@@ -4742,6 +4742,7 @@ elif nav_page == "📲 Briefing Semanal":
                 for _it in _mdata.get('items', []):
                     _it_copy = dict(_it)
                     _it_copy['tienda'] = _t_name
+                    _it_copy['marca'] = _marca
                     _vc_all_rows.append(_it_copy)
         if _vc_all_rows:
             _vc_all_df = pd.DataFrame(_vc_all_rows)
