@@ -2835,6 +2835,384 @@ def build_predistribucion(df_maestro, df_stock, params):
     }
 
 
+
+
+# ─────────────────────────────────────────────────────────────
+#  COMPARATIVO AÑO PASADO (LY) + TICKET PROMEDIO
+# ─────────────────────────────────────────────────────────────
+
+def _load_ly_data():
+    """
+    Carga el parquet pre-agregado de ventas históricas (bundled con deploy).
+    Retorna DataFrame con cols: Año, SemanaSola, Marca, Sucursal, VtaUnd, VtaSMF,
+    Contr, Costo, PBxVtaUnd, PVxVtaUnd, n_transacciones, ticket_promedio, dscto_efectivo_pct
+    """
+    import os as _os
+    _base = _os.path.dirname(_os.path.abspath(__file__))
+    _path = _os.path.join(_base, 'data', 'ly_venta_marca_tienda_semana.parquet')
+    if not _os.path.exists(_path):
+        return None
+    try:
+        return pd.read_parquet(_path)
+    except Exception:
+        return None
+
+
+def build_ly_comparison(df_cob, semana_actual=None):
+    """
+    Construye comparativo Year-over-Year + Ticket Promedio.
+
+    Parámetros
+    ----------
+    df_cob       : DataFrame de cobertura con columnas marca, vta_soles_4sem, etc.
+    semana_actual: int (1-52). Si None, usa semana ISO actual.
+
+    Retorna
+    -------
+    dict con:
+      - 'semana_actual': int
+      - 'ticket_actual_global': float (S/)
+      - 'ticket_actual_marca': list of dicts {marca, ticket, vta_uds, vta_soles}
+      - 'ly_global': dict con vta/contr/ticket LY + deltas %
+      - 'ly_marca': list of dicts con comparativo por marca
+      - 'ly_disponible': bool
+    """
+    from datetime import date
+
+    if semana_actual is None:
+        semana_actual = date.today().isocalendar()[1]
+
+    # ── Ticket promedio ACTUAL (desde df_cob, nivel SKU deduplicado) ──
+    _df_sku = df_cob.drop_duplicates('sku')[['sku', 'marca']].copy()
+    if 'vta_soles_4sem' in df_cob.columns:
+        _df_sku['vta_soles_4sem'] = df_cob.drop_duplicates('sku')['vta_soles_4sem'].values
+    else:
+        _df_sku['vta_soles_4sem'] = 0
+    _df_sku['vta_uds_4sem'] = df_cob.drop_duplicates('sku')['prom_vta_uds'].values * 4
+
+    # Global
+    _vta_soles_total = _df_sku['vta_soles_4sem'].sum()
+    _vta_uds_total = _df_sku['vta_uds_4sem'].sum()
+    _ticket_actual_global = _vta_soles_total / _vta_uds_total if _vta_uds_total > 0 else 0
+
+    # Por marca
+    _marca_actual = _df_sku.groupby('marca').agg(
+        vta_soles=('vta_soles_4sem', 'sum'),
+        vta_uds=('vta_uds_4sem', 'sum'),
+    ).reset_index()
+    _marca_actual['ticket'] = np.where(
+        _marca_actual['vta_uds'] > 0,
+        _marca_actual['vta_soles'] / _marca_actual['vta_uds'],
+        0
+    )
+    _marca_actual = _marca_actual.sort_values('vta_soles', ascending=False)
+
+    result = {
+        'semana_actual': int(semana_actual),
+        'ticket_actual_global': float(round(_ticket_actual_global, 2)),
+        'ticket_actual_marca': _marca_actual.to_dict('records'),
+        'vta_soles_actual': float(_vta_soles_total),
+        'vta_uds_actual': float(_vta_uds_total),
+        'ly_disponible': False,
+        'ly_global': None,
+        'ly_marca': None,
+    }
+
+    # ── Cargar data LY ──
+    df_ly = _load_ly_data()
+    if df_ly is None:
+        return result
+
+    result['ly_disponible'] = True
+
+    # Misma semana del año anterior
+    _año_ly = int(df_ly['Año'].max())
+    _df_sem_ly = df_ly[(df_ly['Año'] == _año_ly) & (df_ly['SemanaSola'] == semana_actual)]
+
+    if _df_sem_ly.empty:
+        for _delta in [1, -1, 2, -2]:
+            _df_sem_ly = df_ly[(df_ly['Año'] == _año_ly) & (df_ly['SemanaSola'] == semana_actual + _delta)]
+            if not _df_sem_ly.empty:
+                break
+
+    if _df_sem_ly.empty:
+        return result
+
+    # Global LY
+    _ly_vta_uds = _df_sem_ly['VtaUnd'].sum()
+    _ly_vta_soles = _df_sem_ly['VtaSMF'].sum()
+    _ly_contr = _df_sem_ly['Contr'].sum()
+    _ly_ticket = _ly_vta_soles / _ly_vta_uds if _ly_vta_uds > 0 else 0
+
+    # Deltas (actual promedio 1sem vs LY 1 semana)
+    _actual_vta_soles_1sem = _vta_soles_total / 4
+    _actual_vta_uds_1sem = _vta_uds_total / 4
+
+    _delta_vta_pct = ((_actual_vta_soles_1sem - _ly_vta_soles) / _ly_vta_soles * 100) if _ly_vta_soles > 0 else 0
+    _delta_uds_pct = ((_actual_vta_uds_1sem - _ly_vta_uds) / _ly_vta_uds * 100) if _ly_vta_uds > 0 else 0
+    _delta_ticket_pct = ((_ticket_actual_global - _ly_ticket) / _ly_ticket * 100) if _ly_ticket > 0 else 0
+
+    result['ly_global'] = {
+        'año_ly': int(_año_ly),
+        'semana_ly': int(semana_actual),
+        'vta_uds_ly': float(_ly_vta_uds),
+        'vta_soles_ly': float(_ly_vta_soles),
+        'contr_ly': float(_ly_contr),
+        'ticket_ly': float(round(_ly_ticket, 2)),
+        'delta_vta_soles_pct': float(round(_delta_vta_pct, 1)),
+        'delta_vta_uds_pct': float(round(_delta_uds_pct, 1)),
+        'delta_ticket_pct': float(round(_delta_ticket_pct, 1)),
+    }
+
+    # Por marca LY
+    _ly_marca = _df_sem_ly.groupby('Marca').agg(
+        vta_uds_ly=('VtaUnd', 'sum'),
+        vta_soles_ly=('VtaSMF', 'sum'),
+        contr_ly=('Contr', 'sum'),
+    ).reset_index()
+    _ly_marca['ticket_ly'] = np.where(
+        _ly_marca['vta_uds_ly'] > 0,
+        _ly_marca['vta_soles_ly'] / _ly_marca['vta_uds_ly'],
+        0
+    )
+    _ly_marca = _ly_marca.rename(columns={'Marca': 'marca'})
+
+    # Merge con actual para calcular deltas
+    _merge = pd.merge(_marca_actual, _ly_marca, on='marca', how='outer').fillna(0)
+    _merge['vta_soles_1sem'] = _merge['vta_soles'] / 4
+    _merge['vta_uds_1sem'] = _merge['vta_uds'] / 4
+    _merge['delta_vta_pct'] = np.where(
+        _merge['vta_soles_ly'] > 0,
+        (_merge['vta_soles_1sem'] - _merge['vta_soles_ly']) / _merge['vta_soles_ly'] * 100,
+        0
+    )
+    _merge['delta_ticket_pct'] = np.where(
+        _merge['ticket_ly'] > 0,
+        (_merge['ticket'] - _merge['ticket_ly']) / _merge['ticket_ly'] * 100,
+        0
+    )
+    _merge = _merge.sort_values('vta_soles', ascending=False)
+
+    result['ly_marca'] = _merge[[
+        'marca', 'vta_soles', 'vta_uds', 'ticket',
+        'vta_soles_ly', 'vta_uds_ly', 'ticket_ly',
+        'delta_vta_pct', 'delta_ticket_pct'
+    ]].round(2).to_dict('records')
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+#  PROYECCIÓN DE VENTAS + OTB (FORECAST POR MARCA)
+# ─────────────────────────────────────────────────────────────
+
+def build_forecast_marca(df_cob, horizonte_semanas=8, semana_actual=None):
+    """
+    Proyecta venta futura por marca combinando tendencia actual + patrón estacional LY.
+    Calcula OTB requerido en soles para sostener la tendencia.
+
+    Parámetros
+    ----------
+    df_cob            : DataFrame de cobertura (stock_total, prom_vta_uds, marca, costo, stock_cd, etc.)
+    horizonte_semanas : int, semanas a proyectar (default 8, configurable)
+    semana_actual     : int (1-52), None=auto
+
+    Retorna
+    -------
+    dict con:
+      - 'horizonte': int
+      - 'semana_actual': int
+      - 'por_marca': list of dicts con proyección por marca
+      - 'resumen': dict con totales
+    """
+    from datetime import date
+
+    if semana_actual is None:
+        semana_actual = date.today().isocalendar()[1]
+
+    # ── Cargar LY para patrón estacional ──
+    df_ly = _load_ly_data()
+    _año_ly = int(df_ly['Año'].max()) if df_ly is not None else None
+
+    # ── Calcular métricas actuales por marca ──
+    # Agrupar df_cob a nivel marca
+    _marca_actual = df_cob.groupby('marca').agg(
+        stock_tienda=('stock_total', 'sum'),
+        stock_valor_costo=('stock_valor_costo', 'sum'),
+        vta_uds_sem=('prom_vta_uds', 'sum'),  # promedio semanal actual
+    ).reset_index()
+
+    # Stock CD por marca (está en df_cob.stock_cd si existe, de lo contrario maestro)
+    if 'stock_cd' in df_cob.columns:
+        _cd_marca = df_cob.drop_duplicates('sku').groupby('marca')['stock_cd'].sum().reset_index()
+        _cd_marca = _cd_marca.rename(columns={'stock_cd': 'stock_cd_uds'})
+        _marca_actual = pd.merge(_marca_actual, _cd_marca, on='marca', how='left')
+        _marca_actual['stock_cd_uds'] = _marca_actual['stock_cd_uds'].fillna(0)
+    else:
+        _marca_actual['stock_cd_uds'] = 0
+
+    # Stock en tránsito por marca
+    if 'stock_transito' in df_cob.columns:
+        _trans_marca = df_cob.groupby('marca')['stock_transito'].sum().reset_index()
+        _trans_marca = _trans_marca.rename(columns={'stock_transito': 'transito_uds'})
+        _marca_actual = pd.merge(_marca_actual, _trans_marca, on='marca', how='left')
+        _marca_actual['transito_uds'] = _marca_actual['transito_uds'].fillna(0)
+    else:
+        _marca_actual['transito_uds'] = 0
+
+    # Costo promedio por unidad (para convertir unidades a soles)
+    _marca_actual['costo_prom_uds'] = np.where(
+        _marca_actual['stock_tienda'] > 0,
+        _marca_actual['stock_valor_costo'] / _marca_actual['stock_tienda'],
+        0
+    )
+
+    # Stock total disponible (tienda + CD + tránsito) en unidades
+    _marca_actual['stock_disponible_uds'] = (
+        _marca_actual['stock_tienda'] +
+        _marca_actual['stock_cd_uds'] +
+        _marca_actual['transito_uds']
+    )
+
+    # Venta soles semanal actual (approx)
+    if 'vta_soles_4sem' in df_cob.columns:
+        _vta_soles_marca = df_cob.drop_duplicates('sku').groupby('marca')['vta_soles_4sem'].sum().reset_index()
+        _vta_soles_marca['vta_soles_sem'] = _vta_soles_marca['vta_soles_4sem'] / 4
+        _marca_actual = pd.merge(_marca_actual, _vta_soles_marca[['marca', 'vta_soles_sem']], on='marca', how='left')
+        _marca_actual['vta_soles_sem'] = _marca_actual['vta_soles_sem'].fillna(0)
+    else:
+        _marca_actual['vta_soles_sem'] = 0
+
+    # ── Patrón estacional LY por marca (semanas futuras) ──
+    resultados = []
+
+    for _, row in _marca_actual.iterrows():
+        marca = row['marca']
+        vta_uds_actual = row['vta_uds_sem']
+        stock_disp = row['stock_disponible_uds']
+        costo_prom = row['costo_prom_uds']
+        vta_soles_actual = row['vta_soles_sem']
+
+        if vta_uds_actual <= 0:
+            resultados.append({
+                'marca': marca,
+                'vta_uds_sem_actual': 0,
+                'stock_disponible_uds': int(stock_disp),
+                'cobertura_actual_sem': 999,
+                'proyeccion_semanal': [],
+                'semana_stockout': None,
+                'otb_total_soles': 0,
+                'otb_por_semana': [],
+            })
+            continue
+
+        # Cobertura actual (semanas de stock)
+        cob_actual = stock_disp / vta_uds_actual if vta_uds_actual > 0 else 999
+
+        # ── Obtener patrón LY para semanas futuras ──
+        proyeccion = []
+        _ly_pattern = []
+
+        if df_ly is not None and _año_ly:
+            # Ventas LY de esta marca en las semanas que nos interesan
+            _ly_marca = df_ly[(df_ly['Año'] == _año_ly) & (df_ly['Marca'] == marca)]
+            _ly_sem_actual = _ly_marca[_ly_marca['SemanaSola'] == semana_actual]['VtaUnd'].sum()
+
+            for i in range(1, horizonte_semanas + 1):
+                sem_futura = semana_actual + i
+                if sem_futura > 52:
+                    sem_futura -= 52
+                _ly_vta_futura = _ly_marca[_ly_marca['SemanaSola'] == sem_futura]['VtaUnd'].sum()
+                _ly_pattern.append(_ly_vta_futura)
+
+        # ── Calcular performance ratio + trend ──
+        # Performance ratio: cuánto estoy vendiendo vs lo que vendí en la misma semana LY
+        if df_ly is not None and _año_ly and _ly_sem_actual > 0:
+            perf_ratio = vta_uds_actual / _ly_sem_actual
+        else:
+            perf_ratio = 1.0  # sin LY, asumir flat
+
+        # Proyectar cada semana futura
+        stock_acumulado_consumido = 0
+        semana_stockout = None
+        otb_por_semana = []
+
+        for i in range(horizonte_semanas):
+            sem_futura = semana_actual + i + 1
+            if sem_futura > 52:
+                sem_futura -= 52
+
+            # Si tenemos patrón LY, usarlo escalado; sino, proyectar flat
+            if _ly_pattern and _ly_pattern[i] > 0:
+                vta_proyectada_uds = _ly_pattern[i] * perf_ratio
+            else:
+                # Sin patrón LY: usar venta actual flat
+                vta_proyectada_uds = vta_uds_actual
+
+            stock_acumulado_consumido += vta_proyectada_uds
+            stock_remanente = stock_disp - stock_acumulado_consumido
+
+            # OTB: si stock no alcanza, cuánto falta en soles
+            if stock_remanente < 0:
+                _deficit_uds = abs(stock_remanente)
+                _otb_soles = _deficit_uds * costo_prom
+                if semana_stockout is None:
+                    semana_stockout = sem_futura
+            else:
+                _otb_soles = 0
+
+            # Venta proyectada en soles (usando ratio vta_soles/vta_uds actual)
+            _ticket_marca = vta_soles_actual / vta_uds_actual if vta_uds_actual > 0 else 0
+            _vta_proy_soles = vta_proyectada_uds * _ticket_marca
+
+            proyeccion.append({
+                'semana': int(sem_futura),
+                'vta_uds_proyectada': round(vta_proyectada_uds, 0),
+                'vta_soles_proyectada': round(_vta_proy_soles, 0),
+                'stock_remanente': round(stock_remanente, 0),
+                'otb_soles': round(_otb_soles, 0),
+            })
+            otb_por_semana.append(round(_otb_soles, 0))
+
+        # OTB total
+        otb_total = sum(o for o in otb_por_semana if o > 0)
+
+        resultados.append({
+            'marca': marca,
+            'vta_uds_sem_actual': round(vta_uds_actual, 0),
+            'vta_soles_sem_actual': round(vta_soles_actual, 0),
+            'stock_disponible_uds': int(stock_disp),
+            'costo_prom_uds': round(costo_prom, 2),
+            'cobertura_actual_sem': round(cob_actual, 1),
+            'perf_ratio_vs_ly': round(perf_ratio, 2),
+            'proyeccion_semanal': proyeccion,
+            'semana_stockout': int(semana_stockout) if semana_stockout else None,
+            'otb_total_soles': round(otb_total, 0),
+            'otb_por_semana': otb_por_semana,
+        })
+
+    # Ordenar por OTB descendente (marcas que más necesitan compra)
+    resultados.sort(key=lambda x: x['otb_total_soles'], reverse=True)
+
+    # Resumen global
+    _total_otb = sum(r['otb_total_soles'] for r in resultados)
+    _marcas_con_stockout = [r for r in resultados if r['semana_stockout'] is not None]
+
+    return {
+        'horizonte': horizonte_semanas,
+        'semana_actual': int(semana_actual),
+        'por_marca': resultados,
+        'resumen': {
+            'otb_total_soles': round(_total_otb, 0),
+            'n_marcas_con_stockout': len(_marcas_con_stockout),
+            'n_marcas_total': len(resultados),
+        }
+    }
+
+
+
+
+
 # ─────────────────────────────────────────────────────────────
 #  FUNCIÓN PRINCIPAL
 # ─────────────────────────────────────────────────────────────
@@ -2967,6 +3345,18 @@ def run_analysis(path, params=None, formato='plantilla'):
             'embarque_n_rojos':      embarque['kpis']['n_rojos'],
         })
 
+    # Comparativo LY + Ticket Promedio
+    ly_comparison = build_ly_comparison(df_cob)
+    summary['ticket_actual_global'] = ly_comparison['ticket_actual_global']
+    summary['semana_actual'] = ly_comparison['semana_actual']
+    if ly_comparison['ly_disponible'] and ly_comparison['ly_global']:
+        summary['ly_delta_vta_pct'] = ly_comparison['ly_global']['delta_vta_soles_pct']
+        summary['ly_delta_ticket_pct'] = ly_comparison['ly_global']['delta_ticket_pct']
+        summary['ly_ticket'] = ly_comparison['ly_global']['ticket_ly']
+
+    # Forecast de ventas por marca (proyección + OTB)
+    forecast = build_forecast_marca(df_cob)
+
     # Briefing ejecutivo
     briefing = build_briefing(df_cob, df_v, summary, p)
 
@@ -2986,6 +3376,8 @@ def run_analysis(path, params=None, formato='plantilla'):
         'aging':                aging,
         'embarque':             embarque,
         'predistribucion':      predist,
+        'ly_comparison':        ly_comparison,
+        'forecast':             forecast,
         'briefing':             briefing,
         'params':               p,
         'summary':              summary,

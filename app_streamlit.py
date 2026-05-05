@@ -1,5 +1,5 @@
 """
-Capi — El Cockpit Semanal del Comprador
+Capi — Herramienta de Gestión Retail
 ========================================
 Lee la plantilla del cliente (4 pestañas) y muestra:
   - Vista 1: Reposición (quiebres, cobertura, pareto tiendas)
@@ -56,24 +56,24 @@ import chat_engine
 # ══════════════════════════════════════════════════════════════
 
 st.set_page_config(
-    page_title="Capi — Cockpit del Comprador",
+    page_title="Capi — Gestión Retail",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ── Paleta de colores Capi ──
-TEAL_600 = "#0D9488"
-TEAL_700 = "#0F766E"
-TEAL_50  = "#F0FDFA"
-SLATE_900 = "#0F172A"
-SLATE_800 = "#1E293B"
-SLATE_700 = "#334155"
-SLATE_500 = "#64748B"
-SLATE_400 = "#94A3B8"
-SLATE_200 = "#E2E8F0"
-SLATE_100 = "#F1F5F9"
-SLATE_50  = "#F8FAFC"
+# ── Paleta de colores Capi (Clean Corporate: navy + light) ──
+TEAL_600 = "#1B4F72"     # Navy-600 — primary accent
+TEAL_700 = "#154360"     # Navy-700 — hover/active
+TEAL_50  = "#EBF2FA"     # Navy-50  — light accent bg
+SLATE_900 = "#1F2937"    # Gray-800 — headings, strong text
+SLATE_800 = "#374151"    # Gray-700 — secondary strong
+SLATE_700 = "#4B5563"    # Gray-600 — medium text
+SLATE_500 = "#6B7280"    # Gray-500 — muted text
+SLATE_400 = "#9CA3AF"    # Gray-400 — tertiary text
+SLATE_200 = "#E5E7EB"    # Gray-200 — borders
+SLATE_100 = "#F3F4F6"    # Gray-100 — surface
+SLATE_50  = "#F9FAFB"    # Near-white — page bg
 STATUS_CRITICO    = "#EF4444"
 STATUS_PRECRITICO = "#F97316"
 STATUS_OPTIMO     = "#10B981"
@@ -84,64 +84,111 @@ STATUS_NUEVO_SV   = "#94A3B8"
 STATUS_DORMIDO    = "#78716C"
 STATUS_MUERTO     = "#374151"
 
+# ── Tema (corporate light — sin toggle) ──
+if "theme_mode" not in st.session_state:
+    st.session_state["theme_mode"] = "light"
+
+_IS_LIGHT = True  # Corporate: siempre light
+
+# Variables Python para contextos donde CSS vars no funcionan (Plotly, etc.)
+TH_TEXT_PY = SLATE_900
+TH_TEXT2_PY = SLATE_500
+TH_BG_CARD_PY = "#FFFFFF"
+TH_BG_SURFACE_PY = SLATE_50
+TH_BORDER_PY = SLATE_200
+TH_PLOT_BG = "rgba(0,0,0,0)"
+TH_PLOT_GRID = "#E5E7EB"
+
+# CSS custom properties — corporate light
+_CSS_VARS = f"""
+    :root {{
+        --capi-bg: #F9FAFB;
+        --capi-bg-card: #FFFFFF;
+        --capi-bg-surface: #F3F4F6;
+        --capi-text: #1F2937;
+        --capi-text2: #6B7280;
+        --capi-text3: #9CA3AF;
+        --capi-border: #E5E7EB;
+        --capi-shadow: rgba(0,0,0,0.04);
+        --capi-hover-shadow: rgba(0,0,0,0.08);
+        --capi-tab-bg: #F3F4F6;
+        --capi-tab-active: #FFFFFF;
+        --capi-tab-text: #6B7280;
+        --capi-tab-active-text: {TEAL_600};
+        --capi-accent: {TEAL_600};
+        --capi-accent-light: {TEAL_50};
+    }}
+"""
+
+# Dark mode override no longer needed — corporate light only
+_DARK_BG_OVERRIDE = ""
+
 st.markdown(f"""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+    {_CSS_VARS}
 
     /* ── Global ──────────────────────────────── */
     html, body, [class*="css"] {{
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }}
+    .stApp, .main, [data-testid="stAppViewContainer"] {{
+        background-color: #F9FAFB !important;
+    }}
+    [data-testid="stHeader"] {{
+        background-color: #F9FAFB !important;
     }}
     .main .block-container {{
         padding-top: 1.5rem;
         max-width: 1400px;
     }}
     h1, h2, h3, h4, h5 {{
-        font-family: 'Inter', sans-serif;
-        color: {SLATE_900};
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        color: var(--capi-text);
     }}
 
-    /* ── Header (Nansen-inspired, compact) ──── */
+    /* ── Header (clean corporate) ──────────── */
     .main-header {{
-        background: {SLATE_900};
+        background: #FFFFFF;
         padding: 1.2rem 2rem;
-        border-radius: 14px;
+        border-radius: 10px;
         margin-bottom: 1.2rem;
-        color: white;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        border: 1px solid rgba(255,255,255,0.06);
+        border: 1px solid {SLATE_200};
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }}
     .main-header h1 {{
-        color: white; margin: 0; font-size: 1.4rem; font-weight: 700;
+        color: {SLATE_900}; margin: 0; font-size: 1.3rem; font-weight: 700;
         letter-spacing: -0.02em;
     }}
     .main-header h1 span {{ color: {TEAL_600}; }}
     .main-header p {{
-        color: rgba(255,255,255,0.5); margin: 0;
+        color: {SLATE_500}; margin: 0;
         font-size: 0.78rem; font-weight: 400;
     }}
 
-    /* ── Chat input (Nansen AI-style, dark) ─── */
+    /* ── Chat input (clean corporate) ───────── */
     [data-testid="stTextInput"] input[aria-label="Pregunta a Capi"] {{
-        background: {SLATE_900} !important;
-        border: 1px solid rgba(255,255,255,0.12) !important;
-        border-radius: 16px !important;
-        color: white !important;
-        padding: 16px 20px !important;
-        font-size: 0.95rem !important;
+        background: #FFFFFF !important;
+        border: 1px solid {SLATE_200} !important;
+        border-radius: 10px !important;
+        color: {SLATE_900} !important;
+        padding: 14px 18px !important;
+        font-size: 0.92rem !important;
         height: auto !important;
     }}
     [data-testid="stTextInput"] input[aria-label="Pregunta a Capi"]::placeholder {{
-        color: rgba(255,255,255,0.3) !important;
+        color: {SLATE_400} !important;
     }}
     [data-testid="stTextInput"] input[aria-label="Pregunta a Capi"]:focus {{
         border-color: {TEAL_600} !important;
-        box-shadow: 0 0 0 2px rgba(13,148,136,0.2) !important;
+        box-shadow: 0 0 0 2px rgba(27,79,114,0.12) !important;
     }}
 
-    /* ── Right Chat Column — Nansen-style (scoped to chat only) ── */
+    /* ── Right Chat Column (corporate) ──────── */
     div[data-testid="stHorizontalBlock"]:has(.chat-panel-marker) {{
         align-items: flex-start !important;
     }}
@@ -151,72 +198,68 @@ st.markdown(f"""
         max-height: 100vh;
         min-width: 380px;
         overflow-y: auto;
-        background: #0B0F19 !important;
-        border-left: 1px solid rgba(255,255,255,0.06);
+        background: #FFFFFF !important;
+        border-left: 1px solid {SLATE_200};
         border-radius: 0;
         padding: 16px 20px !important;
     }}
-    /* Input estilo Nansen — borde teal, fondo oscuro */
     div[data-testid="stColumn"]:has(.chat-panel-marker) .stTextInput input {{
-        background: #0B0F19 !important;
-        border: 1.5px solid rgba(13,148,136,0.5) !important;
-        color: white !important;
-        border-radius: 10px !important;
+        background: {SLATE_50} !important;
+        border: 1px solid {SLATE_200} !important;
+        color: {SLATE_900} !important;
+        border-radius: 8px !important;
         padding: 12px 16px !important;
         font-size: 0.9rem !important;
     }}
     div[data-testid="stColumn"]:has(.chat-panel-marker) .stTextInput input::placeholder {{
-        color: rgba(255,255,255,0.3) !important;
+        color: {SLATE_400} !important;
     }}
     div[data-testid="stColumn"]:has(.chat-panel-marker) .stTextInput input:focus {{
         border-color: {TEAL_600} !important;
-        box-shadow: 0 0 0 2px rgba(13,148,136,0.15) !important;
+        box-shadow: 0 0 0 2px rgba(27,79,114,0.1) !important;
     }}
-    /* Botones chip estilo Nansen — fondo sutil, texto suave */
     div[data-testid="stColumn"]:has(.chat-panel-marker) .stButton > button {{
-        background: rgba(255,255,255,0.04) !important;
-        color: rgba(255,255,255,0.5) !important;
-        border: 1px solid rgba(255,255,255,0.08) !important;
+        background: {SLATE_50} !important;
+        color: {SLATE_500} !important;
+        border: 1px solid {SLATE_200} !important;
         font-size: 0.75em !important;
         padding: 4px 8px !important;
         border-radius: 6px !important;
         min-height: 0 !important;
     }}
     div[data-testid="stColumn"]:has(.chat-panel-marker) .stButton > button:hover {{
-        background: rgba(255,255,255,0.08) !important;
-        color: rgba(255,255,255,0.8) !important;
-        border-color: rgba(13,148,136,0.3) !important;
+        background: {TEAL_50} !important;
+        color: {TEAL_600} !important;
+        border-color: {TEAL_600} !important;
     }}
-    /* Expander en chat */
     div[data-testid="stColumn"]:has(.chat-panel-marker) .stExpander {{
-        border-color: rgba(255,255,255,0.08) !important;
+        border-color: {SLATE_200} !important;
     }}
     div[data-testid="stColumn"]:has(.chat-panel-marker) .stExpander summary {{
-        color: rgba(255,255,255,0.5) !important;
+        color: {SLATE_500} !important;
         font-size: 0.8rem !important;
     }}
     div[data-testid="stColumn"]:has(.chat-panel-marker) .stSpinner > div {{
-        color: rgba(255,255,255,0.5) !important;
+        color: {SLATE_500} !important;
     }}
-    /* Warning en chat */
     div[data-testid="stColumn"]:has(.chat-panel-marker) .stAlert {{
-        background: rgba(255,255,255,0.04) !important;
-        color: rgba(255,255,255,0.7) !important;
-        border-color: rgba(255,255,255,0.08) !important;
+        background: {SLATE_50} !important;
+        color: {SLATE_700} !important;
+        border-color: {SLATE_200} !important;
     }}
 
-    /* ── Chat Panel (Nansen style messages) ── */
+    /* ── Chat Panel (corporate light) ────────── */
     .nansen-chat-panel {{
-        background: {SLATE_900};
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 16px;
+        background: #FFFFFF;
+        border: 1px solid {SLATE_200};
+        border-radius: 10px;
         overflow: hidden;
         margin-top: 0.5rem;
         margin-bottom: 1rem;
     }}
     .nansen-chat-header {{
-        background: rgba(255,255,255,0.04);
-        border-bottom: 1px solid rgba(255,255,255,0.08);
+        background: {SLATE_50};
+        border-bottom: 1px solid {SLATE_200};
         padding: 14px 20px;
         display: flex;
         align-items: center;
@@ -225,16 +268,16 @@ st.markdown(f"""
     .nansen-chat-header .chat-logo {{
         width: 28px; height: 28px;
         background: {TEAL_600};
-        border-radius: 50%;
+        border-radius: 6px;
         display: flex; align-items: center; justify-content: center;
         font-size: 0.8rem; color: white; font-weight: 700;
         flex-shrink: 0;
     }}
     .nansen-chat-header .chat-title {{
-        font-size: 0.88rem; font-weight: 600; color: white;
+        font-size: 0.88rem; font-weight: 600; color: {SLATE_900};
     }}
     .nansen-chat-header .chat-badge {{
-        background: rgba(13,148,136,0.2);
+        background: {TEAL_50};
         color: {TEAL_600};
         font-size: 0.6rem; font-weight: 700;
         padding: 2px 8px; border-radius: 4px;
@@ -242,7 +285,7 @@ st.markdown(f"""
         text-transform: uppercase;
     }}
     .nansen-chat-header .chat-query-preview {{
-        color: rgba(255,255,255,0.4);
+        color: {SLATE_400};
         font-size: 0.78rem;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         max-width: 300px;
@@ -253,21 +296,19 @@ st.markdown(f"""
         max-height: 500px;
         overflow-y: auto;
     }}
-    /* User message bubble (right-aligned, like Nansen) */
     .chat-msg-user {{
         display: flex;
         justify-content: flex-end;
         margin-bottom: 16px;
     }}
     .chat-msg-user .bubble {{
-        background: rgba(255,255,255,0.08);
-        color: rgba(255,255,255,0.9);
+        background: {TEAL_50};
+        color: {TEAL_700};
         padding: 10px 16px;
-        border-radius: 16px 16px 4px 16px;
+        border-radius: 12px 12px 4px 12px;
         font-size: 0.88rem;
         max-width: 80%;
     }}
-    /* AI response (left-aligned) */
     .chat-msg-ai {{
         margin-bottom: 16px;
     }}
@@ -275,55 +316,55 @@ st.markdown(f"""
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        background: rgba(255,255,255,0.06);
-        border-radius: 24px;
+        background: {SLATE_100};
+        border-radius: 20px;
         padding: 5px 14px;
         font-size: 0.78rem;
-        color: rgba(255,255,255,0.5);
+        color: {SLATE_500};
         margin-bottom: 12px;
     }}
     .chat-msg-ai .ai-step .check {{
-        color: {TEAL_600};
+        color: #059669;
         font-size: 0.9rem;
     }}
     .chat-msg-ai h4 {{
-        color: white;
+        color: {SLATE_900};
         font-size: 1rem;
         font-weight: 700;
         margin: 0 0 10px 0;
     }}
     .chat-msg-ai p {{
-        color: rgba(255,255,255,0.72);
+        color: {SLATE_700};
         margin: 0 0 10px 0;
         font-size: 0.88rem;
         line-height: 1.7;
     }}
     .chat-msg-ai strong {{
-        color: white;
+        color: {SLATE_900};
     }}
     .chat-msg-ai .chat-insight {{
-        border-top: 1px solid rgba(255,255,255,0.08);
+        border-top: 1px solid {SLATE_200};
         margin-top: 14px;
         padding-top: 12px;
     }}
     .nansen-chat-footer {{
-        border-top: 1px solid rgba(255,255,255,0.08);
+        border-top: 1px solid {SLATE_200};
         padding: 10px 20px;
         text-align: center;
     }}
     .nansen-chat-footer span {{
         font-size: 0.72rem;
-        color: rgba(255,255,255,0.3);
+        color: {SLATE_400};
     }}
 
-    /* ── Legacy chat-response (keep for backward compat) ── */
+    /* ── Legacy chat-response ──────────────── */
     .chat-response {{
-        background: {SLATE_900};
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 18px;
+        background: #FFFFFF;
+        border: 1px solid {SLATE_200};
+        border-radius: 10px;
         padding: 22px 26px;
         margin-bottom: 1rem;
-        color: rgba(255,255,255,0.88);
+        color: {SLATE_700};
         font-size: 0.92rem;
         line-height: 1.7;
     }}
@@ -331,8 +372,8 @@ st.markdown(f"""
     /* ── Live badge ─────────────────────────── */
     .live-badge {{
         display: inline-block;
-        background: {TEAL_600};
-        color: white;
+        background: {TEAL_50};
+        color: {TEAL_600};
         font-size: 0.65rem;
         font-weight: 700;
         padding: 2px 8px;
@@ -342,7 +383,7 @@ st.markdown(f"""
         vertical-align: middle;
     }}
 
-    /* ── Section headers (Nansen-style) ────── */
+    /* ── Section headers ──────────────────── */
     .section-header {{
         display: flex;
         align-items: center;
@@ -357,58 +398,61 @@ st.markdown(f"""
 
     /* ── KPI cards ───────────────────────────── */
     .kpi-card {{
-        background: white;
-        border-radius: 14px;
+        background: #FFFFFF;
+        border-radius: 8px;
         padding: 1.1rem 1.3rem;
-        border-left: 4px solid {TEAL_600};
-        box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+        border-left: 3px solid {TEAL_600};
+        border: 1px solid {SLATE_200};
+        border-left: 3px solid {TEAL_600};
+        box-shadow: 0 1px 2px var(--capi-shadow);
         margin-bottom: 0.6rem;
         transition: box-shadow 0.2s ease;
     }}
     .kpi-card:hover {{
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        box-shadow: 0 2px 6px var(--capi-hover-shadow);
     }}
     .kpi-val {{
-        font-size: 1.9rem; font-weight: 700; color: {SLATE_900};
+        font-size: 1.8rem; font-weight: 700; color: var(--capi-text);
         line-height: 1; letter-spacing: -0.02em;
     }}
     .kpi-lbl {{
-        font-size: 0.76rem; color: {SLATE_500}; margin-top: 0.3rem;
+        font-size: 0.74rem; color: var(--capi-text2); margin-top: 0.3rem;
         font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em;
     }}
     .kpi-card.red    {{ border-left-color: {STATUS_CRITICO}; }}
     .kpi-card.red    .kpi-val {{ color: {STATUS_CRITICO}; }}
-    .kpi-card.green  {{ border-left-color: {STATUS_OPTIMO}; }}
+    .kpi-card.green  {{ border-left-color: #059669; }}
     .kpi-card.green  .kpi-val {{ color: #059669; }}
     .kpi-card.yellow {{ border-left-color: {STATUS_ALTO}; }}
-    .kpi-card.yellow .kpi-val {{ color: #D97706; }}
+    .kpi-card.yellow .kpi-val {{ color: #B45309; }}
     .kpi-card.orange {{ border-left-color: {STATUS_SOBRESTOCK}; }}
-    .kpi-card.orange .kpi-val {{ color: #EA580C; }}
+    .kpi-card.orange .kpi-val {{ color: #C2410C; }}
     .kpi-card.darkred {{ border-left-color: {STATUS_LIQUIDAR}; }}
     .kpi-card.darkred .kpi-val {{ color: {STATUS_LIQUIDAR}; }}
     .kpi-card.blue   {{ border-left-color: {TEAL_600}; }}
-    .kpi-card.blue   .kpi-val {{ color: {TEAL_700}; }}
+    .kpi-card.blue   .kpi-val {{ color: {TEAL_600}; }}
 
-    /* ── Sidebar (Nansen-style dark nav) ─────── */
+    /* ── Sidebar (clean corporate — light) ─── */
     [data-testid="stSidebar"] {{
-        background: #111318;
-        border-right: 1px solid rgba(255,255,255,0.06);
+        background: #FAFBFD;
+        border-right: 1px solid {SLATE_200};
     }}
     [data-testid="stSidebar"] [data-testid="stSidebarContent"] {{
         padding-top: 0.5rem;
     }}
     [data-testid="stSidebar"] * {{
-        color: rgba(255,255,255,0.7) !important;
+        color: {SLATE_500} !important;
     }}
     [data-testid="stSidebar"] h1,
     [data-testid="stSidebar"] h2,
     [data-testid="stSidebar"] h3 {{
-        color: white !important;
+        color: {SLATE_900} !important;
     }}
     [data-testid="stSidebar"] .stButton > button[kind="primary"] {{
         background: {TEAL_600};
+        color: white !important;
         border: none;
-        border-radius: 10px;
+        border-radius: 8px;
         font-weight: 600;
         padding: 0.6rem 1rem;
         transition: all 0.2s;
@@ -421,14 +465,13 @@ st.markdown(f"""
     [data-testid="stSidebar"] .stSlider label {{
         font-size: 0.82rem !important;
     }}
-    /* Sidebar nav items styling */
     .sidebar-nav-item {{
         display: flex;
         align-items: center;
         gap: 10px;
         padding: 8px 12px;
-        border-radius: 8px;
-        color: rgba(255,255,255,0.6);
+        border-radius: 6px;
+        color: {SLATE_500};
         font-size: 0.85rem;
         font-weight: 500;
         transition: all 0.15s;
@@ -436,11 +479,11 @@ st.markdown(f"""
         margin-bottom: 2px;
     }}
     .sidebar-nav-item:hover {{
-        background: rgba(255,255,255,0.06);
-        color: white;
+        background: {SLATE_100};
+        color: {SLATE_900};
     }}
     .sidebar-nav-item.active {{
-        background: rgba(13,148,136,0.15);
+        background: {TEAL_50};
         color: {TEAL_600};
         font-weight: 600;
     }}
@@ -453,20 +496,20 @@ st.markdown(f"""
         font-size: 0.68rem;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        color: rgba(255,255,255,0.3) !important;
+        color: {SLATE_400} !important;
         padding: 16px 12px 6px 12px;
         font-weight: 600;
     }}
-    /* Sidebar nav button styling — secondary (inactive) */
+    /* Sidebar nav — secondary (inactive) */
     [data-testid="stSidebar"] .stButton > button[kind="secondary"],
     [data-testid="stSidebar"] .stButton > button[data-testid="baseButton-secondary"] {{
         background: transparent !important;
-        color: rgba(255,255,255,0.6) !important;
+        color: {SLATE_500} !important;
         border: none !important;
         text-align: left !important;
         justify-content: flex-start !important;
         padding: 8px 12px !important;
-        border-radius: 8px !important;
+        border-radius: 6px !important;
         font-size: 0.85rem !important;
         font-weight: 500 !important;
         transition: all 0.15s !important;
@@ -474,35 +517,35 @@ st.markdown(f"""
     }}
     [data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover,
     [data-testid="stSidebar"] .stButton > button[data-testid="baseButton-secondary"]:hover {{
-        background: rgba(255,255,255,0.06) !important;
-        color: white !important;
+        background: {SLATE_100} !important;
+        color: {SLATE_900} !important;
         border: none !important;
     }}
-    /* Sidebar nav button — primary (active page) */
+    /* Sidebar nav — primary (active page) */
     [data-testid="stSidebar"] .stButton > button[kind="primary"],
     [data-testid="stSidebar"] .stButton > button[data-testid="baseButton-primary"] {{
-        background: rgba(13,148,136,0.15) !important;
+        background: {TEAL_50} !important;
         color: {TEAL_600} !important;
         font-weight: 600 !important;
         border: none !important;
         text-align: left !important;
         justify-content: flex-start !important;
         padding: 8px 12px !important;
-        border-radius: 8px !important;
+        border-radius: 6px !important;
         font-size: 0.85rem !important;
         box-shadow: none !important;
     }}
-    /* File uploader in dark sidebar */
+    /* File uploader in sidebar */
     [data-testid="stSidebar"] [data-testid="stFileUploader"] {{
-        border-color: rgba(255,255,255,0.1) !important;
+        border-color: {SLATE_200} !important;
     }}
     [data-testid="stSidebar"] [data-testid="stFileUploader"] section {{
-        background: rgba(255,255,255,0.04) !important;
-        border: 1px dashed rgba(255,255,255,0.15) !important;
-        border-radius: 10px !important;
+        background: #FFFFFF !important;
+        border: 1px dashed {SLATE_200} !important;
+        border-radius: 8px !important;
     }}
     [data-testid="stSidebar"] .stExpander {{
-        border-color: rgba(255,255,255,0.08) !important;
+        border-color: {SLATE_200} !important;
     }}
 
     /* ── Ocultar footer y menú hamburguesa ──── */
@@ -512,14 +555,14 @@ st.markdown(f"""
     /* ── Tabs ────────────────────────────────── */
     .stTabs [data-baseweb="tab-list"] {{
         gap: 4px;
-        background: {SLATE_50};
+        background: {SLATE_100};
         padding: 4px;
-        border-radius: 12px;
+        border-radius: 8px;
         border: 1px solid {SLATE_200};
     }}
     .stTabs [data-baseweb="tab"] {{
         padding: 8px 18px;
-        border-radius: 8px;
+        border-radius: 6px;
         font-size: 0.82rem;
         font-weight: 500;
         color: {SLATE_500};
@@ -527,9 +570,9 @@ st.markdown(f"""
         background: transparent;
     }}
     .stTabs [data-baseweb="tab"][aria-selected="true"] {{
-        background: white;
-        color: {TEAL_700};
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        background: #FFFFFF;
+        color: {TEAL_600};
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
         font-weight: 600;
     }}
     .stTabs [data-baseweb="tab-highlight"] {{
@@ -541,7 +584,7 @@ st.markdown(f"""
 
     /* ── Dataframes / Tablas ─────────────────── */
     [data-testid="stDataFrame"] {{
-        border-radius: 12px;
+        border-radius: 8px;
         overflow: hidden;
         border: 1px solid {SLATE_200};
     }}
@@ -550,16 +593,19 @@ st.markdown(f"""
     .streamlit-expanderHeader {{
         font-weight: 600;
         font-size: 0.9rem;
-        color: {SLATE_700};
+        color: {SLATE_900};
+    }}
+    [data-testid="stExpander"] {{
+        border-color: {SLATE_200} !important;
     }}
 
     /* ── Métricas ────────────────────────────── */
     [data-testid="stMetric"] {{
-        background: white;
+        background: #FFFFFF;
         padding: 1rem;
-        border-radius: 12px;
+        border-radius: 8px;
         border: 1px solid {SLATE_200};
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
     }}
     [data-testid="stMetricLabel"] {{
         font-size: 0.78rem !important;
@@ -576,10 +622,10 @@ st.markdown(f"""
 
     /* ── Botones de descarga ─────────────────── */
     .stDownloadButton > button {{
-        background: white;
-        color: {TEAL_700};
-        border: 1.5px solid {TEAL_600};
-        border-radius: 10px;
+        background: #FFFFFF;
+        color: {TEAL_600};
+        border: 1px solid {TEAL_600};
+        border-radius: 6px;
         font-weight: 600;
         transition: all 0.2s;
     }}
@@ -595,26 +641,37 @@ st.markdown(f"""
         margin: 1.8rem 0;
     }}
 
-    /* ── Sección cards del briefing ──────────── */
+    /* ── Briefing cards ──────────────────────── */
     .briefing-card {{
-        border-radius: 12px;
+        border-radius: 8px;
         padding: 14px 18px;
         margin-bottom: 6px;
-        border-left: 4px solid;
+        border-left: 3px solid;
         font-size: 0.92em;
+        background: #FFFFFF;
     }}
 
-    /* ── Nansen-style subtle card containers ── */
+    /* ── Card containers ──────────────────── */
     .nansen-card {{
-        background: white;
+        background: #FFFFFF;
         border: 1px solid {SLATE_200};
-        border-radius: 14px;
+        border-radius: 8px;
         padding: 18px 22px;
         margin-bottom: 12px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
     }}
     .nansen-card:hover {{
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    }}
+
+    /* ── Selectboxes y inputs (corporate light) ── */
+    .stSelectbox [data-baseweb="select"] {{
+        background-color: #FFFFFF !important;
+        border-color: {SLATE_200} !important;
+    }}
+    .stMultiSelect [data-baseweb="select"] {{
+        background-color: #FFFFFF !important;
+        border-color: {SLATE_200} !important;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -708,14 +765,24 @@ if "results" not in st.session_state:
 # ══════════════════════════════════════════════════════════════
 
 with st.sidebar:
-    st.markdown(f"""
-    <div style="text-align:center; padding: 0.6rem 0 0.8rem 0; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 0.8rem;">
-        <span style="font-size:1.5rem; font-weight:700; color:white; letter-spacing:-0.03em;">
-            <span style="color:{TEAL_600};">Capi</span>
-        </span>
-        <span style="font-size:0.65rem; color:rgba(255,255,255,0.4); display:block; margin-top:2px; letter-spacing:0.05em;">EL COCKPIT DEL COMPRADOR</span>
-    </div>
-    """, unsafe_allow_html=True)
+    # ── Toggle día/noche + logo ──
+    _sb_top1, _sb_top2 = st.columns([3, 1])
+    with _sb_top1:
+        st.markdown(f"""
+        <div style="padding: 0.6rem 0 0.4rem 0; display:flex; align-items:center; gap:8px;">
+            <div style="width:28px; height:28px; background:{TEAL_600}; border-radius:6px; display:flex; align-items:center; justify-content:center; color:white; font-size:12px; font-weight:700;">C</div>
+            <div>
+                <span style="font-size:1.2rem; font-weight:700; color:{SLATE_900}; letter-spacing:-0.03em;">Capi</span>
+                <span style="font-size:0.6rem; color:{SLATE_400}; display:block; margin-top:1px; letter-spacing:0.05em;">GESTIÓN RETAIL</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    with _sb_top2:
+        _theme_icon = "☀️" if st.session_state["theme_mode"] == "dark" else "🌙"
+        if st.button(_theme_icon, key="theme_toggle", help="Cambiar entre modo día y noche"):
+            st.session_state["theme_mode"] = "light" if st.session_state["theme_mode"] == "dark" else "dark"
+            st.rerun()
+    st.markdown(f'<div style="border-bottom: 1px solid {SLATE_200}; margin-bottom: 0.8rem;"></div>', unsafe_allow_html=True)
 
     # ── Navegación funcional con botones ──
     _has_results = st.session_state["results"] is not None
@@ -737,17 +804,16 @@ with st.sidebar:
             st.session_state["chat_open"] = not st.session_state["chat_open"]
             st.rerun()
 
-        # ── CAPI SEMANAL — 3 vistas principales ──
-        st.markdown('<div class="sidebar-section-label">CAPI SEMANAL</div>', unsafe_allow_html=True)
+        # ── VISIÓN GENERAL ──
+        st.markdown('<div class="sidebar-section-label">VISIÓN GENERAL</div>', unsafe_allow_html=True)
 
-        _NAV_CAPI = [
+        _NAV_VISION = [
             ("🏠", "Dashboard"),
-            ("📦", "Reposición"),
-            ("📊", "Sobrestock"),
-            ("🏷️", "Marcas Terceras"),
+            ("📲", "Briefing Semanal"),
+            ("📝", "Diario de Gestión"),
         ]
 
-        for _icon, _label in _NAV_CAPI:
+        for _icon, _label in _NAV_VISION:
             _full = f"{_icon} {_label}"
             _is_active = st.session_state["nav_page"] == _full
             if st.button(
@@ -758,22 +824,58 @@ with st.sidebar:
                 st.session_state["nav_page"] = _full
                 st.rerun()
 
-        # ── DETALLE — vistas de análisis granular ──
-        st.markdown('<div class="sidebar-section-label">DETALLE</div>', unsafe_allow_html=True)
+        # ── GESTIÓN DE STOCK ──
+        st.markdown('<div class="sidebar-section-label">GESTIÓN DE STOCK</div>', unsafe_allow_html=True)
 
-        _NAV_DETALLE = [
+        _NAV_STOCK = [
+            ("📦", "Reposición"),
             ("📈", "Cobertura"),
-            ("📊", "Gestión por Antigüedad"),
             ("🔄", "Transferencias"),
-            ("💰", "Acciones Precio"),
-            ("📲", "Briefing Semanal"),
-            ("📦", "Ventana de Compra"),
             ("🚚", "Predistribución"),
+            ("📊", "Sobrestock"),
+        ]
+
+        for _icon, _label in _NAV_STOCK:
+            _full = f"{_icon} {_label}"
+            _is_active = st.session_state["nav_page"] == _full
+            if st.button(
+                _full, key=f"nav_{_label}",
+                use_container_width=True,
+                type="primary" if _is_active else "secondary",
+            ):
+                st.session_state["nav_page"] = _full
+                st.rerun()
+
+        # ── GESTIÓN COMERCIAL ──
+        st.markdown('<div class="sidebar-section-label">GESTIÓN COMERCIAL</div>', unsafe_allow_html=True)
+
+        _NAV_COMERCIAL = [
+            ("📊", "Gestión por Antigüedad"),
+            ("💰", "Acciones Precio"),
+            ("🏷️", "Marcas Terceras"),
+        ]
+
+        for _icon, _label in _NAV_COMERCIAL:
+            _full = f"{_icon} {_label}"
+            _is_active = st.session_state["nav_page"] == _full
+            if st.button(
+                _full, key=f"nav_{_label}",
+                use_container_width=True,
+                type="primary" if _is_active else "secondary",
+            ):
+                st.session_state["nav_page"] = _full
+                st.rerun()
+
+        # ── ANÁLISIS PREDICTIVO ──
+        st.markdown('<div class="sidebar-section-label">ANÁLISIS PREDICTIVO</div>', unsafe_allow_html=True)
+
+        _NAV_PREDICTIVO = [
+            ("📦", "Ventana de Compra"),
             ("🤖", "Alertas IA"),
             ("🔮", "Simulador Predictivo"),
         ]
 
-        for _icon, _label in _NAV_DETALLE:
+        for _icon, _label in _NAV_PREDICTIVO:
             _full = f"{_icon} {_label}"
             _is_active = st.session_state["nav_page"] == _full
             if st.button(
@@ -784,7 +886,7 @@ with st.sidebar:
                 st.session_state["nav_page"] = _full
                 st.rerun()
 
-        st.markdown('<div style="border-bottom:1px solid rgba(255,255,255,0.06); margin:4px 0 12px 0;"></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="border-bottom:1px solid {SLATE_200}; margin:4px 0 12px 0;"></div>', unsafe_allow_html=True)
 
     nav_page = st.session_state["nav_page"] if _has_results else None
 
@@ -873,11 +975,11 @@ with st.sidebar:
     }
 
     st.markdown(f"""
-    <div style="border-top:1px solid rgba(255,255,255,0.06); margin-top:1.5rem; padding-top:0.8rem; text-align:center;">
+    <div style="border-top:1px solid {SLATE_200}; margin-top:1.5rem; padding-top:0.8rem; text-align:center;">
         <div class="sidebar-nav-item" style="justify-content:center; margin-bottom:4px;">
             <span class="nav-icon">⚙️</span> Settings
         </div>
-        <span style="font-size:0.65rem; color:rgba(255,255,255,0.25); letter-spacing:0.05em;">
+        <span style="font-size:0.65rem; color:{SLATE_400}; letter-spacing:0.05em;">
             v2.7 · Powered by AI
         </span>
     </div>
@@ -895,7 +997,7 @@ st.markdown(f"""
         <p>Inventory Engine · Cobertura · Reposiciones · Transferencias · Alertas</p>
     </div>
     <div style="display:flex; align-items:center; gap:12px;">
-        <span style="font-size:0.75rem; color:rgba(255,255,255,0.4);">v2.7</span>
+        <span style="font-size:0.75rem; color:{SLATE_400};">v2.7</span>
         <span style="background:{TEAL_600}; color:white; padding:4px 12px; border-radius:8px; font-size:0.75rem; font-weight:600;">Powered by AI</span>
     </div>
 </div>
@@ -964,21 +1066,21 @@ if run_btn:
 if st.session_state["results"] is None:
     st.markdown(f"""
     <div style="text-align:center; padding:60px 20px;">
-        <div style="font-size:2.2rem; font-weight:700; color:{SLATE_900}; margin-bottom:8px;">
+        <div style="font-size:2.2rem; font-weight:700; color:var(--capi-text); margin-bottom:8px;">
             ¿Qué está pasando con tu inventario?
         </div>
-        <p style="color:{SLATE_500}; font-size:1rem; margin-bottom:30px;">
+        <p style="color:var(--capi-text2); font-size:1rem; margin-bottom:30px;">
             Sube tu Base Profundidad para desbloquear el análisis completo.
         </p>
-        <div style="background:{SLATE_50}; border:1px solid {SLATE_200}; border-radius:14px; padding:24px; max-width:500px; margin:0 auto; text-align:left;">
-            <div style="font-weight:600; color:{SLATE_900}; margin-bottom:12px;">Cómo empezar:</div>
-            <div style="color:{SLATE_700}; font-size:0.9rem; line-height:1.8;">
+        <div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:14px; padding:24px; max-width:500px; margin:0 auto; text-align:left;">
+            <div style="font-weight:600; color:var(--capi-text); margin-bottom:12px;">Cómo empezar:</div>
+            <div style="color:var(--capi-text); font-size:0.9rem; line-height:1.8;">
                 <span style="color:{TEAL_600}; font-weight:600;">1.</span> Sube tu archivo Excel en el sidebar<br>
                 <span style="color:{TEAL_600}; font-weight:600;">2.</span> Ajusta umbrales si lo necesitas<br>
                 <span style="color:{TEAL_600}; font-weight:600;">3.</span> Haz clic en <strong>Ejecutar análisis</strong>
             </div>
-            <div style="margin-top:14px; padding:10px 14px; background:white; border-radius:8px; border:1px solid {SLATE_200};">
-                <span style="font-size:0.82rem; color:{SLATE_500};">
+            <div style="margin-top:14px; padding:10px 14px; background:var(--capi-bg-card); border-radius:8px; border:1px solid var(--capi-border);">
+                <span style="font-size:0.82rem; color:var(--capi-text2);">
                     Acepta <strong>Base Profundidad</strong> de Ripley o Plantilla Capi. Se detecta y transforma automáticamente.
                 </span>
             </div>
@@ -1027,6 +1129,9 @@ predist_kpis      = predist.get('kpis', {})
 _margen_global = s.get('margen_efectivo_global', None)
 _vta_soles_total = s.get('vta_soles_4sem_total', 0)
 _contrib_soles_total = s.get('contrib_soles_4sem_total', 0)
+
+# LY Comparison + Ticket Promedio
+ly_comparison = res.get('ly_comparison', {})
 _margen_por_marca = s.get('margen_por_marca', [])
 
 # ══════════════════════════════════════════════════════════════
@@ -1201,7 +1306,7 @@ else:
 
 # ── Configuración global de Plotly (usada en múltiples vistas) ──
 _plotly_layout = dict(
-    font=dict(family="Inter, -apple-system, sans-serif", size=12, color=SLATE_700),
+    font=dict(family="Inter, -apple-system, sans-serif", size=12, color=TH_TEXT_PY),
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
     margin=dict(l=20, r=20, t=40, b=20),
@@ -1224,8 +1329,8 @@ if nav_page == "🏠 Dashboard":
     st.markdown(f'<div class="section-header"><h3>Dashboard</h3><span class="live-badge">LIVE</span></div>', unsafe_allow_html=True)
 
     # ── Filtros del dashboard ──
-    st.markdown(f"""<div style="background:{SLATE_50}; border:1px solid {SLATE_200}; border-radius:12px; padding:12px 16px; margin-bottom:16px;">
-    <span style="font-weight:600; color:{SLATE_900}; font-size:0.9rem;">Filtros del Dashboard</span>
+    st.markdown(f"""<div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:12px; padding:12px 16px; margin-bottom:16px;">
+    <span style="font-weight:600; color:var(--capi-text); font-size:0.9rem;">Filtros del Dashboard</span>
     </div>""", unsafe_allow_html=True)
 
     has_temporada = "temporada" in df_cob.columns
@@ -1302,14 +1407,14 @@ if nav_page == "🏠 Dashboard":
         )])
         fig_donut.update_layout(
             **_plotly_layout,
-            title=dict(text=_donut_title, font=dict(size=14, color=SLATE_900)),
+            title=dict(text=_donut_title, font=dict(size=14, color=TH_TEXT_PY)),
             showlegend=False,
             height=380,
         )
         total_donut = len(_df_donut)
         fig_donut.add_annotation(
-            text=f"<b>{total_donut:,}</b><br><span style='font-size:10px;color:{SLATE_500}'>SKU×Tienda</span>",
-            showarrow=False, font=dict(size=18, color=SLATE_900),
+            text=f"<b>{total_donut:,}</b><br><span style='font-size:10px;color:var(--capi-text2)'>SKU×Tienda</span>",
+            showarrow=False, font=dict(size=18, color=TH_TEXT_PY),
         )
         st.plotly_chart(fig_donut, use_container_width=True)
 
@@ -1327,7 +1432,7 @@ if nav_page == "🏠 Dashboard":
             "MUERTO":          {"color": STATUS_MUERTO,     "icon": "⚫", "regla": "Sin venta, edad > 6 meses"},
         }
 
-        st.markdown(f"""<div style="font-weight:600; color:{SLATE_900}; font-size:0.95rem; margin-bottom:10px;">
+        st.markdown(f"""<div style="font-weight:600; color:var(--capi-text); font-size:0.95rem; margin-bottom:10px;">
         Criterios de Clasificación
         </div>""", unsafe_allow_html=True)
 
@@ -1342,17 +1447,17 @@ if nav_page == "🏠 Dashboard":
                 background:{'rgba(0,0,0,0.02)' if _n_est > 0 else 'transparent'};">
                 <span style="font-size:0.85rem; min-width:18px;">{_est_info['icon']}</span>
                 <div style="flex:1;">
-                    <span style="font-weight:600; color:{SLATE_900}; font-size:0.82rem;">{_est_info.get('label', _est_name)}</span>
-                    <span style="color:{SLATE_500}; font-size:0.78rem;"> — {_est_info['regla']}</span>
+                    <span style="font-weight:600; color:var(--capi-text); font-size:0.82rem;">{_est_info.get('label', _est_name)}</span>
+                    <span style="color:var(--capi-text2); font-size:0.78rem;"> — {_est_info['regla']}</span>
                 </div>
                 <div style="text-align:right; min-width:80px;">
                     <span style="font-weight:700; color:{_est_info['color']}; font-size:0.85rem;">{_n_est:,}</span>
-                    <span style="color:{SLATE_500}; font-size:0.72rem;"> ({_pct_est:.0f}%)</span>
+                    <span style="color:var(--capi-text2); font-size:0.72rem;"> ({_pct_est:.0f}%)</span>
                 </div>
             </div>""", unsafe_allow_html=True)
 
-        st.markdown(f"""<div style="margin-top:10px; padding:8px 12px; background:{SLATE_50}; border-radius:8px; font-size:0.78rem; color:{SLATE_500};">
-        Capital total: <strong style="color:{SLATE_900};">S/ {_df_donut['stock_valor_costo'].sum():,.0f}</strong> &nbsp;·&nbsp;
+        st.markdown(f"""<div style="margin-top:10px; padding:8px 12px; background:var(--capi-bg-surface); border-radius:8px; font-size:0.78rem; color:var(--capi-text2);">
+        Capital total: <strong style="color:var(--capi-text);">S/ {_df_donut['stock_valor_costo'].sum():,.0f}</strong> &nbsp;·&nbsp;
         {total_donut:,} combos SKU×Tienda
         </div>""", unsafe_allow_html=True)
 
@@ -1388,11 +1493,11 @@ if nav_page == "🏠 Dashboard":
                 "capital": "Capital S/", "vta_sem": "Vta Sem (uds)",
             })
 
-            st.markdown(f"""<div style="background:{'#FEF2F2' if _est_sel in ('CRÍTICO','PRE-CRÍTICO') else SLATE_50};
+            st.markdown(f"""<div style="background:{'#FEF2F2' if _est_sel in ('CRÍTICO','PRE-CRÍTICO') else TH_BG_SURFACE_PY};
             border-left:4px solid {_estado_color_map.get(_est_sel, SLATE_500)};
             padding:10px 14px; border-radius:10px; margin-bottom:10px;">
-            <strong style="color:{_estado_color_map.get(_est_sel, SLATE_900)};">{_est_sel}</strong>
-            <span style="color:{SLATE_500}; font-size:0.82em;"> &nbsp;·&nbsp; {len(_df_est):,} combos · {_df_est['sku'].nunique()} SKUs · S/ {_df_est['stock_valor_costo'].sum():,.0f}</span>
+            <strong style="color:{_estado_color_map.get(_est_sel, TH_TEXT_PY)};">{_est_sel}</strong>
+            <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; {len(_df_est):,} combos · {_df_est['sku'].nunique()} SKUs · S/ {_df_est['stock_valor_costo'].sum():,.0f}</span>
             </div>""", unsafe_allow_html=True)
 
             st.dataframe(
@@ -1491,11 +1596,11 @@ if nav_page == "🏠 Dashboard":
 
     # ── Renderizar stacked bar con HTML (capital + venta a costo + badge cobertura) ──
     st.markdown(f"""<div style="margin-bottom:12px;">
-    <div style="font-size:14px; font-weight:600; color:{SLATE_900}; margin-bottom:4px;">Inventario a Costo por {group_label} (Top 10)</div>
-    <div style="display:flex; gap:16px; font-size:12px; color:{SLATE_500}; margin-bottom:12px;">
+    <div style="font-size:14px; font-weight:600; color:var(--capi-text); margin-bottom:4px;">Inventario a Costo por {group_label} (Top 10)</div>
+    <div style="display:flex; gap:16px; font-size:12px; color:var(--capi-text2); margin-bottom:12px;">
         <span style="display:flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; border-radius:2px; background:{TEAL_700}; display:inline-block;"></span>Capital a costo</span>
         <span style="display:flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; border-radius:2px; background:#5DCAA5; display:inline-block;"></span>Venta a costo (4 sem)</span>
-        <span style="display:flex; align-items:center; gap:4px;"><span style="background:{SLATE_100}; border:1px solid {SLATE_200}; border-radius:4px; padding:0 5px; font-size:10px; color:{SLATE_700};">5.2</span>Cobertura (meses)</span>
+        <span style="display:flex; align-items:center; gap:4px;"><span style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:4px; padding:0 5px; font-size:10px; color:var(--capi-text);">5.2</span>Cobertura (meses)</span>
     </div>
     </div>""", unsafe_allow_html=True)
 
@@ -1525,7 +1630,7 @@ if nav_page == "🏠 Dashboard":
                 _cob_bg, _cob_color, _cob_border = "#FEF2F2", "#DC2626", "#FECACA"
             _cob_html = f'<span style="background:{_cob_bg}; color:{_cob_color}; border:1px solid {_cob_border}; border-radius:6px; padding:2px 8px; font-size:11px; font-weight:600; min-width:50px; text-align:center; white-space:nowrap;">{_cob:.1f}</span>'
         else:
-            _cob_html = f'<span style="background:{SLATE_100}; color:{SLATE_500}; border:1px solid {SLATE_200}; border-radius:6px; padding:2px 8px; font-size:11px; min-width:50px; text-align:center;">—</span>'
+            _cob_html = f'<span style="background:var(--capi-bg-surface); color:var(--capi-text2); border:1px solid var(--capi-border); border-radius:6px; padding:2px 8px; font-size:11px; min-width:50px; text-align:center;">—</span>'
 
         _bars_html += f"""<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
             <span style="width:130px; font-size:12px; font-weight:500; color:{SLATE_800}; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex-shrink:0;">{_marca_name}</span>
@@ -1628,18 +1733,18 @@ if nav_page == "🏠 Dashboard":
         _kc1, _kc2, _kc3 = st.columns(3)
         with _kc1:
             st.markdown(f"""<div style="background:#FEF2F2; border-radius:12px; padding:14px 18px; border-left:4px solid #ef4444;">
-                <div style="font-size:0.72rem; color:{SLATE_500}; font-weight:500;">Capital viejo (>16 sem)</div>
+                <div style="font-size:0.72rem; color:var(--capi-text2); font-weight:500;">Capital viejo (>16 sem)</div>
                 <div style="font-size:1.5rem; font-weight:700; color:#ef4444;">S/ {_cap_viejo:,.0f}</div>
-                <div style="font-size:0.68rem; color:{SLATE_500};">{_pct_viejo:.0f}% del inventario</div>
+                <div style="font-size:0.68rem; color:var(--capi-text2);">{_pct_viejo:.0f}% del inventario</div>
             </div>""", unsafe_allow_html=True)
         with _kc2:
             st.markdown(f"""<div style="background:#FFFBEB; border-radius:12px; padding:14px 18px; border-left:4px solid #f59e0b;">
-                <div style="font-size:0.72rem; color:{SLATE_500}; font-weight:500;">Edad prom. ponderada</div>
+                <div style="font-size:0.72rem; color:var(--capi-text2); font-weight:500;">Edad prom. ponderada</div>
                 <div style="font-size:1.5rem; font-weight:700; color:#f59e0b;">{_edad_prom:.1f} sem</div>
             </div>""", unsafe_allow_html=True)
         with _kc3:
             st.markdown(f"""<div style="background:#F0FDF4; border-radius:12px; padding:14px 18px; border-left:4px solid {TEAL_600};">
-                <div style="font-size:0.72rem; color:{SLATE_500}; font-weight:500;">SKUs zona riesgo (8-16 sem)</div>
+                <div style="font-size:0.72rem; color:var(--capi-text2); font-weight:500;">SKUs zona riesgo (8-16 sem)</div>
                 <div style="font-size:1.5rem; font-weight:700; color:{TEAL_700};">{_n_riesgo:,}</div>
             </div>""", unsafe_allow_html=True)
 
@@ -1654,8 +1759,8 @@ if nav_page == "🏠 Dashboard":
                 _clr = _edad_colors.get(_lbl, '#94A3B8')
                 if _pct > 1:
                     _bar_parts += f'<div style="width:{_pct:.1f}%; background:{_clr}; height:100%; display:inline-block;" title="{_lbl}: S/{_val:,.0f} ({_pct:.0f}%)"></div>'
-            st.markdown(f"""<div style="margin-top:12px; background:white; border-radius:8px; padding:10px 14px; border:1px solid {SLATE_200};">
-                <div style="width:100%; height:16px; border-radius:6px; overflow:hidden; background:{SLATE_200}; display:flex;">{_bar_parts}</div>
+            st.markdown(f"""<div style="margin-top:12px; background:var(--capi-bg-card); border-radius:8px; padding:10px 14px; border:1px solid var(--capi-border);">
+                <div style="width:100%; height:16px; border-radius:6px; overflow:hidden; background:var(--capi-border); display:flex;">{_bar_parts}</div>
             </div>""", unsafe_allow_html=True)
 
         st.caption("Drill-down completo, alertas por acción y reglas del motor → sección **Gestión por Antigüedad** en el menú lateral.")
@@ -1675,21 +1780,21 @@ if nav_page == "🏠 Dashboard":
         _mg_bg = "#F0FDF4" if _mg_pct >= 35 else ("#FFFBEB" if _mg_pct >= 25 else "#FEF2F2")
         with _mk1:
             st.markdown(f"""<div style="background:{_mg_bg}; border-radius:12px; padding:16px 20px; border-left:4px solid {_mg_color};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Margen efectivo global</div>
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Margen efectivo global</div>
                 <div style="font-size:1.8rem; font-weight:700; color:{_mg_color};">{_mg_pct:.1f}%</div>
-                <div style="font-size:0.7rem; color:{SLATE_500};">Contribución / Venta (4 sem)</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Contribución / Venta (4 sem)</div>
             </div>""", unsafe_allow_html=True)
         with _mk2:
             st.markdown(f"""<div style="background:#EFF6FF; border-radius:12px; padding:16px 20px; border-left:4px solid #3b82f6;">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Venta total (4 sem)</div>
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Venta total (4 sem)</div>
                 <div style="font-size:1.8rem; font-weight:700; color:#3b82f6;">S/ {_vta_soles_total:,.0f}</div>
-                <div style="font-size:0.7rem; color:{SLATE_500};">Sin IGV</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Sin IGV</div>
             </div>""", unsafe_allow_html=True)
         with _mk3:
             st.markdown(f"""<div style="background:#F0FDF4; border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Contribución total (4 sem)</div>
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Contribución total (4 sem)</div>
                 <div style="font-size:1.8rem; font-weight:700; color:{TEAL_700};">S/ {_contrib_soles_total:,.0f}</div>
-                <div style="font-size:0.7rem; color:{SLATE_500};">Venta - Costo</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Venta - Costo</div>
             </div>""", unsafe_allow_html=True)
 
         # ── Tabla de margen por marca ──
@@ -1718,7 +1823,7 @@ if nav_page == "🏠 Dashboard":
             st.markdown(f"""<div style="overflow-x:auto;">
             <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
                 <thead>
-                    <tr style="background:{SLATE_100}; border-bottom:2px solid {SLATE_200};">
+                    <tr style="background:var(--capi-bg-surface); border-bottom:2px solid var(--capi-border);">
                         <th style="padding:8px 12px; text-align:left;">Marca</th>
                         <th style="padding:8px 12px; text-align:right;">Venta S/</th>
                         <th style="padding:8px 12px; text-align:right;">Contribución S/</th>
@@ -1728,6 +1833,103 @@ if nav_page == "🏠 Dashboard":
                 </thead>
                 <tbody>{_rows_html}</tbody>
             </table></div>""", unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════
+    #  TICKET PROMEDIO + COMPARATIVO VS AÑO PASADO (LY)
+    # ══════════════════════════════════════════════════════════
+    if ly_comparison and ly_comparison.get('ticket_actual_global', 0) > 0:
+        st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
+        st.markdown(f'<div class="section-header"><h3>🎫 Ticket Promedio & vs Año Pasado</h3><span class="live-badge">YoY</span></div>', unsafe_allow_html=True)
+
+        _ly_g = ly_comparison.get('ly_global')
+        _sem_act = ly_comparison.get('semana_actual', '?')
+        _ticket_act = ly_comparison.get('ticket_actual_global', 0)
+
+        _tk1, _tk2, _tk3, _tk4 = st.columns(4)
+        with _tk1:
+            st.markdown(f"""<div style="background:#EFF6FF; border-radius:12px; padding:16px 20px; border-left:4px solid #3b82f6;">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Ticket promedio actual</div>
+                <div style="font-size:1.8rem; font-weight:700; color:#3b82f6;">S/ {_ticket_act:,.0f}</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Venta S/ / Unidades (4 sem)</div>
+            </div>""", unsafe_allow_html=True)
+
+        if _ly_g:
+            _ticket_ly = _ly_g.get('ticket_ly', 0)
+            _d_ticket = _ly_g.get('delta_ticket_pct', 0)
+            _d_vta = _ly_g.get('delta_vta_soles_pct', 0)
+            _d_uds = _ly_g.get('delta_vta_uds_pct', 0)
+            _year_ly = _ly_g.get('año_ly', '?')
+
+            _clr_ticket = "#10b981" if _d_ticket >= 0 else "#ef4444"
+            _clr_vta = "#10b981" if _d_vta >= 0 else "#ef4444"
+            _clr_uds = "#10b981" if _d_uds >= 0 else "#ef4444"
+            _arrow_ticket = "▲" if _d_ticket >= 0 else "▼"
+            _arrow_vta = "▲" if _d_vta >= 0 else "▼"
+            _arrow_uds = "▲" if _d_uds >= 0 else "▼"
+
+            with _tk2:
+                st.markdown(f"""<div style="background:{'#F0FDF4' if _d_ticket >= 0 else '#FEF2F2'}; border-radius:12px; padding:16px 20px; border-left:4px solid {_clr_ticket};">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Δ Ticket vs LY (sem {_sem_act})</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:{_clr_ticket};">{_arrow_ticket} {abs(_d_ticket):.1f}%</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">LY: S/ {_ticket_ly:,.0f} ({_year_ly})</div>
+                </div>""", unsafe_allow_html=True)
+            with _tk3:
+                st.markdown(f"""<div style="background:{'#F0FDF4' if _d_vta >= 0 else '#FEF2F2'}; border-radius:12px; padding:16px 20px; border-left:4px solid {_clr_vta};">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Δ Venta S/ vs LY</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:{_clr_vta};">{_arrow_vta} {abs(_d_vta):.1f}%</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">Sem actual vs misma sem {_year_ly}</div>
+                </div>""", unsafe_allow_html=True)
+            with _tk4:
+                st.markdown(f"""<div style="background:{'#F0FDF4' if _d_uds >= 0 else '#FEF2F2'}; border-radius:12px; padding:16px 20px; border-left:4px solid {_clr_uds};">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Δ Unidades vs LY</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:{_clr_uds};">{_arrow_uds} {abs(_d_uds):.1f}%</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">Sem actual vs misma sem {_year_ly}</div>
+                </div>""", unsafe_allow_html=True)
+
+            # ── Tabla comparativa por marca ──
+            _ly_marca_data = ly_comparison.get('ly_marca', [])
+            if _ly_marca_data:
+                st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+                st.markdown(f"<h4 style='color:{SLATE_800}; margin:0 0 8px 0;'>Comparativo por Marca — Semana {_sem_act} actual vs {_year_ly}</h4>", unsafe_allow_html=True)
+
+                _ly_rows_html = ""
+                for _lm in _ly_marca_data:
+                    _m_name = _lm.get('marca', '')
+                    _m_ticket = _lm.get('ticket', 0)
+                    _m_ticket_ly = _lm.get('ticket_ly', 0)
+                    _m_dvta = _lm.get('delta_vta_pct', 0)
+                    _m_dticket = _lm.get('delta_ticket_pct', 0)
+                    _clr_mv = "#10b981" if _m_dvta >= 0 else "#ef4444"
+                    _clr_mt = "#10b981" if _m_dticket >= 0 else "#ef4444"
+                    _arr_mv = "▲" if _m_dvta >= 0 else "▼"
+                    _arr_mt = "▲" if _m_dticket >= 0 else "▼"
+                    _ly_rows_html += f"""<tr>
+                        <td style="padding:6px 10px; font-weight:500;">{_m_name}</td>
+                        <td style="padding:6px 10px; text-align:right;">S/ {_m_ticket:,.0f}</td>
+                        <td style="padding:6px 10px; text-align:right; color:var(--capi-text2);">S/ {_m_ticket_ly:,.0f}</td>
+                        <td style="padding:6px 10px; text-align:right; font-weight:600; color:{_clr_mt};">{_arr_mt} {abs(_m_dticket):.1f}%</td>
+                        <td style="padding:6px 10px; text-align:right; font-weight:600; color:{_clr_mv};">{_arr_mv} {abs(_m_dvta):.1f}%</td>
+                    </tr>"""
+
+                st.markdown(f"""<div style="overflow-x:auto; max-height:400px; overflow-y:auto;">
+                <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                    <thead>
+                        <tr style="background:var(--capi-bg-surface); border-bottom:2px solid var(--capi-border); position:sticky; top:0;">
+                            <th style="padding:8px 10px; text-align:left;">Marca</th>
+                            <th style="padding:8px 10px; text-align:right;">Ticket Actual</th>
+                            <th style="padding:8px 10px; text-align:right;">Ticket LY</th>
+                            <th style="padding:8px 10px; text-align:right;">Δ Ticket</th>
+                            <th style="padding:8px 10px; text-align:right;">Δ Venta S/</th>
+                        </tr>
+                    </thead>
+                    <tbody>{_ly_rows_html}</tbody>
+                </table></div>""", unsafe_allow_html=True)
+        else:
+            with _tk2:
+                st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {SLATE_400};">
+                    <div style="font-size:0.75rem; color:var(--capi-text2);">Comparativo LY</div>
+                    <div style="font-size:1rem; color:var(--capi-text2);">Sin data para sem {_sem_act}</div>
+                </div>""", unsafe_allow_html=True)
 
     # (Sección "Acciones del Día" eliminada — info disponible en vistas del sidebar)
 
@@ -1746,29 +1948,29 @@ elif nav_page == "📦 Reposición":
     _capital_critico = df_cob[df_cob['estado'] == 'CRÍTICO']['stock_valor_costo'].sum() if 'estado' in df_cob.columns else 0
     _tiendas_cob_baja = df_cob[df_cob['cobertura_sem'] < params['umbral_critico']]['tienda'].nunique() if 'tienda' in df_cob.columns else 0
 
-    st.markdown(f'<div class="section-header"><h3>Vista Reposición</h3><span class="live-badge">CAPI SEMANAL</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-header"><h3>Vista Reposición</h3><span class="live-badge">GESTIÓN DE STOCK</span></div>', unsafe_allow_html=True)
 
     _kpi_cols = st.columns(3)
     with _kpi_cols[0]:
         st.markdown(f"""
-        <div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_CRITICO};">
-            <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">% SKUs en estado crítico</div>
+        <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_CRITICO};">
+            <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">% SKUs en estado crítico</div>
             <div style="font-size:1.6rem; font-weight:700; color:{STATUS_CRITICO};">{_pct_critico:.1f}%</div>
-            <div style="font-size:0.7rem; color:{SLATE_500};">{_n_critico:,} de {_n_total:,} combos</div>
+            <div style="font-size:0.7rem; color:var(--capi-text2);">{_n_critico:,} de {_n_total:,} combos</div>
         </div>""", unsafe_allow_html=True)
     with _kpi_cols[1]:
         st.markdown(f"""
-        <div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_PRECRITICO};">
-            <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Tiendas con cobertura baja</div>
+        <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_PRECRITICO};">
+            <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Tiendas con cobertura baja</div>
             <div style="font-size:1.6rem; font-weight:700; color:{STATUS_PRECRITICO};">{_tiendas_cob_baja}</div>
-            <div style="font-size:0.7rem; color:{SLATE_500};">< {params['umbral_critico']} semanas</div>
+            <div style="font-size:0.7rem; color:var(--capi-text2);">< {params['umbral_critico']} semanas</div>
         </div>""", unsafe_allow_html=True)
     with _kpi_cols[2]:
         st.markdown(f"""
-        <div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
-            <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Capital atrapado en críticos</div>
+        <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
+            <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Capital atrapado en críticos</div>
             <div style="font-size:1.6rem; font-weight:700; color:{TEAL_700};">S/ {_capital_critico:,.0f}</div>
-            <div style="font-size:0.7rem; color:{SLATE_500};">SKUs en estado CRÍTICO</div>
+            <div style="font-size:0.7rem; color:var(--capi-text2);">SKUs en estado CRÍTICO</div>
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
@@ -1777,7 +1979,7 @@ elif nav_page == "📦 Reposición":
 
     st.markdown(f"""<div style="background:#FEF2F2; border-left:4px solid {STATUS_CRITICO}; padding:10px 14px; border-radius:10px; margin-bottom:10px;">
     <strong style="color:{STATUS_CRITICO};">Reposición Pendiente por Marca</strong>
-    <span style="color:{SLATE_500}; font-size:0.82em;"> &nbsp;·&nbsp; Unidades a reponer y costo total estimado por temporada</span>
+    <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; Unidades a reponer y costo total estimado por temporada</span>
     </div>""", unsafe_allow_html=True)
 
     if not df_rep.empty:
@@ -2154,29 +2356,29 @@ elif nav_page == "📊 Sobrestock":
     _pct_aparente = (_n_aparente / len(_df_sobre) * 100) if len(_df_sobre) > 0 else 0
     _skus_40sem = (df_cob['cobertura_sem'] > 40).sum() if 'cobertura_sem' in df_cob.columns else 0
 
-    st.markdown(f'<div class="section-header"><h3>Vista Sobrestock</h3><span class="live-badge">CAPI SEMANAL</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-header"><h3>Vista Sobrestock</h3><span class="live-badge">GESTIÓN DE STOCK</span></div>', unsafe_allow_html=True)
 
     _kpi_cols2 = st.columns(3)
     with _kpi_cols2[0]:
         st.markdown(f"""
-        <div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_SOBRESTOCK};">
-            <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Capital en sobrestock</div>
+        <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_SOBRESTOCK};">
+            <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Capital en sobrestock</div>
             <div style="font-size:1.6rem; font-weight:700; color:{STATUS_SOBRESTOCK};">S/ {_capital_sobre:,.0f}</div>
-            <div style="font-size:0.7rem; color:{SLATE_500};">{_n_sobrestock:,} combos SKU×Tienda</div>
+            <div style="font-size:0.7rem; color:var(--capi-text2);">{_n_sobrestock:,} combos SKU×Tienda</div>
         </div>""", unsafe_allow_html=True)
     with _kpi_cols2[1]:
         st.markdown(f"""
-        <div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_ALTO};">
-            <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">% sobrestock aparente</div>
+        <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_ALTO};">
+            <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">% sobrestock aparente</div>
             <div style="font-size:1.6rem; font-weight:700; color:{STATUS_ALTO};">{_pct_aparente:.0f}%</div>
-            <div style="font-size:0.7rem; color:{SLATE_500};">{_n_aparente} combos con >60% stock en CD</div>
+            <div style="font-size:0.7rem; color:var(--capi-text2);">{_n_aparente} combos con >60% stock en CD</div>
         </div>""", unsafe_allow_html=True)
     with _kpi_cols2[2]:
         st.markdown(f"""
-        <div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_MUERTO};">
-            <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">SKUs con >40 sem cobertura</div>
+        <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_MUERTO};">
+            <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">SKUs con >40 sem cobertura</div>
             <div style="font-size:1.6rem; font-weight:700; color:{STATUS_MUERTO};">{_skus_40sem:,}</div>
-            <div style="font-size:0.7rem; color:{SLATE_500};">Candidatos a markdown</div>
+            <div style="font-size:0.7rem; color:var(--capi-text2);">Candidatos a markdown</div>
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
@@ -2284,7 +2486,7 @@ elif nav_page == "📊 Sobrestock":
 
 elif nav_page == "🏷️ Marcas Terceras":
 
-    st.markdown(f'<div class="section-header"><h3>Vista Marcas Terceras</h3><span class="live-badge">CAPI SEMANAL</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-header"><h3>Vista Marcas Terceras</h3><span class="live-badge">GESTIÓN COMERCIAL</span></div>', unsafe_allow_html=True)
 
     # ── Construir resumen por marca tercera ──
     # Marcas propias a excluir
@@ -2348,24 +2550,24 @@ elif nav_page == "🏷️ Marcas Terceras":
         _kpi_cols3 = st.columns(3)
         with _kpi_cols3[0]:
             st.markdown(f"""
-            <div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Margen efectivo promedio</div>
+            <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Margen efectivo promedio</div>
                 <div style="font-size:1.6rem; font-weight:700; color:{TEAL_700};">{_margen_prom:.1f}%</div>
-                <div style="font-size:0.7rem; color:{SLATE_500};">Contribución / Vta Soles 4sem</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Contribución / Vta Soles 4sem</div>
             </div>""", unsafe_allow_html=True)
         with _kpi_cols3[1]:
             st.markdown(f"""
-            <div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {SLATE_700};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Cobertura promedio</div>
-                <div style="font-size:1.6rem; font-weight:700; color:{SLATE_700};">{_cob_prom_terc:.1f} sem</div>
-                <div style="font-size:0.7rem; color:{SLATE_500};">{len(_t_marca)} marcas terceras</div>
+            <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {SLATE_700};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Cobertura promedio</div>
+                <div style="font-size:1.6rem; font-weight:700; color:var(--capi-text);">{_cob_prom_terc:.1f} sem</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">{len(_t_marca)} marcas terceras</div>
             </div>""", unsafe_allow_html=True)
         with _kpi_cols3[2]:
             st.markdown(f"""
-            <div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {SLATE_900};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Capital invertido</div>
-                <div style="font-size:1.6rem; font-weight:700; color:{SLATE_900};">S/ {_capital_total_terc:,.0f}</div>
-                <div style="font-size:0.7rem; color:{SLATE_500};">Top 10 concentran {(_t_marca.head(10)['capital'].sum() / _capital_total_terc * 100):.0f}%</div>
+            <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {SLATE_900};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Capital invertido</div>
+                <div style="font-size:1.6rem; font-weight:700; color:var(--capi-text);">S/ {_capital_total_terc:,.0f}</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Top 10 concentran {(_t_marca.head(10)['capital'].sum() / _capital_total_terc * 100):.0f}%</div>
             </div>""", unsafe_allow_html=True)
 
         st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
@@ -2379,7 +2581,7 @@ elif nav_page == "🏷️ Marcas Terceras":
             'cob_prom': 'Cob (sem)', 'sell_through': 'ST %', 'vta_sem': 'Vta Sem',
             'stock_uds': 'Stock Uds', 'n_skus': 'SKUs',
         })
-        # Gradient manual para Margen % (sin necesitar matplotlib)
+        # Gradient manual para Margen % (compatible con st.dataframe)
         def _margen_color(val):
             try:
                 v = float(val)
@@ -2395,7 +2597,8 @@ elif nav_page == "🏷️ Marcas Terceras":
             else:
                 ratio = min((v - 25) / 35, 1.0)
                 r, g = int(76 - 76 * ratio), int(153 + (100) * ratio)
-            return f'background-color: rgba({r},{g},50,0.25); color: inherit;'
+            # NO usar 'color: inherit' — Streamlit lo interpreta mal y oculta el texto
+            return f'background-color: rgba({r},{g},50,0.25)'
 
         _t_styled = _t_disp.style.format({
             'Capital S/': 'S/ {:,.0f}', 'Vta Costo S/': 'S/ {:,.0f}',
@@ -2425,6 +2628,114 @@ elif nav_page == "🏷️ Marcas Terceras":
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dl_terceras_vista",
         )
+
+    # ══════════════════════════════════════════════════════════
+    #  PROYECCIÓN DE VENTAS + OTB (Forecast por marca tercera)
+    # ══════════════════════════════════════════════════════════
+    _forecast_data = res.get('forecast', {})
+    if _forecast_data and _forecast_data.get('por_marca'):
+        st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
+        st.markdown(f'<div class="section-header"><h3>📈 Proyección de Ventas & OTB</h3><span class="live-badge">FORECAST</span></div>', unsafe_allow_html=True)
+        st.caption(f"Proyección basada en tendencia actual + patrón estacional LY. Stock = Tienda + CD + Tránsito.")
+
+        # Selector de horizonte (dinámico — recalcula al cambiar)
+        _horizonte_opts = [4, 8, 12, 16]
+        _h_sel = st.selectbox("Horizonte de proyección (semanas)", _horizonte_opts, index=1, key="forecast_horizonte")
+
+        # Recalcular forecast con horizonte seleccionado si difiere del default
+        if _h_sel != _forecast_data.get('horizonte', 8):
+            _forecast_data = motor_v2.build_forecast_marca(df_cob, horizonte_semanas=_h_sel)
+
+        # Filtrar solo marcas terceras
+        _fc_terceras = [m for m in _forecast_data['por_marca']
+                        if m['marca'].upper() not in _MARCAS_PROPIAS and m['vta_uds_sem_actual'] > 0]
+
+        if _fc_terceras:
+
+            # KPIs resumen
+            _fc_con_stockout = [m for m in _fc_terceras if m.get('semana_stockout')]
+            _fc_otb_total = sum(m['otb_total_soles'] for m in _fc_terceras)
+
+            _fk1, _fk2, _fk3 = st.columns(3)
+            with _fk1:
+                _so_color = "#ef4444" if len(_fc_con_stockout) > 0 else "#10b981"
+                st.markdown(f"""<div style="background:{'#FEF2F2' if _fc_con_stockout else '#F0FDF4'}; border-radius:12px; padding:16px 20px; border-left:4px solid {_so_color};">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Marcas con stockout proyectado</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:{_so_color};">{len(_fc_con_stockout)} / {len(_fc_terceras)}</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">En las próximas {_forecast_data['horizonte']} semanas</div>
+                </div>""", unsafe_allow_html=True)
+            with _fk2:
+                st.markdown(f"""<div style="background:#FEF2F2; border-radius:12px; padding:16px 20px; border-left:4px solid #ef4444;">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">OTB requerido total</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:#ef4444;">S/ {_fc_otb_total:,.0f}</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">Para sostener tendencia actual</div>
+                </div>""", unsafe_allow_html=True)
+            with _fk3:
+                _sem_actual_fc = _forecast_data.get('semana_actual', 0)
+                st.markdown(f"""<div style="background:#EFF6FF; border-radius:12px; padding:16px 20px; border-left:4px solid #3b82f6;">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Semana actual</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:#3b82f6;">{_sem_actual_fc}</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">Proyectando sem {_sem_actual_fc+1} → {_sem_actual_fc + _forecast_data['horizonte']}</div>
+                </div>""", unsafe_allow_html=True)
+
+            # Tabla de forecast por marca
+            st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+            st.markdown(f"<h4 style='color:{SLATE_800}; margin:0 0 8px 0;'>Detalle por Marca Tercera</h4>", unsafe_allow_html=True)
+
+            _fc_rows_html = ""
+            for _fm in _fc_terceras:
+                _m_name = _fm['marca']
+                _m_vta = _fm['vta_soles_sem_actual']
+                _m_stock = _fm['stock_disponible_uds']
+                _m_cob = _fm['cobertura_actual_sem']
+                _m_perf = _fm.get('perf_ratio_vs_ly', 1.0)
+                _m_so = _fm.get('semana_stockout')
+                _m_otb = _fm['otb_total_soles']
+
+                _so_txt = f"<span style='color:#ef4444; font-weight:700;'>Sem {_m_so}</span>" if _m_so else "<span style='color:#10b981;'>OK</span>"
+                _otb_txt = f"<span style='color:#ef4444; font-weight:600;'>S/ {_m_otb:,.0f}</span>" if _m_otb > 0 else "—"
+                _perf_clr = "#10b981" if _m_perf >= 1 else "#ef4444"
+                _perf_arrow = "▲" if _m_perf >= 1 else "▼"
+                _perf_pct = ((_m_perf - 1) * 100)
+
+                _fc_rows_html += f"""<tr>
+                    <td style="padding:7px 10px; font-weight:500;">{_m_name}</td>
+                    <td style="padding:7px 10px; text-align:right;">S/ {_m_vta:,.0f}</td>
+                    <td style="padding:7px 10px; text-align:right;">{_m_stock:,}</td>
+                    <td style="padding:7px 10px; text-align:right;">{_m_cob:.0f}</td>
+                    <td style="padding:7px 10px; text-align:right; color:{_perf_clr};">{_perf_arrow} {abs(_perf_pct):.0f}%</td>
+                    <td style="padding:7px 10px; text-align:center;">{_so_txt}</td>
+                    <td style="padding:7px 10px; text-align:right;">{_otb_txt}</td>
+                </tr>"""
+
+            st.markdown(f"""<div style="overflow-x:auto; max-height:500px; overflow-y:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                <thead>
+                    <tr style="background:var(--capi-bg-surface); border-bottom:2px solid var(--capi-border); position:sticky; top:0;">
+                        <th style="padding:8px 10px; text-align:left;">Marca</th>
+                        <th style="padding:8px 10px; text-align:right;">Vta S/ /sem</th>
+                        <th style="padding:8px 10px; text-align:right;">Stock Disp.</th>
+                        <th style="padding:8px 10px; text-align:right;">Cob (sem)</th>
+                        <th style="padding:8px 10px; text-align:right;">vs LY</th>
+                        <th style="padding:8px 10px; text-align:center;">Stockout</th>
+                        <th style="padding:8px 10px; text-align:right;">OTB Req S/</th>
+                    </tr>
+                </thead>
+                <tbody>{_fc_rows_html}</tbody>
+            </table></div>""", unsafe_allow_html=True)
+
+            # Detalle expandible por marca con stockout
+            if _fc_con_stockout:
+                st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+                st.markdown(f"<h4 style='color:#ef4444; margin:0 0 8px 0;'>⚠️ Marcas que requieren compra</h4>", unsafe_allow_html=True)
+                for _fm in _fc_con_stockout[:10]:
+                    with st.expander(f"🔴 {_fm['marca']} — Stockout sem {_fm['semana_stockout']} | OTB S/ {_fm['otb_total_soles']:,.0f}", expanded=False):
+                        _proy = _fm.get('proyeccion_semanal', [])
+                        if _proy:
+                            _proy_df = pd.DataFrame(_proy)
+                            _proy_df.columns = ['Semana', 'Vta Uds Proy', 'Vta S/ Proy', 'Stock Remanente', 'OTB S/']
+                            st.dataframe(_proy_df, use_container_width=True, hide_index=True)
+                            st.caption(f"Performance vs LY: {_fm.get('perf_ratio_vs_ly', 1.0):.2f}x | Costo prom/ud: S/ {_fm.get('costo_prom_uds', 0):.2f}")
 
     # ── Alertas y recomendaciones de terceras ──
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
@@ -2565,7 +2876,7 @@ elif nav_page == "📈 Cobertura" or nav_page == "📊 Cobertura":
     with dash_t1:
         st.markdown(f"""<div style="background:#FEF2F2; border-left:4px solid {STATUS_CRITICO}; padding:10px 14px; border-radius:10px; margin-bottom:10px;">
         <strong style="color:{STATUS_CRITICO};">Top 5 Tiendas — Menor Cobertura</strong>
-        <span style="color:{SLATE_500}; font-size:0.82em;"> &nbsp;·&nbsp; Oportunidad de reposición</span>
+        <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; Oportunidad de reposición</span>
         </div>""", unsafe_allow_html=True)
 
         for _, row_t in top5_menor.iterrows():
@@ -2573,10 +2884,10 @@ elif nav_page == "📈 Cobertura" or nav_page == "📊 Cobertura":
             cob_val = row_t["cobertura_tienda"]
             capital_val = row_t["stock_valor_costo"]
 
-            st.markdown(f"""<div style="background:white; border:1px solid {SLATE_200}; border-radius:10px; padding:10px 14px; margin-bottom:4px;">
-            <span style="font-weight:600; color:{SLATE_900};">{tienda_name}</span>
+            st.markdown(f"""<div style="background:var(--capi-bg-card); border:1px solid var(--capi-border); border-radius:10px; padding:10px 14px; margin-bottom:4px;">
+            <span style="font-weight:600; color:var(--capi-text);">{tienda_name}</span>
             &nbsp;·&nbsp; <span style="color:{STATUS_CRITICO}; font-weight:700;">{cob_val:.1f} sem</span>
-            &nbsp;·&nbsp; <span style="color:{SLATE_500}; font-size:0.85em;">Capital: S/ {capital_val:,.0f}</span>
+            &nbsp;·&nbsp; <span style="color:var(--capi-text2); font-size:0.85em;">Capital: S/ {capital_val:,.0f}</span>
             </div>""", unsafe_allow_html=True)
 
             with st.expander(f"Ver detalle por marca — {tienda_name}", expanded=False):
@@ -2615,7 +2926,7 @@ elif nav_page == "📈 Cobertura" or nav_page == "📊 Cobertura":
     with dash_t2:
         st.markdown(f"""<div style="background:#FFF7ED; border-left:4px solid {STATUS_SOBRESTOCK}; padding:10px 14px; border-radius:10px; margin-bottom:10px;">
         <strong style="color:{STATUS_SOBRESTOCK};">Top 5 Tiendas — Mayor Cobertura</strong>
-        <span style="color:{SLATE_500}; font-size:0.82em;"> &nbsp;·&nbsp; Requieren acción</span>
+        <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; Requieren acción</span>
         </div>""", unsafe_allow_html=True)
 
         for _, row_t in top5_mayor.iterrows():
@@ -2623,10 +2934,10 @@ elif nav_page == "📈 Cobertura" or nav_page == "📊 Cobertura":
             cob_val = row_t["cobertura_tienda"]
             capital_val = row_t["stock_valor_costo"]
 
-            st.markdown(f"""<div style="background:white; border:1px solid {SLATE_200}; border-radius:10px; padding:10px 14px; margin-bottom:4px;">
-            <span style="font-weight:600; color:{SLATE_900};">{tienda_name}</span>
+            st.markdown(f"""<div style="background:var(--capi-bg-card); border:1px solid var(--capi-border); border-radius:10px; padding:10px 14px; margin-bottom:4px;">
+            <span style="font-weight:600; color:var(--capi-text);">{tienda_name}</span>
             &nbsp;·&nbsp; <span style="color:{STATUS_SOBRESTOCK}; font-weight:700;">{cob_val:.1f} sem</span>
-            &nbsp;·&nbsp; <span style="color:{SLATE_500}; font-size:0.85em;">Capital: S/ {capital_val:,.0f}</span>
+            &nbsp;·&nbsp; <span style="color:var(--capi-text2); font-size:0.85em;">Capital: S/ {capital_val:,.0f}</span>
             </div>""", unsafe_allow_html=True)
 
             with st.expander(f"Ver detalle por marca — {tienda_name}", expanded=False):
@@ -2697,21 +3008,21 @@ elif nav_page == "📊 Gestión por Antigüedad":
             _kc1, _kc2, _kc3 = st.columns(3)
             with _kc1:
                 st.markdown(f"""<div style="background:#FEF2F2; border-radius:12px; padding:16px 20px; border-left:4px solid #ef4444;">
-                    <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Capital en mercadería vieja (>16 sem)</div>
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Capital en mercadería vieja (>16 sem)</div>
                     <div style="font-size:1.8rem; font-weight:700; color:#ef4444;">S/ {_cap_viejo:,.0f}</div>
-                    <div style="font-size:0.7rem; color:{SLATE_500};">{_pct_viejo:.0f}% del inventario total</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">{_pct_viejo:.0f}% del inventario total</div>
                 </div>""", unsafe_allow_html=True)
             with _kc2:
                 st.markdown(f"""<div style="background:#FFFBEB; border-radius:12px; padding:16px 20px; border-left:4px solid #f59e0b;">
-                    <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Edad promedio ponderada</div>
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Edad promedio ponderada</div>
                     <div style="font-size:1.8rem; font-weight:700; color:#f59e0b;">{_edad_prom:.1f} sem</div>
-                    <div style="font-size:0.7rem; color:{SLATE_500};">Ponderada por capital invertido</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">Ponderada por capital invertido</div>
                 </div>""", unsafe_allow_html=True)
             with _kc3:
                 st.markdown(f"""<div style="background:#F0FDF4; border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
-                    <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">SKUs en zona de riesgo (8-16 sem)</div>
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">SKUs en zona de riesgo (8-16 sem)</div>
                     <div style="font-size:1.8rem; font-weight:700; color:{TEAL_700};">{_n_riesgo:,}</div>
-                    <div style="font-size:0.7rem; color:{SLATE_500};">Aún rescatables con empuje a piso</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">Aún rescatables con empuje a piso</div>
                 </div>""", unsafe_allow_html=True)
 
             # Barra horizontal de distribución de capital por edad
@@ -2726,10 +3037,10 @@ elif nav_page == "📊 Gestión por Antigüedad":
                     _clr = _edad_colors.get(_lbl, '#94A3B8')
                     if _pct > 1:
                         _bar_parts += f'<div style="width:{_pct:.1f}%; background:{_clr}; height:100%; display:inline-block;" title="{_lbl}: S/{_val:,.0f} ({_pct:.0f}%)"></div>'
-                    _legend_parts += f'<span style="display:inline-flex; align-items:center; gap:4px; margin-right:12px;"><span style="width:10px; height:10px; border-radius:2px; background:{_clr}; display:inline-block;"></span><span style="font-size:0.7rem; color:{SLATE_500};">{_lbl}</span></span>'
-                st.markdown(f"""<div style="margin-top:16px; background:white; border-radius:8px; padding:12px 16px; border:1px solid {SLATE_200};">
-                    <div style="font-size:0.8rem; font-weight:600; color:{SLATE_700}; margin-bottom:8px;">Distribución de capital por edad</div>
-                    <div style="width:100%; height:20px; border-radius:6px; overflow:hidden; background:{SLATE_200}; display:flex;">{_bar_parts}</div>
+                    _legend_parts += f'<span style="display:inline-flex; align-items:center; gap:4px; margin-right:12px;"><span style="width:10px; height:10px; border-radius:2px; background:{_clr}; display:inline-block;"></span><span style="font-size:0.7rem; color:var(--capi-text2);">{_lbl}</span></span>'
+                st.markdown(f"""<div style="margin-top:16px; background:var(--capi-bg-card); border-radius:8px; padding:12px 16px; border:1px solid var(--capi-border);">
+                    <div style="font-size:0.8rem; font-weight:600; color:var(--capi-text); margin-bottom:8px;">Distribución de capital por edad</div>
+                    <div style="width:100%; height:20px; border-radius:6px; overflow:hidden; background:var(--capi-border); display:flex;">{_bar_parts}</div>
                     <div style="margin-top:6px;">{_legend_parts}</div>
                 </div>""", unsafe_allow_html=True)
 
@@ -2827,7 +3138,7 @@ elif nav_page == "📊 Gestión por Antigüedad":
                         edad_prom=('edad_semanas', 'mean'),
                     ).reset_index().sort_values('capital', ascending=False).head(8)
 
-                    st.markdown(f"<div style='background:white; border:1px solid {SLATE_200}; border-radius:8px; padding:16px; margin-top:8px;'>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='background:var(--capi-bg-card); border:1px solid var(--capi-border); border-radius:8px; padding:16px; margin-top:8px;'>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-weight:600; color:{SLATE_800}; margin-bottom:8px;'>Drill-down: {_sel_cat}</div>", unsafe_allow_html=True)
                     st.caption("Top marcas por capital viejo (>16 sem)")
 
@@ -2836,11 +3147,11 @@ elif nav_page == "📊 Gestión por Antigüedad":
                         _bar_w_d = max(5, int(_dr['capital'] / _max_cap_drill * 100))
                         _dr_color = '#ef4444' if _dr['edad_prom'] > 26 else ('#f97316' if _dr['edad_prom'] > 16 else ('#f59e0b' if _dr['edad_prom'] > 8 else '#10b981'))
                         st.markdown(f"""<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-                            <span style="width:120px; font-size:0.8rem; font-weight:500; color:{SLATE_700}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{_dr['marca']}</span>
-                            <div style="flex:1; background:{SLATE_200}; border-radius:4px; height:16px;">
+                            <span style="width:120px; font-size:0.8rem; font-weight:500; color:var(--capi-text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{_dr['marca']}</span>
+                            <div style="flex:1; background:var(--capi-border); border-radius:4px; height:16px;">
                                 <div style="background:{_dr_color}; border-radius:4px; height:16px; width:{_bar_w_d}%;"></div>
                             </div>
-                            <span style="font-size:0.75rem; color:{SLATE_500}; white-space:nowrap;">S/{_dr['capital']:,.0f}</span>
+                            <span style="font-size:0.75rem; color:var(--capi-text2); white-space:nowrap;">S/{_dr['capital']:,.0f}</span>
                         </div>""", unsafe_allow_html=True)
 
                     # Nivel 3: click marca → ver SKUs
@@ -2858,7 +3169,7 @@ elif nav_page == "📊 Gestión por Antigüedad":
                                 <td style="padding:6px 8px; font-size:0.75rem; text-align:center;">{_sr.get('accion_aging','')}</td>
                             </tr>"""
                         st.markdown(f"""<table style="width:100%; border-collapse:collapse; margin-top:8px;">
-                            <thead><tr style="background:{SLATE_100}; border-bottom:1px solid {SLATE_200};">
+                            <thead><tr style="background:var(--capi-bg-surface); border-bottom:1px solid var(--capi-border);">
                                 <th style="padding:6px 8px; text-align:left; font-size:0.7rem;">Modelo</th>
                                 <th style="padding:6px 8px; text-align:left; font-size:0.7rem;">Tienda</th>
                                 <th style="padding:6px 8px; text-align:right; font-size:0.7rem;">Edad</th>
@@ -2902,20 +3213,20 @@ elif nav_page == "📊 Gestión por Antigüedad":
                     _ejemplos_acc = aging_top_ejemplos.get(_cfg['key'], [])
                     _ej_html = ""
                     for _ej in _ejemplos_acc[:2]:
-                        _ej_html += f"""<div style="margin-bottom:8px; padding:6px 8px; background:white; border-radius:6px; border:1px solid {SLATE_200};">
+                        _ej_html += f"""<div style="margin-bottom:8px; padding:6px 8px; background:var(--capi-bg-card); border-radius:6px; border:1px solid var(--capi-border);">
                             <div style="font-size:0.72rem; font-weight:600; color:{SLATE_800};">• {_ej['nombre'][:45]}</div>
-                            <div style="font-size:0.68rem; color:{SLATE_500}; margin-top:2px;">{_ej['detalle']}</div>
+                            <div style="font-size:0.68rem; color:var(--capi-text2); margin-top:2px;">{_ej['detalle']}</div>
                             <div style="font-size:0.68rem; color:{_cfg['color']}; margin-top:2px;">→ {_ej['sugerencia'][:60]}</div>
                         </div>"""
                     if not _ej_html:
-                        _ej_html = f'<div style="font-size:0.72rem; color:{SLATE_400}; padding:8px;">Sin casos detectados</div>'
+                        _ej_html = f'<div style="font-size:0.72rem; color:var(--capi-text3); padding:8px;">Sin casos detectados</div>'
 
                     st.markdown(f"""<div style="background:{_cfg['bg']}; border:2px solid {_cfg['border']}; border-radius:12px; padding:14px; height:100%;">
                         <div style="font-weight:700; font-size:0.85rem; color:{_cfg['color']}; margin-bottom:2px;">{_cfg['icon']} {_cfg['title']}</div>
-                        <div style="font-size:0.68rem; color:{SLATE_500}; margin-bottom:10px;">{_cfg['criteria']}</div>
+                        <div style="font-size:0.68rem; color:var(--capi-text2); margin-bottom:10px;">{_cfg['criteria']}</div>
                         {_ej_html}
                         <div style="background:{_cfg['color']}; color:white; padding:6px 10px; border-radius:6px; font-size:0.72rem; font-weight:600; text-align:center; margin-top:8px;">{_cfg['n_label']}</div>
-                        <div style="font-size:0.68rem; color:{SLATE_500}; text-align:center; margin-top:4px;">{_cfg['accion']}</div>
+                        <div style="font-size:0.68rem; color:var(--capi-text2); text-align:center; margin-top:4px;">{_cfg['accion']}</div>
                     </div>""", unsafe_allow_html=True)
 
             st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
@@ -2929,8 +3240,8 @@ elif nav_page == "📊 Gestión por Antigüedad":
             _reglas_html = f"""<div style="overflow-x:auto;">
             <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
                 <thead>
-                    <tr style="background:{SLATE_100}; border-bottom:2px solid {SLATE_200};">
-                        <th style="padding:8px 12px; text-align:left; color:{SLATE_700};">Criterio</th>
+                    <tr style="background:var(--capi-bg-surface); border-bottom:2px solid var(--capi-border);">
+                        <th style="padding:8px 12px; text-align:left; color:var(--capi-text);">Criterio</th>
                         <th style="padding:8px 12px; text-align:center; color:#84cc16;">🟢 Empuje</th>
                         <th style="padding:8px 12px; text-align:center; color:#f59e0b;">🟡 Markdown</th>
                         <th style="padding:8px 12px; text-align:center; color:#f97316;">🟠 Negociar</th>
@@ -2938,35 +3249,35 @@ elif nav_page == "📊 Gestión por Antigüedad":
                     </tr>
                 </thead>
                 <tbody>
-                    <tr style="border-bottom:1px solid {SLATE_200};">
+                    <tr style="border-bottom:1px solid var(--capi-border);">
                         <td style="padding:8px 12px; font-weight:500;">Edad (sem)</td>
                         <td style="padding:8px 12px; text-align:center;">8 – 16</td>
                         <td style="padding:8px 12px; text-align:center;">16 – 26</td>
                         <td style="padding:8px 12px; text-align:center;">16+ (terceras)</td>
                         <td style="padding:8px 12px; text-align:center;">>26</td>
                     </tr>
-                    <tr style="border-bottom:1px solid {SLATE_200};">
+                    <tr style="border-bottom:1px solid var(--capi-border);">
                         <td style="padding:8px 12px; font-weight:500;">Sell-through</td>
                         <td style="padding:8px 12px; text-align:center;">>5%</td>
                         <td style="padding:8px 12px; text-align:center;">2% – 5%</td>
                         <td style="padding:8px 12px; text-align:center;">cualquiera</td>
                         <td style="padding:8px 12px; text-align:center;"><2%</td>
                     </tr>
-                    <tr style="border-bottom:1px solid {SLATE_200};">
+                    <tr style="border-bottom:1px solid var(--capi-border);">
                         <td style="padding:8px 12px; font-weight:500;">Descuento actual</td>
                         <td style="padding:8px 12px; text-align:center;"><10% o ninguno</td>
                         <td style="padding:8px 12px; text-align:center;"><40%</td>
                         <td style="padding:8px 12px; text-align:center;">cualquiera</td>
                         <td style="padding:8px 12px; text-align:center;">ya con 30%+</td>
                     </tr>
-                    <tr style="border-bottom:1px solid {SLATE_200};">
+                    <tr style="border-bottom:1px solid var(--capi-border);">
                         <td style="padding:8px 12px; font-weight:500;">Tipo marca</td>
                         <td style="padding:8px 12px; text-align:center;">cualquiera</td>
                         <td style="padding:8px 12px; text-align:center;">cualquiera</td>
                         <td style="padding:8px 12px; text-align:center;">solo terceras</td>
                         <td style="padding:8px 12px; text-align:center;">cualquiera</td>
                     </tr>
-                    <tr style="border-bottom:1px solid {SLATE_200};">
+                    <tr style="border-bottom:1px solid var(--capi-border);">
                         <td style="padding:8px 12px; font-weight:500;">Capital mín.</td>
                         <td style="padding:8px 12px; text-align:center;">S/10K por SKU</td>
                         <td style="padding:8px 12px; text-align:center;">S/5K por SKU</td>
@@ -3001,7 +3312,7 @@ elif nav_page == "📊 Gestión por Antigüedad":
             if not df_obs.empty:
                 st.markdown(f"""<div style="background:#FDF4FF; border-left:4px solid {STATUS_LIQUIDAR}; padding:10px 14px; border-radius:10px; margin-bottom:10px;">
                 <strong style="color:{STATUS_LIQUIDAR};">Inventario Obsoleto (>6 meses)</strong>
-                <span style="color:{SLATE_500}; font-size:0.82em;"> &nbsp;·&nbsp; {len(df_obs):,} combos · S/ {df_obs['stock_valor_costo'].sum():,.0f} en capital</span>
+                <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; {len(df_obs):,} combos · S/ {df_obs['stock_valor_costo'].sum():,.0f} en capital</span>
                 </div>""", unsafe_allow_html=True)
 
                 _obs_marcas = ["Todas"] + sorted(df_obs["marca"].unique().tolist()) if "marca" in df_obs.columns else ["Todas"]
@@ -3035,15 +3346,15 @@ elif nav_page == "📊 Gestión por Antigüedad":
                     )])
                     fig_obs.update_layout(
                         **_plotly_layout,
-                        title=dict(text="Capital Obsoleto por Antigüedad", font=dict(size=14, color=SLATE_900)),
+                        title=dict(text="Capital Obsoleto por Antigüedad", font=dict(size=14, color=TH_TEXT_PY)),
                         showlegend=False,
                         height=340,
                     )
                     _obs_total = obs_rango["capital"].sum()
                     _obs_pct_total = (_obs_total / df_cob["stock_valor_costo"].sum() * 100) if df_cob["stock_valor_costo"].sum() > 0 else 0
                     fig_obs.add_annotation(
-                        text=f"<b>{_obs_pct_total:.1f}%</b><br><span style='font-size:10px;color:{SLATE_500}'>del inventario</span>",
-                        showarrow=False, font=dict(size=18, color=SLATE_900),
+                        text=f"<b>{_obs_pct_total:.1f}%</b><br><span style='font-size:10px;color:var(--capi-text2)'>del inventario</span>",
+                        showarrow=False, font=dict(size=18, color=TH_TEXT_PY),
                     )
                     st.plotly_chart(fig_obs, use_container_width=True)
 
@@ -3460,8 +3771,8 @@ elif nav_page == "🤖 Alertas IA":
                 col.markdown(
                     f'<div style="background:{bg}; border-radius:12px; padding:12px 14px; text-align:center;">'
                     f'<div style="font-size:1.6em; font-weight:700; color:{fg};">{_count}</div>'
-                    f'<div style="font-size:0.75em; color:{SLATE_500};">{label}</div>'
-                    f'<div style="font-size:0.7em; color:{SLATE_500};">S/ {_cap_sum:,.0f}</div>'
+                    f'<div style="font-size:0.75em; color:var(--capi-text2);">{label}</div>'
+                    f'<div style="font-size:0.7em; color:var(--capi-text2);">S/ {_cap_sum:,.0f}</div>'
                     f'</div>',
                     unsafe_allow_html=True
                 )
@@ -3473,7 +3784,7 @@ elif nav_page == "🤖 Alertas IA":
             if _capital_total_riesgo > 0:
                 st.markdown(
                     f'<div style="background:linear-gradient(135deg,#FEF2F2,#FFF7ED); border-radius:12px; padding:10px 16px; margin-top:8px; text-align:center;">'
-                    f'<span style="font-size:0.85em; color:{SLATE_700};">Capital en riesgo (detuvo + frenando + riesgo crítico): </span>'
+                    f'<span style="font-size:0.85em; color:var(--capi-text);">Capital en riesgo (detuvo + frenando + riesgo crítico): </span>'
                     f'<strong style="font-size:1.1em; color:#DC2626;">S/ {_capital_total_riesgo:,.0f}</strong>'
                     f'</div>',
                     unsafe_allow_html=True
@@ -3529,7 +3840,7 @@ elif nav_page == "🤖 Alertas IA":
                 # Mini badges de tipos para el header del expander
                 _tipo_badges = ""
                 for _t_name, _t_count in _marca_agg["tipos"]:
-                    _t_bg, _t_fg = SLATE_50, SLATE_500
+                    _t_bg, _t_fg = TH_BG_SURFACE_PY, TH_TEXT2_PY
                     for kw, (bg_c, bd_c) in _COLOR_MAP.items():
                         if kw in _t_name:
                             _t_bg, _t_fg = bg_c, bd_c
@@ -3542,7 +3853,7 @@ elif nav_page == "🤖 Alertas IA":
                     _df_marca = df_al[df_al["marca"] == _marca_name].sort_values("capital_stock", ascending=False)
                     for _, r in _df_marca.iterrows():
                         tipo = r["tipo_alerta"]
-                        _bg, _border = SLATE_50, SLATE_500
+                        _bg, _border = TH_BG_SURFACE_PY, TH_TEXT2_PY
                         for kw, (bg_c, bd_c) in _COLOR_MAP.items():
                             if kw in tipo:
                                 _bg, _border = bg_c, bd_c
@@ -3554,18 +3865,18 @@ elif nav_page == "🤖 Alertas IA":
                         st.markdown(
                             f'<div style="background-color:{_bg}; padding:14px 18px; border-radius:12px; margin-bottom:8px; border-left:4px solid {_border};">'
                             f'<div style="display:flex; justify-content:space-between; align-items:center;">'
-                            f'  <div><strong style="color:{SLATE_900};">{tipo}</strong>{_temp_tag}</div>'
-                            f'  <div style="text-align:right; font-size:0.82em; color:{SLATE_500};">S/ {r["capital_stock"]:,.0f} en stock</div>'
+                            f'  <div><strong style="color:var(--capi-text);">{tipo}</strong>{_temp_tag}</div>'
+                            f'  <div style="text-align:right; font-size:0.82em; color:var(--capi-text2);">S/ {r["capital_stock"]:,.0f} en stock</div>'
                             f'</div>'
                             f'<div style="margin-top:4px;">'
                             f'  <code style="background:rgba(0,0,0,0.06); padding:2px 6px; border-radius:4px; font-size:0.82em;">{r["sku"]}</code>'
                             f'  &nbsp;·&nbsp; {str(r["nombre"])[:35]}'
                             f'</div>'
-                            f'<div style="margin-top:4px; font-size:0.82em; color:{SLATE_500};">'
+                            f'<div style="margin-top:4px; font-size:0.82em; color:var(--capi-text2);">'
                             f'  Estado: {r["estado_actual"]} &nbsp;·&nbsp; Stock: {int(r["stock_total"])} uds ({int(r["n_tiendas"])} tiendas)'
                             f'  &nbsp;·&nbsp; Cob: {_cob_txt} &nbsp;·&nbsp; Edad: {int(r["edad_semanas"])} sem'
                             f'</div>'
-                            f'<div style="margin-top:6px; font-size:0.88em; color:{SLATE_700};">{r["detalle"]}</div>'
+                            f'<div style="margin-top:6px; font-size:0.88em; color:var(--capi-text);">{r["detalle"]}</div>'
                             f'</div>',
                             unsafe_allow_html=True
                         )
@@ -3602,10 +3913,10 @@ elif nav_page == "🤖 Alertas IA":
                 _border_anom = "#DC2626" if "SIN VENTA" in r["tipo"] else "#EAB308"
                 st.markdown(
                     f'<div style="background-color:{color}; padding:14px 18px; border-radius:12px; margin-bottom:8px; border-left:4px solid {_border_anom};">'
-                    f'<strong style="color:{SLATE_900};">{r["tipo"]}</strong> &nbsp;·&nbsp; '
+                    f'<strong style="color:var(--capi-text);">{r["tipo"]}</strong> &nbsp;·&nbsp; '
                     f'<code style="background:rgba(0,0,0,0.06); padding:2px 6px; border-radius:4px; font-size:0.82em;">{r["sku"]}</code> '
                     f'&nbsp;·&nbsp; {str(r["nombre"])[:30]} &nbsp;·&nbsp; Tienda: {r["tienda_anomala"]}<br>'
-                    f'<span style="font-size:0.88em; color:{SLATE_700};">{r["detalle"]}</span>'
+                    f'<span style="font-size:0.88em; color:var(--capi-text);">{r["detalle"]}</span>'
                     f'</div>',
                     unsafe_allow_html=True
                 )
@@ -3846,9 +4157,9 @@ elif nav_page == "🔮 Simulador Predictivo":
             with _proj_cols[3]:
                 st.markdown(
                     f'<div style="background:{TEAL_50};padding:12px 16px;border-radius:10px;border-left:4px solid {TEAL_600};">'
-                    f'<div style="font-size:0.82em;color:{SLATE_500};">Contribución extra mensual</div>'
+                    f'<div style="font-size:0.82em;color:var(--capi-text2);">Contribución extra mensual</div>'
                     f'<div style="font-size:1.3em;font-weight:700;color:{TEAL_600};">S/{abs(_sim_extra_contrib):,.0f}</div>'
-                    f'<div style="font-size:0.78em;color:{SLATE_500};">'
+                    f'<div style="font-size:0.78em;color:var(--capi-text2);">'
                     f'{_sim_actions_active} acciones · impacto en {_sim_max_weeks} sem · '
                     f'capital parado remanente: S/{_sim_new_cap:,.0f}</div>'
                     f'</div>',
@@ -3942,7 +4253,7 @@ elif nav_page == "🔮 Simulador Predictivo":
             st.markdown(
                 f'<div style="background:#fff;padding:14px 18px;border-radius:10px;border:1px solid #e9ecef;">'
                 f'<strong>Margen vs velocidad de recuperación</strong>'
-                f'<div style="font-size:0.82em;color:{SLATE_500};margin-top:6px;">'
+                f'<div style="font-size:0.82em;color:var(--capi-text2);margin-top:6px;">'
                 f'Markdown acelera la recuperación de capital pero destruye margen. '
                 f'La pregunta no es "cuánto margen pierdo" sino "cuánto vale tener ese capital libre 8 semanas antes".'
                 f'</div></div>', unsafe_allow_html=True
@@ -3951,7 +4262,7 @@ elif nav_page == "🔮 Simulador Predictivo":
             st.markdown(
                 f'<div style="background:#fff;padding:14px 18px;border-radius:10px;border:1px solid #e9ecef;">'
                 f'<strong>Diversidad vs rentabilidad</strong>'
-                f'<div style="font-size:0.82em;color:{SLATE_500};margin-top:6px;">'
+                f'<div style="font-size:0.82em;color:var(--capi-text2);margin-top:6px;">'
                 f'Concentrar en propias sube el margen pero reduce opciones. '
                 f'Los clientes que buscan Lacoste también compran Marquis — el tráfico de marca importa.'
                 f'</div></div>', unsafe_allow_html=True
@@ -4039,23 +4350,56 @@ st.download_button(
 # ══════════════════════════════════════════════════════════════
 
 st.markdown("---")
-st.markdown(f'<div class="section-header"><h3>📸 Medición de resultados</h3></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="section-header"><h3>📸 Medición de resultados</h3><span class="live-badge">TRACKING</span></div>', unsafe_allow_html=True)
 
-_snap_col1, _snap_col2 = st.columns(2)
-with _snap_col1:
-    _snap_label = st.text_input("Etiqueta del snapshot", value="semana_0", key="snap_label",
-                                 help="Ej: semana_0 (baseline), semana_1, semana_2...")
-with _snap_col2:
-    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-    if st.button("📸 Guardar snapshot semanal", key="btn_snapshot", use_container_width=True):
-        _snap = motor_v2.snapshot_kpis(st.session_state["results"], semana_label=_snap_label)
-        st.success(f"✅ Snapshot '{_snap_label}' guardado — {_snap['total_combos']:,} combos, ST {_snap['sell_through_pct']:.1f}%")
+import json as _json_snap
 
-# Mostrar comparativo si hay snapshots
-_all_snaps = motor_v2.load_snapshots()
-if len(_all_snaps) >= 2:
-    with st.expander(f"📊 Comparativo semanal — {len(_all_snaps)} snapshots disponibles", expanded=False):
-        _snap_options = [s_item.get('semana', '?') for s_item in _all_snaps]
+# ── Guardar snapshot ──
+_snap_tab1, _snap_tab2, _snap_tab3 = st.tabs(["📸 Guardar snapshot", "📊 Comparativo", "📂 Cargar snapshots"])
+
+with _snap_tab1:
+    st.caption("Guarda un snapshot de los KPIs actuales para medir el impacto semana a semana. El primer snapshot es tu baseline (semana 0).")
+    _snap_col1, _snap_col2 = st.columns(2)
+    with _snap_col1:
+        _snap_label = st.text_input("Etiqueta del snapshot", value="semana_0", key="snap_label",
+                                     help="Ej: semana_0 (baseline), semana_1, semana_2...")
+    with _snap_col2:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        if st.button("📸 Guardar snapshot", key="btn_snapshot", use_container_width=True):
+            _snap = motor_v2.snapshot_kpis(st.session_state["results"], semana_label=_snap_label)
+            st.session_state["_last_snapshot"] = _snap
+            st.success(f"Snapshot '{_snap_label}' guardado — {_snap['total_combos']:,} combos, ST {_snap['sell_through_pct']:.1f}%, Margen {_snap.get('margen_efectivo_pct', 0):.1f}%")
+
+    # Botón de descarga del último snapshot
+    if st.session_state.get("_last_snapshot"):
+        _snap_json = _json_snap.dumps(st.session_state["_last_snapshot"], indent=2, ensure_ascii=False)
+        st.download_button(
+            "📥 Descargar snapshot (.json)",
+            data=_snap_json,
+            file_name=f"snapshot_{st.session_state['_last_snapshot'].get('semana', 'actual')}.json",
+            mime="application/json",
+            key="dl_snapshot",
+        )
+        st.caption("Descarga y guarda este archivo. Lo necesitarás para comparar en futuras sesiones.")
+
+    # Resumen de snapshots guardados en servidor
+    _all_snaps_server = motor_v2.load_snapshots()
+    if _all_snaps_server:
+        st.markdown(f"**{len(_all_snaps_server)} snapshots en servidor:**")
+        for _s_item in _all_snaps_server:
+            st.caption(f"• {_s_item.get('semana', '?')} — {_s_item.get('timestamp', '?')[:10]} — ST {_s_item.get('sell_through_pct', 0):.1f}%")
+    else:
+        st.info("No hay snapshots guardados aún. Guarda tu primer snapshot como baseline (semana_0).")
+
+with _snap_tab2:
+    # Cargar snapshots del servidor + session_state (uploads)
+    _all_snaps = motor_v2.load_snapshots()
+    _uploaded_snaps = st.session_state.get("_uploaded_snapshots", [])
+    _all_snaps = _all_snaps + _uploaded_snaps
+
+    if len(_all_snaps) >= 2:
+        st.caption(f"{len(_all_snaps)} snapshots disponibles para comparar.")
+        _snap_options = [f"{s_item.get('semana', '?')} ({s_item.get('timestamp', '?')[:10]})" for s_item in _all_snaps]
         _sc1, _sc2 = st.columns(2)
         with _sc1:
             _base_idx = st.selectbox("Baseline", range(len(_snap_options)),
@@ -4087,11 +4431,45 @@ if len(_all_snaps) >= 2:
             if _comp_rows:
                 _df_comp = pd.DataFrame(_comp_rows)
                 st.dataframe(_df_comp, use_container_width=True, hide_index=True, height=min(500, 40 + len(_comp_rows) * 35))
-elif len(_all_snaps) == 1:
-    st.caption(f"📌 Baseline guardado: {_all_snaps[0].get('semana', '?')} ({_all_snaps[0].get('timestamp', '?')[:10]}). "
-               "Guarda un segundo snapshot para ver el comparativo.")
-else:
-    st.caption("Guarda tu primer snapshot (baseline) para comenzar a medir el impacto de Capi.")
+
+                # Descargar comparativo como Excel
+                _comp_xl_buf = io.BytesIO()
+                with pd.ExcelWriter(_comp_xl_buf, engine='openpyxl') as _cw:
+                    _df_comp.to_excel(_cw, sheet_name='Comparativo', index=False)
+                st.download_button(
+                    "📥 Descargar comparativo (.xlsx)",
+                    data=_comp_xl_buf.getvalue(),
+                    file_name=f"comparativo_{_comp['baseline_semana']}_vs_{_comp['actual_semana']}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_comparativo",
+                )
+    elif len(_all_snaps) == 1:
+        st.info(f"Baseline guardado: {_all_snaps[0].get('semana', '?')} ({_all_snaps[0].get('timestamp', '?')[:10]}). "
+                   "Guarda o carga un segundo snapshot para ver el comparativo.")
+    else:
+        st.info("Necesitas al menos 2 snapshots para comparar. Guarda tu baseline primero o carga snapshots previos.")
+
+with _snap_tab3:
+    st.caption("Carga snapshots JSON que descargaste anteriormente. Útil cuando usas Capi en la nube y los snapshots del servidor se pierden.")
+    _snap_uploads = st.file_uploader(
+        "Cargar snapshots (.json)", type=["json"],
+        accept_multiple_files=True, key="snap_uploader",
+    )
+    if _snap_uploads:
+        _loaded = []
+        for _sf in _snap_uploads:
+            try:
+                _snap_data = _json_snap.load(_sf)
+                _loaded.append(_snap_data)
+            except Exception as _e:
+                st.error(f"Error leyendo {_sf.name}: {_e}")
+        if _loaded:
+            st.session_state["_uploaded_snapshots"] = _loaded
+            st.success(f"{len(_loaded)} snapshots cargados. Ve a la pestaña Comparativo para analizar.")
+            for _sl in _loaded:
+                st.caption(f"• {_sl.get('semana', '?')} — {_sl.get('timestamp', '?')[:10]}")
+
+
 
 
 # ══════════════════════════════════════════════════════════════
@@ -4119,14 +4497,14 @@ if _chat_is_open and _col_chat is not None:
 
         st.markdown(
             f'<div style="display:flex; align-items:center; gap:8px; padding:12px 0; '
-            f'border-bottom:1px solid rgba(255,255,255,0.08); margin-bottom:16px;">'
+            f'border-bottom:1px solid {SLATE_200}; margin-bottom:16px;">'
             f'<div style="width:28px; height:28px; background:{TEAL_600}; border-radius:50%; '
             f'display:flex; align-items:center; justify-content:center; color:white; font-weight:700; '
             f'font-size:0.75rem; flex-shrink:0;">C</div>'
-            f'<span style="font-weight:600; color:white; font-size:0.88rem;">Capi</span>'
-            f'<span style="background:rgba(13,148,136,0.25); color:{TEAL_600}; font-size:0.58rem; font-weight:700; '
+            f'<span style="font-weight:600; color:{SLATE_900}; font-size:0.88rem;">Capi</span>'
+            f'<span style="background:{TEAL_50}; color:{TEAL_600}; font-size:0.58rem; font-weight:700; '
             f'padding:2px 7px; border-radius:3px; letter-spacing:0.06em; text-transform:uppercase;">AI</span>'
-            f'<span style="color:rgba(255,255,255,0.35); font-size:0.78rem; margin-left:auto; '
+            f'<span style="color:{SLATE_400}; font-size:0.78rem; margin-left:auto; '
             f'white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;">{_preview_txt}</span>'
             f'</div>',
             unsafe_allow_html=True
@@ -4143,7 +4521,7 @@ if _chat_is_open and _col_chat is not None:
                 # Burbuja usuario — alineada a la derecha, fondo sutil
                 st.markdown(
                     f'<div style="display:flex; justify-content:flex-end; margin:16px 0 12px 0;">'
-                    f'<div style="background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); '
+                    f'<div style="background:{TEAL_50}; color:{SLATE_900}; '
                     f'padding:10px 16px; border-radius:16px 16px 4px 16px; max-width:88%; '
                     f'font-size:0.88rem; line-height:1.5;">{_msg["question"]}</div></div>',
                     unsafe_allow_html=True
@@ -4151,22 +4529,22 @@ if _chat_is_open and _col_chat is not None:
             elif _msg["role"] == "ai":
                 # Respuesta AI — texto directo estilo Nansen
                 _conv = _msg["conversacion"].replace("\n\n", "<br><br>").replace("\n", "<br>")
-                _conv = _re_chat.sub(r'\*\*(.+?)\*\*', r'<strong style="color:white;">\1</strong>', _conv)
+                _conv = _re_chat.sub(r'\*\*(.+?)\*\*', r'<strong style="color:{SLATE_900};">\1</strong>', _conv)
 
                 # Step verde con check (estilo Nansen "Checking Smart Money positions >")
                 _step_html = (
                     f'<div style="display:inline-flex; align-items:center; gap:6px; margin:8px 0 14px 0;">'
                     f'<span style="color:{TEAL_600}; font-size:0.9rem;">●</span>'
-                    f'<span style="color:rgba(255,255,255,0.55); font-size:0.82rem;">'
+                    f'<span style="color:{SLATE_500}; font-size:0.82rem;">'
                     f'Analizando inventario — {_msg.get("n_combos", 0):,} combos</span>'
-                    f'<span style="color:rgba(255,255,255,0.35); font-size:0.82rem;">›</span>'
+                    f'<span style="color:{SLATE_400}; font-size:0.82rem;">›</span>'
                     f'</div>'
                 )
 
                 st.markdown(
                     f'<div style="margin:4px 0 20px 0;">'
                     f'{_step_html}'
-                    f'<div style="color:rgba(255,255,255,0.78); font-size:0.88rem; line-height:1.7;">{_conv}</div>'
+                    f'<div style="color:{SLATE_700}; font-size:0.88rem; line-height:1.7;">{_conv}</div>'
                     f'</div>',
                     unsafe_allow_html=True
                 )
@@ -4183,7 +4561,7 @@ if _chat_is_open and _col_chat is not None:
 
                 # Separador sutil entre respuestas
                 st.markdown(
-                    '<div style="border-bottom:1px solid rgba(255,255,255,0.06); margin:4px 0 8px 0;"></div>',
+                    f'<div style="border-bottom:1px solid {SLATE_200}; margin:4px 0 8px 0;"></div>',
                     unsafe_allow_html=True
                 )
 
@@ -4254,9 +4632,9 @@ if _chat_is_open and _col_chat is not None:
         _chip_html = '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">'
         for _idx, _s_label in enumerate(_CHAT_SUGGESTIONS):
             _chip_html += (
-                f'<span class="nansen-chip" style="background:rgba(255,255,255,0.06); '
-                f'color:rgba(255,255,255,0.55); font-size:0.72rem; padding:4px 10px; '
-                f'border-radius:6px; border:1px solid rgba(255,255,255,0.08); '
+                f'<span class="nansen-chip" style="background:{SLATE_100}; '
+                f'color:{SLATE_700}; font-size:0.72rem; padding:4px 10px; '
+                f'border-radius:6px; border:1px solid {SLATE_200}; '
                 f'cursor:default;">{_s_label}</span>'
             )
         _chip_html += '</div>'
@@ -4274,7 +4652,7 @@ if _chat_is_open and _col_chat is not None:
         _bot_cols = st.columns([3, 1])
         with _bot_cols[0]:
             st.markdown(
-                '<span style="font-size:0.68rem; color:rgba(255,255,255,0.25);">AI-generated. Verify independently.</span>',
+                f'<span style="font-size:0.68rem; color:{SLATE_400};">AI-generated. Verify independently.</span>',
                 unsafe_allow_html=True
             )
         with _bot_cols[1]:
@@ -4298,24 +4676,24 @@ elif nav_page == "📲 Briefing Semanal":
     _at_total_items = sum(p['resumen']['n_items'] for p in alertas_tienda_dict.values())
     _at_total_capital = sum(p['resumen']['capital_parado_sol'] for p in alertas_tienda_dict.values())
 
-    st.markdown(f"""<div style="background:{SLATE_50}; border:1px solid {SLATE_200}; border-radius:14px; padding:18px 22px; margin-bottom:16px;">
-    <span style="font-weight:700; color:{SLATE_900}; font-size:1rem;">Resumen Ejecutivo — Criterios de alertas a tiendas</span>
-    <p style="color:{SLATE_700}; font-size:0.88rem; margin:10px 0 6px 0;">
+    st.markdown(f"""<div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:14px; padding:18px 22px; margin-bottom:16px;">
+    <span style="font-weight:700; color:var(--capi-text); font-size:1rem;">Resumen Ejecutivo — Criterios de alertas a tiendas</span>
+    <p style="color:var(--capi-text); font-size:0.88rem; margin:10px 0 6px 0;">
     Se generan <strong>dos tipos de alerta</strong> semanales para el personal de piso:
     </p>
     <div style="display:flex; gap:16px; flex-wrap:wrap;">
-    <div style="flex:1; min-width:280px; background:white; border-radius:10px; padding:14px; border-left:4px solid {STATUS_MUERTO};">
-    <strong style="color:{SLATE_900};">1. Productos con venta cero</strong><br>
-    <span style="font-size:0.84rem; color:{SLATE_700};">
+    <div style="flex:1; min-width:280px; background:var(--capi-bg-card); border-radius:10px; padding:14px; border-left:4px solid {STATUS_MUERTO};">
+    <strong style="color:var(--capi-text);">1. Productos con venta cero</strong><br>
+    <span style="font-size:0.84rem; color:var(--capi-text);">
     SKUs con stock a costo &ge; S/ 1,000 que no vendieron la semana pasada.<br>
     <strong>Acción:</strong> Revisar exhibición del producto y comunicación de precio (si tiene descuento).<br>
     <strong>Alcance:</strong> {_vc_n_tiendas} tiendas · {_vc_total_skus:,} alertas · S/ {_vc_total_capital:,.0f} capital parado.<br>
     Top 15 SKUs por marca, ordenados por capital parado.
     </span>
     </div>
-    <div style="flex:1; min-width:280px; background:white; border-radius:10px; padding:14px; border-left:4px solid {STATUS_SOBRESTOCK};">
-    <strong style="color:{SLATE_900};">2. Productos con sobrestock</strong><br>
-    <span style="font-size:0.84rem; color:{SLATE_700};">
+    <div style="flex:1; min-width:280px; background:var(--capi-bg-card); border-radius:10px; padding:14px; border-left:4px solid {STATUS_SOBRESTOCK};">
+    <strong style="color:var(--capi-text);">2. Productos con sobrestock</strong><br>
+    <span style="font-size:0.84rem; color:var(--capi-text);">
     SKUs con cobertura &ge; {params.get('alertas_tienda_cob_min', 16)} semanas y edad &ge; {params.get('alertas_tienda_edad_min', 2)} semanas.<br>
     <strong>Acción:</strong> Revisar exhibición + comunicación de precio según tipo descuento (MD1/PTR).<br>
     <strong>Alcance:</strong> {_at_n_tiendas} tiendas · {_at_total_items:,} alertas · S/ {_at_total_capital:,.0f} capital inmovilizado.<br>
@@ -4349,7 +4727,7 @@ elif nav_page == "📲 Briefing Semanal":
 
         st.markdown(f"""<div style="background:#FEF2F2; border-left:4px solid {STATUS_CRITICO}; padding:10px 14px; border-radius:10px; margin-bottom:10px;">
         <strong style="color:{STATUS_CRITICO};">⚠️ {_vc_n_tiendas} tiendas con SKUs sin venta</strong>
-        <span style="color:{SLATE_500}; font-size:0.82em;"> &nbsp;·&nbsp; Capital parado total: S/ {_vc_total_capital:,.0f}</span>
+        <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; Capital parado total: S/ {_vc_total_capital:,.0f}</span>
         </div>""", unsafe_allow_html=True)
 
         st.dataframe(
@@ -4370,12 +4748,14 @@ elif nav_page == "📲 Briefing Semanal":
             _vc_export_cols = ["tienda", "sku", "nombre", "marca", "categoria", "stock_total",
                                "stock_valor_costo", "edad_semanas", "estado", "pct_descuento", "mensaje"]
             _vc_export_cols = [c for c in _vc_export_cols if c in _vc_all_df.columns]
-            _vc_csv = _vc_all_df[_vc_export_cols].to_csv(index=False).encode("utf-8")
+            _vc_xl_buf = io.BytesIO()
+            with pd.ExcelWriter(_vc_xl_buf, engine='openpyxl') as _vc_w:
+                _vc_all_df[_vc_export_cols].to_excel(_vc_w, sheet_name='Venta Cero', index=False)
             st.download_button(
-                "📥 Descargar detalle venta cero (CSV)",
-                data=_vc_csv,
-                file_name="detalle_venta_cero.csv",
-                mime="text/csv",
+                "📥 Descargar detalle venta cero (.xlsx)",
+                data=_vc_xl_buf.getvalue(),
+                file_name="detalle_venta_cero.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="download_venta_cero",
             )
 
@@ -4446,7 +4826,7 @@ elif nav_page == "📲 Briefing Semanal":
 
         st.markdown(f"""<div style="background:#FFF7ED; border-left:4px solid {STATUS_SOBRESTOCK}; padding:10px 14px; border-radius:10px; margin-bottom:10px;">
         <strong style="color:{STATUS_SOBRESTOCK};">📲 {_at_n_tiendas} tiendas con alertas de sobrestock</strong>
-        <span style="color:{SLATE_500}; font-size:0.82em;"> &nbsp;·&nbsp; Capital inmovilizado total: S/ {_at_total_capital:,.0f}</span>
+        <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; Capital inmovilizado total: S/ {_at_total_capital:,.0f}</span>
         </div>""", unsafe_allow_html=True)
 
         st.dataframe(
@@ -4466,12 +4846,14 @@ elif nav_page == "📲 Briefing Semanal":
             _at_export_cols = ["tienda", "sku", "nombre", "marca", "categoria",
                                "stock_actual", "cobertura_sem", "capital_parado_sol", "pct_descuento"]
             _at_export_cols = [c for c in _at_export_cols if c in _at_all_df.columns]
-            _at_csv = _at_all_df[_at_export_cols].to_csv(index=False).encode("utf-8")
+            _at_xl_buf = io.BytesIO()
+            with pd.ExcelWriter(_at_xl_buf, engine='openpyxl') as _at_w:
+                _at_all_df[_at_export_cols].to_excel(_at_w, sheet_name='Sobrestock', index=False)
             st.download_button(
-                "📥 Descargar detalle sobrestock (CSV)",
-                data=_at_csv,
-                file_name="detalle_sobrestock.csv",
-                mime="text/csv",
+                "📥 Descargar detalle sobrestock (.xlsx)",
+                data=_at_xl_buf.getvalue(),
+                file_name="detalle_sobrestock.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="download_sobrestock",
             )
 
@@ -4518,7 +4900,7 @@ elif nav_page == "📲 Briefing Semanal":
             if prioridad <= 1: return "#FEF2F2", STATUS_CRITICO
             if prioridad <= 2: return "#FFF7ED", STATUS_SOBRESTOCK
             if prioridad <= 3: return TEAL_50, TEAL_600
-            if prioridad <= 5: return SLATE_50, SLATE_500
+            if prioridad <= 5: return TH_BG_SURFACE_PY, TH_TEXT2_PY
             return "#ECFDF5", STATUS_OPTIMO
 
         for idx, item in enumerate(briefing_items):
@@ -4570,25 +4952,25 @@ elif nav_page == "📦 Ventana de Compra":
         _ek = embarque_kpis
         _ek_c1, _ek_c2, _ek_c3, _ek_c4 = st.columns(4)
         with _ek_c1:
-            st.markdown(f"""<div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Ventanas activas</div>
+            st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Ventanas activas</div>
                 <div style="font-size:1.6rem; font-weight:700; color:{TEAL_700};">{_ek.get('n_ventanas', 0)}</div>
             </div>""", unsafe_allow_html=True)
         with _ek_c2:
-            st.markdown(f"""<div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_OPTIMO};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Mejor ventana</div>
+            st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_OPTIMO};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Mejor ventana</div>
                 <div style="font-size:1.6rem; font-weight:700; color:{STATUS_OPTIMO};">{_ek.get('mejor_ventana', '—')}</div>
-                <div style="font-size:0.7rem; color:{SLATE_500};">Retorno/sem: {_ek.get('mejor_retorno', 0):.2%}</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Retorno/sem: {_ek.get('mejor_retorno', 0):.2%}</div>
             </div>""", unsafe_allow_html=True)
         with _ek_c3:
-            st.markdown(f"""<div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_CRITICO};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Peor ventana</div>
+            st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_CRITICO};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Peor ventana</div>
                 <div style="font-size:1.6rem; font-weight:700; color:{STATUS_CRITICO};">{_ek.get('peor_ventana', '—')}</div>
-                <div style="font-size:0.7rem; color:{SLATE_500};">Retorno/sem: {_ek.get('peor_retorno', 0):.2%}</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Retorno/sem: {_ek.get('peor_retorno', 0):.2%}</div>
             </div>""", unsafe_allow_html=True)
         with _ek_c4:
-            st.markdown(f"""<div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_PRECRITICO};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Ventanas en rojo</div>
+            st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_PRECRITICO};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Ventanas en rojo</div>
                 <div style="font-size:1.6rem; font-weight:700; color:{STATUS_PRECRITICO};">{_ek.get('n_rojos', 0)}</div>
             </div>""", unsafe_allow_html=True)
 
@@ -4604,11 +4986,11 @@ elif nav_page == "📦 Ventana de Compra":
             _icon = _sem_icons.get(_sem, "⚪")
             _border_color = _sem_colors.get(_sem, SLATE_400)
 
-            st.markdown(f"""<div style="background:white; border:1px solid {SLATE_200}; border-left:4px solid {_border_color}; border-radius:10px; padding:12px 16px; margin-bottom:6px;">
+            st.markdown(f"""<div style="background:var(--capi-bg-card); border:1px solid var(--capi-border); border-left:4px solid {_border_color}; border-radius:10px; padding:12px 16px; margin-bottom:6px;">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
                 <div>
-                    <strong style="color:{SLATE_900}; font-size:1rem;">{_icon} Ventana {_v}</strong>
-                    <span style="color:{SLATE_500}; font-size:0.82em;"> &nbsp;·&nbsp; {vrow['label']}</span>
+                    <strong style="color:var(--capi-text); font-size:1rem;">{_icon} Ventana {_v}</strong>
+                    <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; {vrow['label']}</span>
                 </div>
                 <div style="display:flex; gap:20px; font-size:0.85em;">
                     <span><strong>ST:</strong> {vrow['sell_through']:.0%}</span>
@@ -4706,18 +5088,18 @@ elif nav_page == "🚚 Predistribución":
         _r_c1, _r_c2, _r_c3 = st.columns(3)
         with _r_c1:
             _ret_color = STATUS_CRITICO if _n_ret > 0 else STATUS_OPTIMO
-            st.markdown(f"""<div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {_ret_color};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">SKUs retenidos en CD</div>
+            st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {_ret_color};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">SKUs retenidos en CD</div>
                 <div style="font-size:1.6rem; font-weight:700; color:{_ret_color};">{_n_ret:,}</div>
             </div>""", unsafe_allow_html=True)
         with _r_c2:
-            st.markdown(f"""<div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Unidades retenidas</div>
+            st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Unidades retenidas</div>
                 <div style="font-size:1.6rem; font-weight:700; color:{TEAL_700};">{_uds_ret:,}</div>
             </div>""", unsafe_allow_html=True)
         with _r_c3:
-            st.markdown(f"""<div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_ALTO};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Capital retenido</div>
+            st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_ALTO};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Capital retenido</div>
                 <div style="font-size:1.6rem; font-weight:700; color:{STATUS_ALTO};">S/ {_cap_ret:,.0f}</div>
             </div>""", unsafe_allow_html=True)
 
@@ -4770,20 +5152,20 @@ elif nav_page == "🚚 Predistribución":
         _g_c1, _g_c2, _g_c3 = st.columns(3)
         with _g_c1:
             _gap_color = STATUS_ALTO if _n_gaps > 0 else STATUS_OPTIMO
-            st.markdown(f"""<div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {_gap_color};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">SKUs con gaps</div>
+            st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {_gap_color};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">SKUs con gaps</div>
                 <div style="font-size:1.6rem; font-weight:700; color:{_gap_color};">{_n_gaps:,}</div>
             </div>""", unsafe_allow_html=True)
         with _g_c2:
-            st.markdown(f"""<div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Gaps con stock CD</div>
+            st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Gaps con stock CD</div>
                 <div style="font-size:1.6rem; font-weight:700; color:{TEAL_700};">{_n_gaps_cd:,}</div>
-                <div style="font-size:0.7rem; color:{SLATE_500};">Accionables (hay stock para enviar)</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Accionables (hay stock para enviar)</div>
             </div>""", unsafe_allow_html=True)
         with _g_c3:
             _cob_color = STATUS_OPTIMO if _prom_cob >= 0.8 else (STATUS_ALTO if _prom_cob >= 0.5 else STATUS_CRITICO)
-            st.markdown(f"""<div style="background:{SLATE_50}; border-radius:12px; padding:16px 20px; border-left:4px solid {_cob_color};">
-                <div style="font-size:0.75rem; color:{SLATE_500}; font-weight:500;">Cobertura distribución prom.</div>
+            st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {_cob_color};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Cobertura distribución prom.</div>
                 <div style="font-size:1.6rem; font-weight:700; color:{_cob_color};">{_prom_cob:.0%}</div>
             </div>""", unsafe_allow_html=True)
 
@@ -4995,5 +5377,209 @@ elif nav_page == "🚚 Predistribución":
                     with open(_matriz_linea_path, 'w', encoding='utf-8') as _mlf:
                         _json_mod.dump(_matriz_linea_actual, _mlf, ensure_ascii=False, indent=2)
                     st.success(f"Matriz actualizada: {_linea_editar} → {len(_nuevas_tiendas_l)} tiendas. Re-corre el análisis para ver el efecto.")
+
+
+# ══════════════════════════════════════════════════════════════
+#  DIARIO DE GESTIÓN — Sección propia en sidebar
+# ══════════════════════════════════════════════════════════════
+
+elif nav_page == "📝 Diario de Gestión":
+    import json as _json_diario
+    from datetime import datetime as _dt_diario
+
+    st.markdown(f'<div class="section-header"><h3>📝 Diario de Gestión</h3><span class="live-badge">LOG</span></div>', unsafe_allow_html=True)
+    st.caption("Registra tus acciones semanales y haz seguimiento del impacto de tus decisiones. Las entradas se organizan por fecha.")
+
+    # Inicializar session state para el diario
+    if "_diario_entries" not in st.session_state:
+        st.session_state["_diario_entries"] = []
+
+    # ── Layout: 2 tabs — Nueva entrada | Gestión de datos ──
+    _diario_tab1, _diario_tab2 = st.tabs(["✏️ Nueva entrada", "📂 Importar / Exportar"])
+
+    # ════════════════ TAB 1: Nueva entrada ════════════════
+    with _diario_tab1:
+        st.markdown(f"""<div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border);
+            border-radius:12px; padding:16px; margin-bottom:16px;">
+            <span style="font-weight:600; color:var(--capi-text); font-size:0.92rem;">Nueva entrada</span>
+        </div>""", unsafe_allow_html=True)
+
+        _d_col1, _d_col2 = st.columns(2)
+        with _d_col1:
+            _d_semana = st.text_input("Semana", value=f"semana_{_dt_diario.now().strftime('%Y%m%d')}",
+                                       key="diario_semana", help="Ej: semana_0, semana_1, 2026-05-05")
+        with _d_col2:
+            _d_categoria = st.selectbox("Categoría", [
+                "Reposición", "Markdown / Precio", "Negociación Terceras",
+                "Transferencias", "Predistribución", "Liquidación", "Otro"
+            ], key="diario_cat")
+
+        _d_accion = st.text_area(
+            "¿Qué acción tomaste?",
+            placeholder="Ej: Reposé 15 SKUs de MARQUIS a tiendas con quiebre. Pedí markdown de 30% en 8 SKUs SILBON con >20 sem antigüedad.",
+            key="diario_accion", height=100,
+        )
+
+        _d_skus = st.text_input(
+            "SKUs o marcas afectadas (opcional)",
+            placeholder="Ej: MARQUIS, NAVIGATA, SKU-12345",
+            key="diario_skus",
+        )
+
+        _d_resultado = st.text_input(
+            "Resultado esperado (opcional)",
+            placeholder="Ej: Reducir capital parado en S/ 15,000. Mejorar ST en 2pp.",
+            key="diario_resultado",
+        )
+
+        if st.button("💾 Guardar entrada", key="btn_diario_save", use_container_width=True):
+            if _d_accion.strip():
+                _entry = {
+                    "timestamp": _dt_diario.now().isoformat(),
+                    "semana": _d_semana,
+                    "categoria": _d_categoria,
+                    "accion": _d_accion.strip(),
+                    "skus_marcas": _d_skus.strip() if _d_skus else "",
+                    "resultado_esperado": _d_resultado.strip() if _d_resultado else "",
+                }
+                st.session_state["_diario_entries"].append(_entry)
+                st.success(f"Entrada guardada — {_d_categoria}: {_d_accion[:60]}...")
+            else:
+                st.warning("Escribe la acción que tomaste antes de guardar.")
+
+    # ════════════════ TAB 2: Importar / Exportar ════════════════
+    with _diario_tab2:
+        st.caption("Exporta tu diario como respaldo o importa entradas de sesiones anteriores.")
+
+        _ie_col1, _ie_col2 = st.columns(2)
+        with _ie_col1:
+            st.markdown("**Exportar**")
+            if st.session_state["_diario_entries"]:
+                _diario_json = _json_diario.dumps(st.session_state["_diario_entries"], indent=2, ensure_ascii=False)
+                st.download_button(
+                    "📥 Descargar diario (.json)",
+                    data=_diario_json,
+                    file_name=f"diario_gestion_{_dt_diario.now().strftime('%Y%m%d')}.json",
+                    mime="application/json",
+                    key="dl_diario",
+                    use_container_width=True,
+                )
+            else:
+                st.info("No hay entradas para exportar.")
+
+        with _ie_col2:
+            st.markdown("**Importar**")
+            _diario_upload = st.file_uploader(
+                "Cargar diario (.json)", type=["json"],
+                accept_multiple_files=False, key="diario_uploader",
+            )
+            if _diario_upload:
+                try:
+                    _loaded_entries = _json_diario.load(_diario_upload)
+                    if isinstance(_loaded_entries, list):
+                        _existing_ts = {e.get("timestamp") for e in st.session_state["_diario_entries"]}
+                        _new_count = 0
+                        for _le in _loaded_entries:
+                            if _le.get("timestamp") not in _existing_ts:
+                                st.session_state["_diario_entries"].append(_le)
+                                _new_count += 1
+                        st.success(f"{_new_count} entradas nuevas importadas.")
+                    else:
+                        st.error("Formato inválido (debe ser una lista).")
+                except Exception as _e:
+                    st.error(f"Error: {_e}")
+
+    # ══════════════════════════════════════════════════════════════
+    #  HISTORIAL — Vista principal por fecha (siempre visible)
+    # ══════════════════════════════════════════════════════════════
+
+    st.markdown("---")
+    st.markdown(f"""<div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border);
+        border-radius:12px; padding:12px 16px; margin-bottom:12px;">
+        <span style="font-weight:600; color:var(--capi-text); font-size:0.92rem;">Historial de acciones</span>
+    </div>""", unsafe_allow_html=True)
+
+    _all_entries = st.session_state.get("_diario_entries", [])
+
+    if _all_entries:
+        # Extraer fechas únicas para filtro
+        _fechas_unicas = sorted(set(e.get("timestamp", "")[:10] for e in _all_entries if e.get("timestamp")), reverse=True)
+
+        # Filtros
+        _filt_col1, _filt_col2 = st.columns([2, 1])
+        with _filt_col1:
+            _filtro_fechas = st.multiselect(
+                "Filtrar por fecha",
+                options=_fechas_unicas,
+                default=[],
+                key="diario_filtro_fecha",
+                help="Deja vacío para ver todas las entradas",
+            )
+        with _filt_col2:
+            _filtro_cat = st.multiselect(
+                "Filtrar por categoría",
+                options=["Reposición", "Markdown / Precio", "Negociación Terceras",
+                         "Transferencias", "Predistribución", "Liquidación", "Otro"],
+                default=[],
+                key="diario_filtro_cat",
+            )
+
+        # Aplicar filtros
+        _filtered = _all_entries
+        if _filtro_fechas:
+            _filtered = [e for e in _filtered if e.get("timestamp", "")[:10] in _filtro_fechas]
+        if _filtro_cat:
+            _filtered = [e for e in _filtered if e.get("categoria", "") in _filtro_cat]
+
+        st.caption(f"{len(_filtered)} de {len(_all_entries)} entradas")
+
+        # Agrupar por fecha
+        _fechas_dict = {}
+        for _e in _filtered:
+            _fecha = _e.get("timestamp", "")[:10]
+            if _fecha not in _fechas_dict:
+                _fechas_dict[_fecha] = []
+            _fechas_dict[_fecha].append(_e)
+
+        _cat_colors = {
+            "Reposición": TEAL_600, "Markdown / Precio": STATUS_ALTO,
+            "Negociación Terceras": STATUS_SOBRESTOCK, "Transferencias": "#6366F1",
+            "Predistribución": "#8B5CF6", "Liquidación": STATUS_LIQUIDAR, "Otro": TH_TEXT2_PY,
+        }
+
+        for _fecha_key in sorted(_fechas_dict.keys(), reverse=True):
+            _fecha_entries = _fechas_dict[_fecha_key]
+            # Nombre del día
+            try:
+                _dt_obj = _dt_diario.strptime(_fecha_key, "%Y-%m-%d")
+                _dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+                _dia_nombre = _dias[_dt_obj.weekday()]
+                _fecha_display = f"{_dia_nombre} {_fecha_key}"
+            except Exception:
+                _fecha_display = _fecha_key
+
+            st.markdown(f"""<div style="background:var(--capi-bg-card); border:1px solid var(--capi-border);
+                border-radius:10px; padding:10px 14px; margin:8px 0 4px 0;">
+                <span style="font-weight:700; color:var(--capi-text); font-size:0.95rem;">{_fecha_display}</span>
+                <span style="color:var(--capi-text3); font-size:0.8rem; float:right;">{len(_fecha_entries)} acción{"es" if len(_fecha_entries) > 1 else ""}</span>
+            </div>""", unsafe_allow_html=True)
+
+            for _e in _fecha_entries:
+                _cat_color = _cat_colors.get(_e.get("categoria", ""), TH_TEXT2_PY)
+                _hora = _e.get("timestamp", "")[11:16] if len(_e.get("timestamp", "")) > 16 else ""
+                _semana_tag = f" · {_e.get('semana', '')}" if _e.get('semana') else ""
+                st.markdown(f"""<div style="background:var(--capi-bg-surface); border-left:3px solid {_cat_color};
+                    border-radius:8px; padding:10px 14px; margin:4px 0 6px 16px; font-size:0.88rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <span style="color:{_cat_color}; font-weight:600; font-size:0.8rem;">{_e.get('categoria', '')}</span>
+                        <span style="color:var(--capi-text3); font-size:0.72rem;">{_hora}{_semana_tag}</span>
+                    </div>
+                    <div style="color:var(--capi-text); line-height:1.4;">{_e.get('accion', '')}</div>
+                    {"<div style='color:var(--capi-text2); font-size:0.82rem; margin-top:4px;'>SKUs: " + _e.get('skus_marcas', '') + "</div>" if _e.get('skus_marcas') else ""}
+                    {"<div style='color:var(--capi-text2); font-size:0.82rem; margin-top:2px;'>Resultado esperado: " + _e.get('resultado_esperado', '') + "</div>" if _e.get('resultado_esperado') else ""}
+                </div>""", unsafe_allow_html=True)
+
+    else:
+        st.info("No hay entradas aún. Usa la pestaña 'Nueva entrada' para registrar tu primera acción.")
 
 
