@@ -40,6 +40,18 @@ try:
 except ImportError:
     _HAS_SNAPSHOTS = False
 
+# Auto-cargar bases históricas como snapshots en cold start
+if _HAS_SNAPSHOTS and not st.session_state.get("_snapshots_initialized"):
+    try:
+        _existing_weeks = snapshots_engine.list_available_weeks()
+        if len(_existing_weeks) < 2:
+            _hist_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data2", "bases antiguas")
+            if os.path.isdir(_hist_dir):
+                snapshots_engine.loader.load_all_bases_antiguas(_hist_dir, force=False)
+        st.session_state["_snapshots_initialized"] = True
+    except Exception:
+        st.session_state["_snapshots_initialized"] = True
+
 # Cargar .env antes de importar chat_engine
 try:
     from dotenv import load_dotenv
@@ -1070,6 +1082,13 @@ if run_btn:
                     _shutil_cp.copy2(tmp_path, _base_copy_path)
                     st.session_state["_base_profundidad_path"] = _base_copy_path
 
+                    # Guardar snapshot ANTES de transformar (columnas originales Ripley)
+                    if _HAS_SNAPSHOTS:
+                        try:
+                            snapshots_engine.process_micro_profundidad(_base_copy_path, force=True)
+                        except Exception:
+                            pass  # Silencioso — no bloquear el flujo
+
                     plantilla_path = tmp_path.replace(".xlsx", "_plantilla.xlsx")
                     etl_profundidad.transform(tmp_path, output_path=plantilla_path)
                     os.unlink(tmp_path)
@@ -1079,12 +1098,12 @@ if run_btn:
             with st.spinner("Ejecutando análisis..."):
                 results = motor_v2.run_analysis(tmp_path, params=params_ui, formato=formato_input)
 
-                # Auto-guardar snapshot semanal (Prompt B) — antes del unlink
-                if _HAS_SNAPSHOTS:
+                # Snapshot para formato plantilla (non-profundidad uploads)
+                if _HAS_SNAPSHOTS and not st.session_state.get("_base_profundidad_path"):
                     try:
-                        snapshots_engine.process_micro_profundidad(tmp_path, force=False)
+                        snapshots_engine.process_micro_profundidad(tmp_path, force=True)
                     except Exception:
-                        pass  # Silencioso — no bloquear el flujo si ya existe
+                        pass
 
                 os.unlink(tmp_path)
                 st.session_state["results"] = results
