@@ -8,8 +8,8 @@ Lee la plantilla de 4 pestañas del cliente y produce:
   - Acciones de precio con fix de sobrestock residual
 
 Thresholds default (configurables):
-  CRÍTICO       < 4 sem
-  PRE-CRÍTICO   4–8 sem
+  QUIEBRE       < 4 sem
+  PRE-QUIEBRE   4–8 sem
   ÓPTIMO        8–12 sem
   ALTO          12–16 sem
   SOBRESTOCK    > 16 sem
@@ -21,11 +21,29 @@ Thresholds default (configurables):
   MUERTO            rango 6+ meses (obsoleto sin venta)
 """
 
+import json
+import os
 import pandas as pd
 import numpy as np
 from datetime import datetime
 from math import ceil, floor
 from collections import defaultdict
+
+# Sistema unificado de clasificación (introducido Sprint 1 Capi — Prompt A1)
+from taxonomia import Estado, classify_coverage as _taxonomia_classify
+from config import COLOR_MAP as _NEW_COLOR_MAP, ESTADO_ORDEN as _NEW_ESTADO_ORDEN
+
+# ── Lead times por marca (Prompt F — Escenario 2) ──
+_LEAD_TIMES_PATH = os.path.join(os.path.dirname(__file__), 'config_lead_times.json')
+try:
+    with open(_LEAD_TIMES_PATH, 'r') as _f:
+        _LEAD_TIMES_RAW = json.load(_f)
+    LEAD_TIMES = {k.upper().strip(): v for k, v in _LEAD_TIMES_RAW.items()
+                  if not k.startswith('_')}
+    LEAD_TIME_DEFAULT = _LEAD_TIMES_RAW.get('_default', 14)
+except (FileNotFoundError, json.JSONDecodeError):
+    LEAD_TIMES = {}
+    LEAD_TIME_DEFAULT = 14
 
 
 # ─────────────────────────────────────────────────────────────
@@ -33,8 +51,8 @@ from collections import defaultdict
 # ─────────────────────────────────────────────────────────────
 
 DEFAULT_PARAMS = {
-    "umbral_critico":    4,    # < 4 sem → CRÍTICO
-    "umbral_precritico": 8,    # 4–8 sem → PRE-CRÍTICO
+    "umbral_critico":    4,    # < 4 sem → QUIEBRE
+    "umbral_precritico": 8,    # 4–8 sem → PRE-QUIEBRE
     "umbral_optimo":    12,    # 8–12 sem → ÓPTIMO
     "umbral_alto":      16,    # 12–16 sem → ALTO  (>16 → SOBRESTOCK)
     "umbral_edad":      26,    # semanas de antigüedad para LIQUIDAR
@@ -331,23 +349,10 @@ def load_from_plantilla(path, params=None):
 #  CLASIFICACIÓN DE COBERTURA
 # ─────────────────────────────────────────────────────────────
 
-COLOR_MAP = {
-    "CRÍTICO":          "#B71C1C",  # rojo oscuro
-    "PRE-CRÍTICO":      "#E65100",  # naranja oscuro
-    "ÓPTIMO":           "#1B5E20",  # verde oscuro
-    "ALTO":             "#F57F17",  # ámbar
-    "SOBRESTOCK":       "#BF360C",  # naranja-rojo
-    "LIQUIDAR":         "#880E4F",  # púrpura-rojo
-    "NUEVO SIN VENTA":  "#78909C",  # gris azulado (recién llegó, aún sin tracción)
-    "DORMIDO":          "#5D4037",  # marrón (debería estar vendiendo)
-    "MUERTO":           "#212121",  # gris muy oscuro (obsoleto sin venta)
-}
-
-ESTADO_ORDEN = {
-    "CRÍTICO": 0, "PRE-CRÍTICO": 1, "ÓPTIMO": 2, "ALTO": 3,
-    "SOBRESTOCK": 4, "LIQUIDAR": 5,
-    "NUEVO SIN VENTA": 6, "DORMIDO": 7, "MUERTO": 8,
-}
+# COLOR_MAP y ESTADO_ORDEN migrados a config.py (Sprint 1 Capi, Prompt A).
+# Re-exportados para backward-compat con app_streamlit.py que usa motor_v2.ESTADO_ORDEN
+COLOR_MAP = _NEW_COLOR_MAP
+ESTADO_ORDEN = _NEW_ESTADO_ORDEN
 
 # Mapeo de rango_antiguedad a subcategoría SIN VENTA
 _RANGO_SIN_VENTA = {
@@ -362,48 +367,20 @@ _RANGO_SIN_VENTA = {
 
 def classify_coverage(cob, edad_semanas, params, rango_antiguedad=None):
     """
-    cob               : cobertura en semanas (None = sin venta)
+    Wrapper que delega a taxonomia.classify_coverage (módulo unificado).
+
+    Mantenido aquí por backward-compat con código legacy que importa
+    classify_coverage desde motor_v2. La lógica vive en taxonomia.py
+    desde Sprint 1 Capi (Prompt A1).
+
+    cob               : cobertura en semanas (None o NaN = sin venta)
     edad_semanas      : antigüedad del producto en semanas
-    params            : dict de parámetros
-    rango_antiguedad  : str del rango (RANGO 0_3, RANGO 3_6, etc.) para subdividir SIN VENTA
+    params            : dict de parámetros (compatible con DEFAULT_PARAMS v1)
+    rango_antiguedad  : str del rango (RANGO 0_3, etc.) para subdividir SIN VENTA
 
     Retorna: (estado_str, color_hex)
     """
-    if cob is None or (isinstance(cob, float) and pd.isna(cob)):
-        # Subdividir SIN VENTA por antigüedad del producto
-        rango = str(rango_antiguedad or '').strip()
-        sub = _RANGO_SIN_VENTA.get(rango, None)
-        if sub is None:
-            # Sin rango definido → usar edad en semanas como fallback
-            if edad_semanas is not None:
-                if edad_semanas < 13:    # ~3 meses
-                    sub = "NUEVO SIN VENTA"
-                elif edad_semanas < 26:  # ~6 meses
-                    sub = "DORMIDO"
-                else:
-                    sub = "MUERTO"
-            else:
-                sub = "DORMIDO"  # default conservador
-        return sub, COLOR_MAP[sub]
-
-    uc  = params["umbral_critico"]
-    upc = params["umbral_precritico"]
-    uo  = params["umbral_optimo"]
-    ua  = params["umbral_alto"]
-    ue  = params["umbral_edad"]
-
-    if cob > ua:
-        if edad_semanas is not None and edad_semanas > ue:
-            return "LIQUIDAR", COLOR_MAP["LIQUIDAR"]
-        return "SOBRESTOCK", COLOR_MAP["SOBRESTOCK"]
-    elif cob >= uo:
-        return "ALTO", COLOR_MAP["ALTO"]
-    elif cob >= upc:
-        return "ÓPTIMO", COLOR_MAP["ÓPTIMO"]
-    elif cob >= uc:
-        return "PRE-CRÍTICO", COLOR_MAP["PRE-CRÍTICO"]
-    else:
-        return "CRÍTICO", COLOR_MAP["CRÍTICO"]
+    return _taxonomia_classify(cob, edad_semanas, params, rango_antiguedad)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -564,6 +541,24 @@ def _redondear_a_curva(cantidad, curva):
     return n_curvas * curva
 
 
+def _es_temporada_opuesta(temporada: str, mes_actual: int = None) -> bool:
+    """
+    Detecta si un SKU de temporada estacional está fuera de su temporada.
+    PV en meses 4-9 (abr-sep) = opuesta. OI en meses 10-3 (oct-mar) = opuesta.
+    TT (todo tiempo) nunca es opuesta.
+    """
+    if mes_actual is None:
+        mes_actual = datetime.now().month
+    temp = str(temporada).strip().upper()
+    if temp == 'TT' or not temp:
+        return False
+    if temp == 'PV' and mes_actual in (4, 5, 6, 7, 8, 9):
+        return True
+    if temp == 'OI' and mes_actual in (10, 11, 12, 1, 2, 3):
+        return True
+    return False
+
+
 def build_reposiciones(df_cobertura, params):
     """
     Sugerencias de reposición para todos los SKUs cuya cobertura está
@@ -572,14 +567,22 @@ def build_reposiciones(df_cobertura, params):
     a_reponer = ceil(cob_target × avg - stock_actual), redondeado hacia arriba
     a la curva del producto (si la línea tiene curva definida).
 
-    Incluye SKUs en estado CRÍTICO, ÓPTIMO y ALTO siempre que su cobertura
+    Incluye SKUs en estado QUIEBRE, ÓPTIMO y ALTO siempre que su cobertura
     actual < cob_target. Excluye SOBRESTOCK, LIQUIDAR y SIN VENTA.
 
     SKUs cuya línea no tiene curva en CURVAS_POR_LINEA se marcan con
     warning_curva = True y se les asigna a_reponer = a_reponer_base (sin redondeo).
 
+    Prompt F — Flags de riesgo:
+      - quiebre_inminente: cobertura_dias < lead_time de la marca (Esc. 2)
+      - requiere_proveedor: tercera con stock_cd == 0 (Esc. 4)
+      - descontinuado_temporal: temporada opuesta + edad > 16 sem (Esc. 5)
+      - riesgo_repo: cualquiera de los 3 flags anteriores activo
+
     Retorna DataFrame con columnas adicionales:
-      curva, a_reponer_base, n_curvas, warning_curva
+      curva, a_reponer_base, n_curvas, warning_curva,
+      lead_time_dias, quiebre_inminente, requiere_proveedor,
+      descontinuado_temporal, riesgo_repo
     """
     cob_target = params["cob_target"]
     uc         = params["umbral_critico"]
@@ -592,7 +595,11 @@ def build_reposiciones(df_cobertura, params):
                             'OSCAR DE LA RENTA', 'US POLO', 'NAUTICA'}
 
     # Todos los SKUs con cobertura por debajo del target que tienen venta
-    _estados_excluir = {'SOBRESTOCK', 'LIQUIDAR', 'NUEVO SIN VENTA', 'DORMIDO', 'MUERTO'}
+    # NOTA Sprint 1: agregado Estado.ESTANCADO (cob >52 sin venta es problema, no repo).
+    _estados_excluir = {
+        Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.LIQUIDAR,
+        Estado.LANZAMIENTO, Estado.DORMIDO, Estado.MUERTO,
+    }
     _mask = (
         (~df_cobertura['estado'].isin(_estados_excluir)) &
         (df_cobertura['cobertura_sem'] < cob_target)
@@ -611,6 +618,7 @@ def build_reposiciones(df_cobertura, params):
 
     rows = []
     warnings_sin_curva = set()
+    mes_actual = datetime.now().month
 
     for _, r in candidatos.iterrows():
         avg = r['prom_vta_uds']
@@ -650,14 +658,37 @@ def build_reposiciones(df_cobertura, params):
 
         # Nivel de urgencia según estado
         estado = r['estado']
-        if estado == 'CRÍTICO':
-            urgencia = '🔴 CRÍTICO'
+        if estado == Estado.QUIEBRE:
+            urgencia = '🔴 QUIEBRE'
         elif (cob or 999) < uc:
-            urgencia = '🔴 CRÍTICO'
+            urgencia = '🔴 QUIEBRE'
         elif cob < cob_target * 0.5:
             urgencia = '🟠 URGENTE'
         else:
             urgencia = '🟡 BAJO'
+
+        # ── Flags de riesgo (Prompt F) ──
+        marca_upper = str(r.get('marca', '')).upper().strip()
+        es_propia = marca_upper in _MARCAS_PROPIAS_REPO
+        stock_cd = int(r.get('stock_cd', 0))
+
+        # Esc. 2: Lead time — quiebre inminente si cob_dias < lead_time
+        lead_time = LEAD_TIMES.get(marca_upper, LEAD_TIME_DEFAULT)
+        cob_dias = (cob or 0) * 7  # semanas → días
+        quiebre_inminente = cob_dias < lead_time
+
+        # Esc. 4: Requiere proveedor — tercera sin stock CD
+        requiere_proveedor = (not es_propia) and (stock_cd <= 0)
+
+        # Esc. 5: Descontinuado temporal — temporada opuesta + edad > 16
+        temporada = str(r.get('temporada', '')).strip().upper()
+        edad = float(r.get('edad_semanas', 0) or 0)
+        descontinuado_temporal = (
+            _es_temporada_opuesta(temporada, mes_actual) and edad > 16
+        )
+
+        # Flag consolidado
+        riesgo_repo = quiebre_inminente or requiere_proveedor or descontinuado_temporal
 
         rows.append({
             'sku':              r['sku'],
@@ -677,10 +708,16 @@ def build_reposiciones(df_cobertura, params):
             'precio_vigente':   r['precio_vigente'],
             'urgencia':         urgencia,
             'warning_curva':    warning_curva,
-            'stock_cd':         int(r.get('stock_cd', 0)),
+            'stock_cd':         stock_cd,
             'pct_descuento':    float(r.get('pct_descuento', 0)),
-            'temporada':        r.get('temporada', ''),
+            'temporada':        temporada,
             'stock_valor_costo': float(r.get('stock_valor_costo', 0)),
+            # Prompt F — flags de riesgo
+            'lead_time_dias':          lead_time,
+            'quiebre_inminente':       quiebre_inminente,
+            'requiere_proveedor':      requiere_proveedor,
+            'descontinuado_temporal':  descontinuado_temporal,
+            'riesgo_repo':             riesgo_repo,
         })
 
     if warnings_sin_curva:
@@ -703,6 +740,18 @@ def build_reposiciones(df_cobertura, params):
         if _excluir.any():
             print(f"[MOTOR] Reposición: excluidas {_excluir.sum()} líneas de marcas propias sin stock CD")
         df_rep = df_rep[~_excluir].reset_index(drop=True)
+
+        # Prompt F — Excluir descontinuados temporales del listado principal de repo
+        # Se mueven a "Repo en Riesgo" en la UI, no se mezclan con repo accionable
+        n_desc = df_rep['descontinuado_temporal'].sum()
+        if n_desc > 0:
+            print(f"[MOTOR] Reposición: {n_desc} líneas de SKUs descontinuados temporales (temporada opuesta + edad>16)")
+
+        # Prompt F — log de quiebres inminentes
+        n_inm = df_rep['quiebre_inminente'].sum()
+        if n_inm > 0:
+            print(f"[MOTOR] Reposición: {n_inm} líneas con quiebre inminente (cob < lead time)")
+
         df_rep = df_rep.sort_values('cobertura_actual').reset_index(drop=True)
     return df_rep
 
@@ -717,7 +766,7 @@ def build_transferencias(df_cobertura, params):
 
     Lógica simplificada:
       - Fuentes: tiendas en SOBRESTOCK o LIQUIDAR del mismo SKU
-      - Destinos: tiendas en CRÍTICO del mismo SKU
+      - Destinos: tiendas en QUIEBRE del mismo SKU
       - Sin restricción de zona ni distancia
       - Cantidad: min(exceso_fuente, déficit_destino)
 
@@ -732,12 +781,15 @@ def build_transferencias(df_cobertura, params):
     for sku in df_cobertura['sku'].unique():
         df_sku = df_cobertura[df_cobertura['sku'] == sku].copy()
 
-        # Fuentes: tiendas con exceso (SOBRESTOCK, LIQUIDAR, DORMIDO, MUERTO)
+        # Fuentes: tiendas con exceso (SOBRESTOCK, ESTANCADO, LIQUIDAR, DORMIDO, MUERTO)
         fuentes  = df_sku[
-            df_sku['estado'].isin(['SOBRESTOCK', 'LIQUIDAR', 'DORMIDO', 'MUERTO'])
+            df_sku['estado'].isin([
+                Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.LIQUIDAR,
+                Estado.DORMIDO, Estado.MUERTO,
+            ])
         ]
-        # Destinos: tiendas que necesitan stock (CRÍTICO, PRE-CRÍTICO)
-        destinos = df_sku[df_sku['estado'].isin(['CRÍTICO', 'PRE-CRÍTICO'])]
+        # Destinos: tiendas que necesitan stock (QUIEBRE, BAJA)
+        destinos = df_sku[df_sku['estado'].isin([Estado.QUIEBRE, Estado.PRE_QUIEBRE])]
 
         if fuentes.empty or destinos.empty:
             continue
@@ -841,12 +893,12 @@ def build_acciones_precio(df_cobertura, df_transferencias, df_maestro, params):
         for _, t in df_transferencias.iterrows():
             transferidas[(t['sku'], t['tienda_origen'])] += t['uds_transferir']
 
-    # Candidatos: SOBRESTOCK, LIQUIDAR, y sin venta (DORMIDO/MUERTO) con stock > 0
-    # NUEVO SIN VENTA (0-3 meses) se excluye: son recién llegados, necesitan tiempo.
+    # Candidatos: SOBRESTOCK, ESTANCADO, LIQUIDAR, y sin venta (DORMIDO/MUERTO) con stock > 0.
+    # LANZAMIENTO (sin venta, <8 sem) se excluye: son recién llegados, necesitan tiempo.
     # DORMIDO y MUERTO sí califican para acción de precio.
-    _estados_sin_venta = {'DORMIDO', 'MUERTO'}
+    _estados_sin_venta = {Estado.DORMIDO, Estado.MUERTO}
     candidatos = df_cobertura[
-        df_cobertura['estado'].isin(['SOBRESTOCK', 'LIQUIDAR']) |
+        df_cobertura['estado'].isin([Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.LIQUIDAR]) |
         ((df_cobertura['estado'].isin(_estados_sin_venta)) & (df_cobertura['stock_total'] > 0))
     ].copy()
 
@@ -875,8 +927,10 @@ def build_acciones_precio(df_cobertura, df_transferencias, df_maestro, params):
 
         if estado in _estados_sin_venta:
             motivos.append(f"PRODUCTO {estado} — {int(stk)} uds en stock, 0 ventas en 4 semanas")
-        elif estado == 'LIQUIDAR':
+        elif estado == Estado.LIQUIDAR:
             motivos.append(f"LIQUIDAR — {cob} sem cobertura + {edad} sem de antigüedad")
+        elif estado == Estado.ESTANCADO:
+            motivos.append(f"ESTANCADO — {cob} sem de cobertura (>52), edad {edad} sem")
         elif uds_trans > 0 and cob_post is not None and cob_post > ua:
             motivos.append(f"SOBRESTOCK residual post-transferencia ({cob_post} sem)")
         else:
@@ -884,9 +938,11 @@ def build_acciones_precio(df_cobertura, df_transferencias, df_maestro, params):
 
         # Descuento base según severidad
         if estado in _estados_sin_venta:
-            dscto_base = 0.30 if estado == 'DORMIDO' else 0.40  # MUERTO más agresivo
-        elif estado == 'LIQUIDAR':
+            dscto_base = 0.30 if estado == Estado.DORMIDO else 0.40  # MUERTO más agresivo
+        elif estado == Estado.LIQUIDAR:
             dscto_base = 0.40
+        elif estado == Estado.ESTANCADO:
+            dscto_base = 0.35  # entre SOBRESTOCK y LIQUIDAR
         elif cob is not None and cob > ua * 2:
             dscto_base = 0.30  # sobrestock severo
         else:
@@ -1038,7 +1094,7 @@ def build_alertas(df_cobertura, df_ventas, params, df_maestro=None):
       🔴 FRENANDO       — sem1 cayó significativamente vs promedio sem2-4
       🟢 ACELERANDO     — sem1 subió significativamente vs promedio sem2-4
       🆕 SIN TRACCIÓN   — edad 3-8 sem, vende <50% del promedio de su categoría
-      🔮 RIESGO CRÍTICO — a ritmo actual, pasa a CRÍTICO en <= 3 semanas
+      🔮 RIESGO QUIEBRE — a ritmo actual, pasa a QUIEBRE en <= 3 semanas
 
     Cambios v3 vs v2:
       - Alertas consolidadas a nivel SKU (no por SKU×Tienda)
@@ -1109,7 +1165,7 @@ def build_alertas(df_cobertura, df_ventas, params, df_maestro=None):
     sku_agg['costo_unit'] = sku_agg['costo_unit'].fillna(0)
     sku_agg['capital_stock'] = sku_agg['stock_total_red'] * sku_agg['costo_unit']
 
-    # Semanas hasta CRÍTICO (usando prom_4sem para estabilidad)
+    # Semanas hasta QUIEBRE (usando prom_4sem para estabilidad)
     sku_agg['sem_hasta_critico'] = sku_agg.apply(
         lambda r: round(max(0, (r['stock_total_red'] / r['prom_4sem']) - uc), 1)
         if r['prom_4sem'] > 0 else None,
@@ -1117,8 +1173,13 @@ def build_alertas(df_cobertura, df_ventas, params, df_maestro=None):
     )
 
     # Estado predominante del SKU (el más grave)
-    _estado_orden = {'CRÍTICO': 0, 'SIN VENTA': 1, 'PRE-CRÍTICO': 2, 'NUEVO SIN VENTA': 3,
-                     'DORMIDO': 4, 'ÓPTIMO': 5, 'ALTO': 6, 'SOBRESTOCK': 7, 'LIQUIDAR': 8}
+    # Sprint 1 Capi: renombrado a Estado.* + agregado ESTANCADO. Orden de
+    # gravedad operativa (más urgente = menor número).
+    _estado_orden = {
+        Estado.QUIEBRE: 0, Estado.LANZAMIENTO: 1, Estado.PRE_QUIEBRE: 2,
+        Estado.DORMIDO: 3, Estado.MUERTO: 4, Estado.OPTIMO: 5,
+        Estado.ALTO: 6, Estado.SOBRESTOCK: 7, Estado.ESTANCADO: 8, Estado.LIQUIDAR: 9,
+    }
     _estado_sku = (df.assign(_ord=df['estado'].map(_estado_orden).fillna(99))
                      .sort_values('_ord')
                      .drop_duplicates('sku')[['sku', 'estado']])
@@ -1208,15 +1269,15 @@ def build_alertas(df_cobertura, df_ventas, params, df_maestro=None):
                            f"Capital: S/ {r['capital_stock']:,.0f}. Evaluar exhibición."),
             })
 
-        # ── ALERTA 5: RIESGO CRÍTICO ──
+        # ── ALERTA 5: RIESGO QUIEBRE ──
         if (r['sem_hasta_critico'] is not None and 0 < r['sem_hasta_critico'] <= 3 and
-                r['estado'] not in ('CRÍTICO', 'SIN VENTA', 'NUEVO SIN VENTA', 'DORMIDO') and
+                r['estado'] not in (Estado.QUIEBRE, Estado.LANZAMIENTO, Estado.DORMIDO, Estado.MUERTO) and
                 r['prom_4sem'] >= vta_min_alerta):
             alertas_sku.append({
-                'tipo': '🔮 RIESGO CRÍTICO',
+                'tipo': '🔮 RIESGO QUIEBRE',
                 'severidad': 2,
                 'detalle': (f"Estado: {r['estado']}. A ritmo actual ({r['prom_4sem']:.0f} uds/sem), "
-                           f"pasa a CRÍTICO en ~{r['sem_hasta_critico']:.0f} sem. "
+                           f"pasa a QUIEBRE en ~{r['sem_hasta_critico']:.0f} sem. "
                            f"Stock: {int(r['stock_total_red'])} uds · S/ {r['capital_stock']:,.0f}."),
             })
 
@@ -1400,7 +1461,7 @@ def _mensaje_oportunidad(stock_actual, vta_sem, cob_actual, stock_transito):
 
 def _mensaje_lento(stock_total, edad, capital_parado, estado):
     """Mensaje coloquial para 🔴 Mercadería lenta."""
-    if estado in ('SIN VENTA', 'NUEVO SIN VENTA', 'DORMIDO', 'MUERTO'):
+    if estado in (Estado.LANZAMIENTO, Estado.DORMIDO, Estado.MUERTO):
         cuerpo = f"No ha registrado venta en las últimas 4 semanas. Tienes {int(stock_total)} uds en tienda"
     else:
         cuerpo = f"Lleva {int(edad)} semanas en catálogo y tienes {int(stock_total)} uds en tienda"
@@ -1412,15 +1473,15 @@ def _accion_sugerida(estado, edad, stock_transito, umbral_edad_liquidar=20):
     Decide la acción concreta según estado + edad + tránsito.
     Lógica explícita, documentada en el plan aprobado.
     """
-    if estado == 'CRÍTICO':
+    if estado == Estado.QUIEBRE:
         if stock_transito > 0:
             return "Refuerza exhibición en vitrina principal. Reposición en camino."
         return "Pide reposición urgente al CD."
-    if estado == 'LIQUIDAR' or (edad is not None and edad >= umbral_edad_liquidar):
+    if estado in (Estado.LIQUIDAR, Estado.ESTANCADO) or (edad is not None and edad >= umbral_edad_liquidar):
         return "Consulta al buyer si aplicamos marcado de precio."
-    if estado == 'SOBRESTOCK':
+    if estado == Estado.SOBRESTOCK:
         return "Reubica al piso de venta, zona de alto tráfico."
-    if estado in ('SIN VENTA', 'NUEVO SIN VENTA', 'DORMIDO', 'MUERTO'):
+    if estado in (Estado.LANZAMIENTO, Estado.DORMIDO, Estado.MUERTO):
         return "Reubica al piso de venta. Si no mueve, consulta al buyer."
     # Fallback defensivo
     return "Revisa con el buyer."
@@ -1791,9 +1852,9 @@ def build_briefing(df_cobertura, df_ventas, summary, params):
     situacion = (f"{total} combinaciones SKU×Tienda analizadas. "
                  f"Stock total valorizado: S/ {stock_valor:,.0f} a costo.")
     if pct_critico > 20:
-        situacion += f" ⚠️ {pct_critico:.0f}% del portafolio en estado CRÍTICO — situación de desabastecimiento."
+        situacion += f" ⚠️ {pct_critico:.0f}% del portafolio en estado QUIEBRE — situación de desabastecimiento."
     elif pct_critico > 0:
-        situacion += f" {s['n_critico']} combo(s) en CRÍTICO requieren reposición inmediata."
+        situacion += f" {s['n_critico']} combo(s) en QUIEBRE requieren reposición inmediata."
     if pct_sobre > 30:
         situacion += f" {pct_sobre:.0f}% en SOBRESTOCK/LIQUIDAR — capital inmovilizado importante."
 
@@ -2166,6 +2227,14 @@ def _classify_aging_action(row):
         msg = (f"{int(edad)} sem · S/{cap:,.0f} · {dscto*100:.0f}% dscto · ST {st_rate*100:.1f}%")
         return ('EMPUJE', '#84cc16', msg, sug)
 
+    # ── MONITOREAR: 4-8 sem sin tracción, capital significativo ──
+    # (Agregado 2026-05-12) Última ventana antes que el SKU pase a DORMIDO (8+ sem sin venta).
+    # NO es acción agresiva — solo visibilidad. Franco decide si interviene o espera.
+    if edad >= 4 and edad < 8 and st_rate < 0.02 and cap >= 5000:
+        sug = "Validar exhibición + comunicación de precio. Si no se mueve esta semana, pasa a DORMIDO."
+        msg = (f"{int(edad)} sem · S/{cap:,.0f} · ST {st_rate*100:.1f}% · sin venta")
+        return ('MONITOREAR', '#0ea5e9', msg, sug)
+
     # ── Sin acción requerida (fresco o ya cubierto) ──
     return ('OK', '#10b981', '', '')
 
@@ -2174,7 +2243,8 @@ def build_aging_analysis(df_cob, params):
     """
     Construye el análisis de Ventana de Mercadería.
 
-    Clasifica cada SKU×Tienda en 4 acciones de aging:
+    Clasifica cada SKU×Tienda en 5 acciones de aging:
+      MONITOREAR — 4-8 sem, ST <2%, cap >=S/5K (última rampa antes de DORMIDO)
       EMPUJE    — 8-16 sem, aún rescatable con exhibición
       MARKDOWN  — 16-26 sem, necesita descuento progresivo
       NEGOCIAR  — tercera >16 sem con capital alto, reunión con proveedor
@@ -2253,6 +2323,8 @@ def build_aging_analysis(df_cob, params):
         'n_zona_riesgo':     int(_n_riesgo),
         'capital_total':     float(_capital_total),
         'dist_edad':         _dist_edad,
+        'n_monitorear':      int((df['accion_aging'] == 'MONITOREAR').sum()),
+        'capital_monitorear': float(df.loc[df['accion_aging'] == 'MONITOREAR', 'stock_valor_costo'].sum()),
         'n_empuje':          int((df['accion_aging'] == 'EMPUJE').sum()),
         'capital_empuje':    float(df.loc[df['accion_aging'] == 'EMPUJE', 'stock_valor_costo'].sum()),
         'n_markdown':        int((df['accion_aging'] == 'MARKDOWN').sum()),
@@ -2268,7 +2340,7 @@ def build_aging_analysis(df_cob, params):
     # Sell-through proxy para deduplicación a nivel SKU
     _st_col = 'prom_vta_uds'
     top_ejemplos = {}
-    for _acc in ['EMPUJE', 'MARKDOWN', 'NEGOCIAR', 'LIQUIDAR']:
+    for _acc in ['MONITOREAR', 'EMPUJE', 'MARKDOWN', 'NEGOCIAR', 'LIQUIDAR']:
         _df_acc = df[df['accion_aging'] == _acc].copy()
         if _df_acc.empty:
             top_ejemplos[_acc] = []
@@ -2883,12 +2955,22 @@ def build_ly_comparison(df_cob, semana_actual=None):
         semana_actual = date.today().isocalendar()[1]
 
     # ── Ticket promedio ACTUAL (desde df_cob, nivel SKU deduplicado) ──
+    # BUG FIX 2026-05-12: vta_uds_4sem debe sumar prom_vta_uds de TODAS las tiendas
+    # del SKU, no de una sola (drop_duplicates tomaba la primera). vta_soles_4sem
+    # sí está agregado a nivel SKU (viene del maestro), drop_duplicates OK ahí.
+    # Antes: ticket inflado ~10-20x según # tiendas donde vende el SKU.
     _df_sku = df_cob.drop_duplicates('sku')[['sku', 'marca']].copy()
+
     if 'vta_soles_4sem' in df_cob.columns:
-        _df_sku['vta_soles_4sem'] = df_cob.drop_duplicates('sku')['vta_soles_4sem'].values
+        # Vta S/ ya está agregada a nivel SKU en el maestro → drop_duplicates correcto
+        _vta_soles_por_sku = df_cob.drop_duplicates('sku').set_index('sku')['vta_soles_4sem']
+        _df_sku['vta_soles_4sem'] = _df_sku['sku'].map(_vta_soles_por_sku).fillna(0)
     else:
         _df_sku['vta_soles_4sem'] = 0
-    _df_sku['vta_uds_4sem'] = df_cob.drop_duplicates('sku')['prom_vta_uds'].values * 4
+
+    # Vta uds 4sem = SUMA prom_vta_uds × 4 across todas las tiendas del SKU
+    _vta_uds_por_sku = df_cob.groupby('sku')['prom_vta_uds'].sum() * 4
+    _df_sku['vta_uds_4sem'] = _df_sku['sku'].map(_vta_uds_por_sku).fillna(0)
 
     # Global
     _vta_soles_total = _df_sku['vta_soles_4sem'].sum()
@@ -3214,6 +3296,307 @@ def build_forecast_marca(df_cob, horizonte_semanas=8, semana_actual=None):
 
 
 # ─────────────────────────────────────────────────────────────
+#  SALUD DEL STOCK — Health Score (Prompt C)
+# ─────────────────────────────────────────────────────────────
+
+def _classify_snapshot_estados(df, params=None):
+    """
+    Clasifica cada fila de un snapshot (SKU-level) en uno de los 10 estados.
+
+    Parámetros
+    ----------
+    df     : DataFrame con columnas cobertura_sem, edad_semanas, rango_antiguedad
+    params : dict compatible con DEFAULT_PARAMS (opcional, usa defaults)
+
+    Retorna
+    -------
+    Series de strings con el estado de cada fila.
+    """
+    p = {**DEFAULT_PARAMS, **(params or {})}
+    estados = []
+    for _, row in df.iterrows():
+        cob = row.get('cobertura_sem')
+        edad = row.get('edad_semanas', 0)
+        rango = row.get('rango_antiguedad', None)
+        est, _ = classify_coverage(cob, edad, p, rango)
+        estados.append(est)
+    return pd.Series(estados, index=df.index, name='estado')
+
+
+def _score_cobertura(pct_optimo_alto):
+    """
+    Componente 1 — Cobertura (25%).
+    % de SKUs activos con stock en ÓPTIMO + ALTO.
+    Escala: 0% → 0, 35%+ → 100 (lineal).
+    Calibrado v2: P75 real ~28%, mediana ~18%. Techo 35% permite
+    que las mejores marcas alcancen 80+ sin saturar todo en 100.
+    (v1 usaba 50% — inalcanzable, comprimía a todas debajo de 60.)
+    """
+    return min(pct_optimo_alto / 0.35, 1.0) * 100
+
+
+def _score_quiebre(pct_quiebre):
+    """
+    Componente 2 — Quiebre (20%).
+    Inverso de % SKUs activos en QUIEBRE + PRE-QUIEBRE.
+    Escala: 0% → 100, 40%+ → 0 (lineal invertido).
+    Calibrado v2: mediana real ~22%, P75 ~30%. Techo 40% permite
+    discriminar entre marcas con quiebre moderado vs severo.
+    (v1 usaba 30% — 76% de marcas sacaban <50, sin discriminación.)
+    """
+    return max(1.0 - pct_quiebre / 0.40, 0.0) * 100
+
+
+def _score_sobrestock(pct_exceso):
+    """
+    Componente 3 — Sobrestock / Exceso de inventario (15%).
+    Mide % de SKUs en estados de exceso: SOBRESTOCK, ESTANCADO, DORMIDO, MUERTO, LIQUIDAR.
+    Escala inversa: 0% exceso → 100, 80%+ exceso → 0.
+    Calibrado v2: mediana real ~55%, P75 ~65%. Techo 80% permite
+    que marcas con 40-50% exceso (mejorables) saquen 40-50 en vez de <15.
+    (v1 usaba 60% — 95% de marcas sacaban <30, sin discriminación.)
+    """
+    return max(1.0 - pct_exceso / 0.80, 0.0) * 100
+
+
+def _score_eficiencia(rotacion):
+    """
+    Componente 4 — Eficiencia de Capital (20%).
+    Rotación = Venta a Costo / Stock valor costo (misma base).
+    Escala: 0 → 0, 1.2x+ → 100 (lineal).
+    Calibrado: P75 rotación a costo es ~1.21x, mediana 0.90x.
+    """
+    return min(rotacion / 1.2, 1.0) * 100
+
+
+def _score_margen(margen_pct):
+    """
+    Componente 5 — Margen (20%).
+    Contribución / Venta.
+    Escala: -50%→ -100, 0% → 0, 45%+ → 100 (lineal, permite negativos).
+    Calibrado: P75 real de marcas Ripley es ~38.6%.
+    Margen negativo penaliza (destrucción de valor).
+    """
+    if margen_pct < 0:
+        # Penalidad: margen -50% → score -100 (lineal)
+        return max(margen_pct / 0.50, -1.0) * 100
+    return min(margen_pct / 0.45, 1.0) * 100
+
+
+# Pesos del Health Score compuesto
+_HEALTH_WEIGHTS = {
+    'cobertura':   0.25,   # % SKUs en ÓPTIMO + ALTO (más = mejor)
+    'quiebre':     0.20,   # % SKUs en QUIEBRE + PRE-QUIEBRE (menos = mejor)
+    'sobrestock':  0.15,   # % SKUs en exceso: SOBRESTOCK/ESTANCADO/DORMIDO/MUERTO/LIQUIDAR (menos = mejor)
+    'eficiencia':  0.20,   # Rotación a costo (más = mejor)
+    'margen':      0.20,   # Contribución / Venta (más = mejor)
+}
+
+# Estados que representan exceso de inventario (capital parado)
+_ESTADOS_EXCESO = {Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.DORMIDO,
+                   Estado.MUERTO, Estado.LIQUIDAR}
+
+
+def build_health_score(df_snapshot, grupo_cols=None, params=None):
+    """
+    Calcula el Health Score compuesto por grupo de agrupación.
+
+    El score va de 0 (stock en pésimo estado) a 100 (stock perfecto) y se
+    compone de 5 indicadores ponderados:
+      - Cobertura (25%): % SKUs con stock en ÓPTIMO + ALTO
+      - Quiebre (20%): inverso de % SKUs en QUIEBRE + PRE-QUIEBRE
+      - Sobrestock (15%): inverso de % SKUs en exceso (SOBRESTOCK/ESTANCADO/DORMIDO/MUERTO/LIQUIDAR)
+      - Eficiencia de Capital (20%): rotación a costo (venta costo / stock costo)
+      - Margen (20%): contribución / venta
+
+    Parámetros
+    ----------
+    df_snapshot : DataFrame del snapshot (nivel SKU). Requiere columnas:
+                  cobertura_sem, edad_semanas, rango_antiguedad,
+                  venta_soles, contribucion_soles, stock_valor_costo, stock_total
+    grupo_cols  : lista de columnas para agrupar (ej: ['marca'], ['marca','linea']).
+                  Si None → score global único.
+    params      : dict de parámetros (compatible con DEFAULT_PARAMS)
+
+    Retorna
+    -------
+    DataFrame con columnas:
+      [grupo_cols...], n_skus, n_con_stock,
+      pct_optimo_alto, pct_quiebre,
+      rotacion, margen_pct,
+      score_cobertura, score_quiebre, score_eficiencia, score_margen,
+      health_score, semaforo
+    """
+    df = df_snapshot.copy()
+    p = {**DEFAULT_PARAMS, **(params or {})}
+
+    # ── 1. Clasificar estados si no existen ──
+    if 'estado' not in df.columns:
+        df['estado'] = _classify_snapshot_estados(df, p)
+
+    # ── 1b. Filtrar SKUs inactivos (cadáveres) ──
+    # Un SKU sin stock Y sin venta es ruido estadístico — no tiene impacto
+    # en la salud del inventario. Un MUERTO con stock SÍ cuenta (capital parado).
+    _n_antes = len(df)
+    df = df[~(
+        (df['stock_total'].fillna(0) <= 0) &
+        (df['venta_soles'].fillna(0) <= 0)
+    )].copy()
+    _n_filtrados = _n_antes - len(df)
+
+    # ── 2. Flags derivados ──
+    df['_tiene_stock'] = df['stock_total'].fillna(0) > 0
+    df['_es_optimo_alto'] = df['estado'].isin({Estado.OPTIMO, Estado.ALTO})
+    df['_es_quiebre'] = df['estado'].isin({Estado.QUIEBRE, Estado.PRE_QUIEBRE})
+    df['_es_exceso'] = df['estado'].isin(_ESTADOS_EXCESO)
+
+    # ── 3. Preparar agrupación ──
+    if grupo_cols is None:
+        grupo_cols = []
+    if not grupo_cols:
+        # Score global — agregar dummy para reusar groupby
+        df['_global'] = 'TOTAL'
+        group_keys = ['_global']
+    else:
+        group_keys = list(grupo_cols)
+
+    # ── 4. Agregar métricas por grupo ──
+    agg = df.groupby(group_keys, dropna=False).agg(
+        n_skus=('estado', 'size'),
+        n_con_stock=('_tiene_stock', 'sum'),
+        n_optimo_alto=('_es_optimo_alto', 'sum'),
+        n_quiebre=('_es_quiebre', 'sum'),
+        n_exceso=('_es_exceso', 'sum'),
+        venta_total=('venta_soles', 'sum'),
+        contribucion_total=('contribucion_soles', 'sum'),
+        stock_costo_total=('stock_valor_costo', 'sum'),
+        capital_parado=('stock_valor_costo', lambda x: x[df.loc[x.index, '_es_quiebre'] == False].sum()
+                        if len(x) > 0 else 0),
+    ).reset_index()
+
+    # Capital parado: stock en estados problemáticos (sobrestock + estancado + liquidar + dormido + muerto)
+    _estados_capital_parado = {Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.LIQUIDAR,
+                                Estado.DORMIDO, Estado.MUERTO}
+    capital_parado_series = df.assign(
+        _cap_parado=lambda d: np.where(
+            d['estado'].isin(_estados_capital_parado),
+            d['stock_valor_costo'].fillna(0), 0
+        )
+    ).groupby(group_keys, dropna=False)['_cap_parado'].sum().reset_index()
+    capital_parado_series.columns = [*group_keys, 'capital_parado']
+    agg = agg.drop(columns=['capital_parado'], errors='ignore')
+    agg = agg.merge(capital_parado_series, on=group_keys, how='left')
+
+    # ── 5. Calcular ratios ──
+    agg['pct_optimo_alto'] = np.where(
+        agg['n_con_stock'] > 0,
+        agg['n_optimo_alto'] / agg['n_con_stock'],
+        0.0
+    )
+    # Quiebre sobre SKUs activos (post-filtro de cadáveres), no sobre total
+    agg['pct_quiebre'] = np.where(
+        agg['n_skus'] > 0,
+        agg['n_quiebre'] / agg['n_skus'],
+        0.0
+    )
+    agg['pct_exceso'] = np.where(
+        agg['n_skus'] > 0,
+        agg['n_exceso'] / agg['n_skus'],
+        0.0
+    )
+    # Rotación a costo: Venta a Costo / Stock a Costo (misma base, sin inflar por margen)
+    agg['venta_costo'] = agg['venta_total'] - agg['contribucion_total']
+    agg['rotacion'] = np.where(
+        agg['stock_costo_total'] > 0,
+        agg['venta_costo'] / agg['stock_costo_total'],
+        0.0
+    )
+    agg['margen_pct'] = np.where(
+        agg['venta_total'] > 0,
+        agg['contribucion_total'] / agg['venta_total'],
+        0.0
+    )
+
+    # ── 6. Calcular scores por componente ──
+    agg['score_cobertura'] = agg['pct_optimo_alto'].apply(_score_cobertura)
+    agg['score_quiebre'] = agg['pct_quiebre'].apply(_score_quiebre)
+    agg['score_sobrestock'] = agg['pct_exceso'].apply(_score_sobrestock)
+    agg['score_eficiencia'] = agg['rotacion'].apply(_score_eficiencia)
+    agg['score_margen'] = agg['margen_pct'].apply(_score_margen)
+
+    # ── 7. Health Score compuesto (5 componentes) ──
+    agg['health_score'] = (
+        agg['score_cobertura']  * _HEALTH_WEIGHTS['cobertura'] +
+        agg['score_quiebre']    * _HEALTH_WEIGHTS['quiebre'] +
+        agg['score_sobrestock'] * _HEALTH_WEIGHTS['sobrestock'] +
+        agg['score_eficiencia'] * _HEALTH_WEIGHTS['eficiencia'] +
+        agg['score_margen']     * _HEALTH_WEIGHTS['margen']
+    ).round(1)
+
+    # ── 8. Semáforo (soporta scores negativos por penalidad de margen) ──
+    agg['semaforo'] = pd.cut(
+        agg['health_score'].clip(lower=-100),
+        bins=[-101, 40, 60, 75, 200],
+        labels=['CRÍTICO', 'EN RIESGO', 'ACEPTABLE', 'SALUDABLE']
+    )
+
+    # ── 9. Venta en riesgo (SKUs en quiebre × venta promedio) ──
+    venta_riesgo = df.assign(
+        _vta_riesgo=lambda d: np.where(d['_es_quiebre'], d['venta_soles'].fillna(0), 0)
+    ).groupby(group_keys, dropna=False)['_vta_riesgo'].sum().reset_index()
+    venta_riesgo.columns = [*group_keys, 'venta_en_riesgo']
+    agg = agg.merge(venta_riesgo, on=group_keys, how='left')
+
+    # ── 10. Impacto de negocio (solo cuando se agrupa por marca) ──
+    # Impacto = (100 − score) × % participación venta de la marca.
+    # Marca enferma + grande → impacto alto → prioridad de atención.
+    # Solo tiene sentido a nivel marca; en modo global o por línea se omite.
+    if grupo_cols == ['marca'] and len(agg) > 1:
+        _total_venta = agg['venta_total'].sum()
+        agg['pct_venta'] = np.where(_total_venta > 0,
+                                     agg['venta_total'] / _total_venta, 0.0)
+        agg['impacto'] = ((100 - agg['health_score']) * agg['pct_venta']).round(1)
+        agg['prioridad'] = pd.cut(
+            agg['impacto'],
+            bins=[-0.1, 2, 5, 9999],
+            labels=['BAJO RADAR', 'MONITOREAR', 'FOCO URGENTE']
+        )
+
+    # ── 11. Limpiar columnas auxiliares ──
+    if '_global' in agg.columns:
+        agg = agg.drop(columns=['_global'])
+
+    # Ordenar por health_score ascendente (peores primero)
+    agg = agg.sort_values('health_score', ascending=True).reset_index(drop=True)
+
+    # Redondear porcentajes
+    for col in ['pct_optimo_alto', 'pct_quiebre', 'pct_exceso', 'rotacion', 'margen_pct']:
+        agg[col] = agg[col].round(4)
+
+    return agg
+
+
+def build_health_detail(df_snapshot, params=None):
+    """
+    Retorna el snapshot enriquecido con estado clasificado para drill-down a nivel SKU.
+
+    Parámetros
+    ----------
+    df_snapshot : DataFrame del snapshot (nivel SKU)
+    params      : dict de parámetros
+
+    Retorna
+    -------
+    DataFrame original + columna 'estado' clasificada.
+    """
+    df = df_snapshot.copy()
+    p = {**DEFAULT_PARAMS, **(params or {})}
+    if 'estado' not in df.columns:
+        df['estado'] = _classify_snapshot_estados(df, p)
+    return df
+
+
+# ─────────────────────────────────────────────────────────────
 #  FUNCIÓN PRINCIPAL
 # ─────────────────────────────────────────────────────────────
 
@@ -3264,17 +3647,22 @@ def run_analysis(path, params=None, formato='plantilla'):
     alertas_venta_cero = build_alertas_venta_cero(df_cob, df_s, p)
 
     # KPIs de resumen (se construye antes del briefing)
+    # Sprint 1 Capi: renombrados estados (CRÍTICO→QUIEBRE, PRE-CRÍTICO→BAJA,
+    # NUEVO SIN VENTA→LANZAMIENTO) + agregado ESTANCADO. Las keys del summary
+    # mantienen nombres antiguos (n_critico, n_precritico, n_nuevo_sv) para
+    # backward-compat con consumidores en app_streamlit y reports.
     summary = {
         'total_combos':      len(df_cob),
-        'n_critico':         int((df_cob['estado'] == 'CRÍTICO').sum()),
-        'n_precritico':      int((df_cob['estado'] == 'PRE-CRÍTICO').sum()),
-        'n_optimo':          int((df_cob['estado'] == 'ÓPTIMO').sum()),
-        'n_alto':            int((df_cob['estado'] == 'ALTO').sum()),
-        'n_sobrestock':      int((df_cob['estado'] == 'SOBRESTOCK').sum()),
-        'n_liquidar':        int((df_cob['estado'] == 'LIQUIDAR').sum()),
-        'n_nuevo_sv':        int((df_cob['estado'] == 'NUEVO SIN VENTA').sum()),
-        'n_dormido':         int((df_cob['estado'] == 'DORMIDO').sum()),
-        'n_muerto':          int((df_cob['estado'] == 'MUERTO').sum()),
+        'n_critico':         int((df_cob['estado'] == Estado.QUIEBRE).sum()),
+        'n_precritico':      int((df_cob['estado'] == Estado.PRE_QUIEBRE).sum()),
+        'n_optimo':          int((df_cob['estado'] == Estado.OPTIMO).sum()),
+        'n_alto':            int((df_cob['estado'] == Estado.ALTO).sum()),
+        'n_sobrestock':      int((df_cob['estado'] == Estado.SOBRESTOCK).sum()),
+        'n_estancado':       int((df_cob['estado'] == Estado.ESTANCADO).sum()),
+        'n_liquidar':        int((df_cob['estado'] == Estado.LIQUIDAR).sum()),
+        'n_nuevo_sv':        int((df_cob['estado'] == Estado.LANZAMIENTO).sum()),
+        'n_dormido':         int((df_cob['estado'] == Estado.DORMIDO).sum()),
+        'n_muerto':          int((df_cob['estado'] == Estado.MUERTO).sum()),
         'uds_reponer':       int(df_rep['a_reponer'].sum()) if not df_rep.empty else 0,
         'uds_transferir':    int(df_trans['uds_transferir'].sum()) if not df_trans.empty else 0,
         'n_acciones_precio': len(df_prec),
@@ -3282,7 +3670,7 @@ def run_analysis(path, params=None, formato='plantilla'):
         'n_anomalias':       len(df_anomalias),
         # Sobrestock aparente (proxy CD)
         'n_sobrestock_aparente': int(df_cob['sobrestock_aparente'].sum()) if 'sobrestock_aparente' in df_cob.columns else 0,
-        'capital_sobrestock': float(df_cob.loc[df_cob['estado'].isin({'SOBRESTOCK', 'LIQUIDAR'}), 'stock_valor_costo'].sum()),
+        'capital_sobrestock': float(df_cob.loc[df_cob['estado'].isin({Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.LIQUIDAR}), 'stock_valor_costo'].sum()),
         'capital_sobrestock_aparente': float(df_cob.loc[df_cob.get('sobrestock_aparente', False) == True, 'stock_valor_costo'].sum()) if 'sobrestock_aparente' in df_cob.columns else 0,
     }
 
@@ -3598,11 +3986,11 @@ def print_report(results):
     print("\n" + "═" * 62)
     print("   Capi — Inventory Engine v2 — REPORTE")
     print("═" * 62)
-    print(f"\n  Thresholds: CRÍTICO<{p['umbral_critico']} | ÓPTIMO {p['umbral_critico']}–{p['umbral_optimo']}"
+    print(f"\n  Thresholds: QUIEBRE<{p['umbral_critico']} | ÓPTIMO {p['umbral_critico']}–{p['umbral_optimo']}"
           f" | ALTO {p['umbral_optimo']}–{p['umbral_alto']} | SOBRESTOCK>{p['umbral_alto']} sem")
 
     print(f"\n📊 COBERTURA GENERAL — {s['total_combos']} combinaciones SKU×Tienda")
-    print(f"   🔴 CRÍTICO     : {s['n_critico']:>4}")
+    print(f"   🔴 QUIEBRE     : {s['n_critico']:>4}")
     print(f"   🟢 ÓPTIMO      : {s['n_optimo']:>4}")
     print(f"   🟡 ALTO        : {s['n_alto']:>4}")
     print(f"   🟠 SOBRESTOCK  : {s['n_sobrestock']:>4}")
@@ -3640,6 +4028,339 @@ def print_report(results):
         print("   (sin acciones de precio recomendadas)")
 
     print("\n" + "═" * 62 + "\n")
+
+
+# ─────────────────────────────────────────────────────────────
+#  MÓDULO FENÓMENO DEL NIÑO
+# ─────────────────────────────────────────────────────────────
+# Outputs (cada uno con decisión accionable asociada):
+#   1. Tabla riesgo quiebre por línea (LIGERO)  → ¿reponemos? ¿adelantamos OC?
+#   2. SKUs en riesgo de quiebre               → ¿qué SKUs priorizo?
+#   3. Capital parado por categoría calórica    → ¿liquido? ¿cuánto margen sacrifico?
+#   4. Marcas más expuestas al Niño             → ¿con quién negocio devoluciones?
+#   5. Data para curva temp × venta             → insight: ¿cuánto responde la venta?
+#   6. Resumen ejecutivo KPIs Niño              → para reunión con gerencia
+
+# ── Config calórico ──
+_CALORICO_PATH = os.path.join(os.path.dirname(__file__), 'config_calorico.json')
+try:
+    with open(_CALORICO_PATH, 'r') as _f:
+        _CALORICO_RAW = json.load(_f)
+    MAPEO_CALORICO = {k.upper().strip(): v for k, v in _CALORICO_RAW.get('mapeo', {}).items()}
+except (FileNotFoundError, json.JSONDecodeError):
+    MAPEO_CALORICO = {}
+
+
+def _assign_calorico(df):
+    """Agrega columna 'cat_calorica' al DataFrame basado en la columna 'linea'."""
+    if 'linea' not in df.columns:
+        df['cat_calorica'] = 'NEUTRO'
+        return df
+    df['cat_calorica'] = df['linea'].str.upper().str.strip().map(MAPEO_CALORICO).fillna('NEUTRO')
+    return df
+
+
+def _compute_weekly_deltas(snapshots_dict):
+    """
+    Calcula deltas semanales a partir de snapshots (data acumulativa).
+
+    Parámetros
+    ----------
+    snapshots_dict : dict {semana_iso: DataFrame} — snapshots ordenados
+
+    Retorna
+    -------
+    list of dict: cada uno con semana, delta_venta_soles, delta_unidades por línea y cat_calorica
+    """
+    sorted_weeks = sorted(snapshots_dict.keys())
+    if len(sorted_weeks) < 2:
+        return []
+
+    deltas = []
+    for i in range(1, len(sorted_weeks)):
+        prev_week = sorted_weeks[i - 1]
+        curr_week = sorted_weeks[i]
+        df_prev = _assign_calorico(snapshots_dict[prev_week].copy())
+        df_curr = _assign_calorico(snapshots_dict[curr_week].copy())
+
+        # Agregar por línea + cat_calorica
+        agg_prev = df_prev.groupby(['linea', 'cat_calorica']).agg(
+            venta_soles=('venta_soles', 'sum'),
+            unidades=('unidades_vendidas', 'sum'),
+        ).reset_index()
+
+        agg_curr = df_curr.groupby(['linea', 'cat_calorica']).agg(
+            venta_soles=('venta_soles', 'sum'),
+            unidades=('unidades_vendidas', 'sum'),
+        ).reset_index()
+
+        # Merge y calcular delta
+        merged = agg_curr.merge(agg_prev, on=['linea', 'cat_calorica'],
+                                 suffixes=('_curr', '_prev'), how='outer').fillna(0)
+        merged['delta_venta'] = merged['venta_soles_curr'] - merged['venta_soles_prev']
+        merged['delta_unidades'] = merged['unidades_curr'] - merged['unidades_prev']
+        merged['semana_iso'] = curr_week
+        merged['semana_prev'] = prev_week
+
+        deltas.append(merged)
+
+    if deltas:
+        return pd.concat(deltas, ignore_index=True)
+    return pd.DataFrame()
+
+
+def build_fenomeno_nino(snapshots_dict, temp_semanal=None, params=None):
+    """
+    Construye los 6 outputs del módulo Fenómeno del Niño.
+
+    Parámetros
+    ----------
+    snapshots_dict : dict {semana_iso: DataFrame} — snapshots disponibles
+    temp_semanal   : list of dict — output de clima_engine.get_weekly_temperature()
+                     Si None, se intenta generar automáticamente.
+    params         : dict — parámetros override
+
+    Retorna
+    -------
+    dict con keys:
+        'riesgo_quiebre_linea'  : DataFrame — Output 1
+        'skus_riesgo_quiebre'   : DataFrame — Output 2
+        'capital_por_calorica'  : DataFrame — Output 3
+        'marcas_expuestas'      : DataFrame — Output 4
+        'tendencia_temp_venta'  : DataFrame — Output 5
+        'resumen_ejecutivo'     : dict      — Output 6
+        'deltas_semanales'      : DataFrame — deltas intermedios
+    """
+    p = {**DEFAULT_PARAMS, **(params or {})}
+
+    # Usar el snapshot más reciente como base
+    sorted_weeks = sorted(snapshots_dict.keys())
+    if not sorted_weeks:
+        return {'error': 'No hay snapshots disponibles'}
+
+    latest_week = sorted_weeks[-1]
+    df_latest = _assign_calorico(snapshots_dict[latest_week].copy())
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    #  OUTPUT 1: Tabla Riesgo de Quiebre por Línea
+    #  → Decisión: ¿reponemos? ¿adelantamos OC?
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    # Calcular velocidad de venta semanal (promedio últimas 4 semanas de venta)
+    vta_cols = [c for c in df_latest.columns if c.startswith('vta_u_sem_')]
+    if vta_cols:
+        df_latest['vta_semanal_uds'] = df_latest[vta_cols].mean(axis=1).fillna(0)
+    else:
+        # Fallback: unidades / edad_semanas
+        df_latest['vta_semanal_uds'] = np.where(
+            df_latest['edad_semanas'] > 0,
+            df_latest['unidades_vendidas'] / df_latest['edad_semanas'],
+            0
+        )
+
+    # Cobertura restante a nivel línea
+    riesgo_linea = df_latest.groupby(['linea', 'cat_calorica']).agg(
+        n_skus=('sku', 'nunique'),
+        stock_total=('stock_total', 'sum'),
+        stock_cd=('stock_cd', 'sum'),
+        vta_semanal_uds=('vta_semanal_uds', 'sum'),
+        venta_soles=('venta_soles', 'sum'),
+        stock_valor_costo=('stock_valor_costo', 'sum'),
+    ).reset_index()
+
+    riesgo_linea['cobertura_semanas'] = np.where(
+        riesgo_linea['vta_semanal_uds'] > 0,
+        (riesgo_linea['stock_total'] / riesgo_linea['vta_semanal_uds']).round(1),
+        999  # Sin venta → cobertura infinita
+    )
+
+    # Semáforo de riesgo
+    riesgo_linea['estado_riesgo'] = pd.cut(
+        riesgo_linea['cobertura_semanas'],
+        bins=[-1, 3, 6, 10, 9999],
+        labels=['🔴 QUIEBRE INMINENTE', '🟡 RIESGO', '🟢 OK', '⚪ SOBRESTOCK']
+    )
+
+    riesgo_linea = riesgo_linea.sort_values('cobertura_semanas')
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    #  OUTPUT 2: SKUs en Riesgo de Quiebre (LIGERO con cob < 4 sem)
+    #  → Decisión: ¿qué SKUs priorizo para reposición urgente?
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    # Solo LIGERO (oportunidad Niño)
+    df_ligero = df_latest[df_latest['cat_calorica'] == 'LIGERO'].copy()
+
+    # Mediana de venta por línea para filtro de materialidad
+    mediana_vta = df_ligero.groupby('linea')['vta_semanal_uds'].transform('median')
+
+    # SKUs con cobertura < 4 semanas Y venta > mediana de su línea
+    skus_riesgo = df_ligero[
+        (df_ligero['cobertura_sem'] < 4) &
+        (df_ligero['vta_semanal_uds'] > mediana_vta) &
+        (df_ligero['stock_total'] > 0)  # Excluir ya quebrados (stock 0)
+    ].copy()
+
+    skus_riesgo['semanas_restantes'] = np.where(
+        skus_riesgo['vta_semanal_uds'] > 0,
+        (skus_riesgo['stock_total'] / skus_riesgo['vta_semanal_uds']).round(1),
+        0
+    )
+
+    skus_riesgo = skus_riesgo.sort_values('venta_soles', ascending=False)
+
+    cols_riesgo = ['sku', 'descripcion', 'marca', 'linea', 'stock_total', 'stock_cd',
+                   'vta_semanal_uds', 'semanas_restantes', 'venta_soles', 'cobertura_sem']
+    skus_riesgo = skus_riesgo[[c for c in cols_riesgo if c in skus_riesgo.columns]]
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    #  OUTPUT 3: Capital Parado por Categoría Calórica
+    #  → Decisión: ¿liquido? ¿cuánto margen sacrifico?
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    capital_cal = df_latest.groupby('cat_calorica').agg(
+        n_skus=('sku', 'nunique'),
+        capital_invertido=('stock_valor_costo', 'sum'),
+        stock_total=('stock_total', 'sum'),
+        venta_soles=('venta_soles', 'sum'),
+        vta_semanal_uds=('vta_semanal_uds', 'sum'),
+    ).reset_index()
+
+    total_capital = capital_cal['capital_invertido'].sum()
+    capital_cal['pct_capital'] = np.where(
+        total_capital > 0,
+        (capital_cal['capital_invertido'] / total_capital * 100).round(1),
+        0
+    )
+
+    # Rotación: venta / capital
+    capital_cal['rotacion'] = np.where(
+        capital_cal['capital_invertido'] > 0,
+        (capital_cal['venta_soles'] / capital_cal['capital_invertido']).round(3),
+        0
+    )
+
+    capital_cal = capital_cal.sort_values('capital_invertido', ascending=False)
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    #  OUTPUT 4: Marcas más Expuestas al Niño
+    #  → Decisión: ¿con qué proveedor negocio devoluciones?
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    marca_cal = df_latest.groupby(['marca', 'cat_calorica']).agg(
+        n_skus=('sku', 'nunique'),
+        capital=('stock_valor_costo', 'sum'),
+        venta_soles=('venta_soles', 'sum'),
+    ).reset_index()
+
+    # Pivot: una fila por marca, columnas por categoría
+    marca_total = df_latest.groupby('marca').agg(
+        n_skus_total=('sku', 'nunique'),
+        capital_total=('stock_valor_costo', 'sum'),
+        venta_total=('venta_soles', 'sum'),
+    ).reset_index()
+
+    marca_grueso = marca_cal[marca_cal['cat_calorica'] == 'GRUESO'].rename(
+        columns={'n_skus': 'n_skus_grueso', 'capital': 'capital_grueso', 'venta_soles': 'venta_grueso'}
+    )[['marca', 'n_skus_grueso', 'capital_grueso', 'venta_grueso']]
+
+    marcas_exp = marca_total.merge(marca_grueso, on='marca', how='left').fillna(0)
+
+    marcas_exp['pct_capital_grueso'] = np.where(
+        marcas_exp['capital_total'] > 0,
+        (marcas_exp['capital_grueso'] / marcas_exp['capital_total'] * 100).round(1),
+        0
+    )
+
+    # Rotación del GRUESO de cada marca
+    marca_grueso_rot = marca_cal[marca_cal['cat_calorica'] == 'GRUESO'].copy()
+    marca_grueso_rot['rotacion_grueso'] = np.where(
+        marca_grueso_rot['capital'] > 0,
+        (marca_grueso_rot['venta_soles'] / marca_grueso_rot['capital']).round(3),
+        0
+    )
+    marcas_exp = marcas_exp.merge(
+        marca_grueso_rot[['marca', 'rotacion_grueso']], on='marca', how='left'
+    ).fillna(0)
+
+    # Índice vulnerabilidad = (% capital GRUESO / 100) × (1 - rotación GRUESO)
+    # Mayor cuando mucho capital en GRUESO que no rota
+    marcas_exp['idx_vulnerabilidad'] = (
+        (marcas_exp['pct_capital_grueso'] / 100) *
+        (1 - marcas_exp['rotacion_grueso'].clip(upper=1))
+    ).round(3)
+
+    marcas_exp = marcas_exp.sort_values('idx_vulnerabilidad', ascending=False)
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    #  OUTPUT 5: Tendencia Temperatura × Venta
+    #  → Insight: ¿cuánto responde la venta a temperatura?
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    deltas_df = _compute_weekly_deltas(snapshots_dict)
+
+    tendencia = pd.DataFrame()
+    if not deltas_df.empty and temp_semanal:
+        # Agregar deltas por categoría calórica × semana
+        tend_cal = deltas_df.groupby(['semana_iso', 'cat_calorica']).agg(
+            delta_venta=('delta_venta', 'sum'),
+            delta_unidades=('delta_unidades', 'sum'),
+        ).reset_index()
+
+        # Merge con temperatura
+        df_temp = pd.DataFrame(temp_semanal)
+        tendencia = tend_cal.merge(df_temp, on='semana_iso', how='left')
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    #  OUTPUT 6: Resumen Ejecutivo KPIs Niño
+    #  → Para reunión con gerencia
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    # Temp promedio semana más reciente
+    temp_actual = None
+    if temp_semanal:
+        # Buscar la semana que coincida o la más reciente
+        for tw in reversed(temp_semanal):
+            if tw.get('semana_iso') and tw['semana_iso'] <= latest_week:
+                temp_actual = tw.get('temp_avg')
+                break
+
+    # Ratio venta LIGERO vs GRUESO
+    venta_ligero = df_latest[df_latest['cat_calorica'] == 'LIGERO']['venta_soles'].sum()
+    venta_grueso = df_latest[df_latest['cat_calorica'] == 'GRUESO']['venta_soles'].sum()
+    ratio_lig_gru = round(venta_ligero / venta_grueso, 1) if venta_grueso > 0 else float('inf')
+
+    # Capital GRUESO sin rotación (rot < 0.1)
+    capital_grueso_total = marcas_exp['capital_grueso'].sum()
+
+    # Número de SKUs LIGERO en riesgo
+    n_skus_riesgo = len(skus_riesgo)
+
+    resumen = {
+        'semana_analisis': latest_week,
+        'temp_promedio_actual': temp_actual,
+        'temp_historico_normal': 20.8,  # Promedio 2024-2025 Mar-May
+        'delta_temp_vs_normal': round(temp_actual - 20.8, 1) if temp_actual else None,
+        'ratio_venta_ligero_grueso': ratio_lig_gru,
+        'venta_ligero_soles': round(venta_ligero),
+        'venta_grueso_soles': round(venta_grueso),
+        'capital_grueso_en_riesgo': round(capital_grueso_total),
+        'n_skus_ligero_riesgo_quiebre': n_skus_riesgo,
+        'pct_capital_en_grueso': round(
+            capital_grueso_total / total_capital * 100, 1
+        ) if total_capital > 0 else 0,
+        'n_marcas_alta_vulnerabilidad': int((marcas_exp['idx_vulnerabilidad'] > 0.3).sum()),
+    }
+
+    return {
+        'riesgo_quiebre_linea': riesgo_linea,
+        'skus_riesgo_quiebre': skus_riesgo,
+        'capital_por_calorica': capital_cal,
+        'marcas_expuestas': marcas_exp,
+        'tendencia_temp_venta': tendencia,
+        'resumen_ejecutivo': resumen,
+        'deltas_semanales': deltas_df,
+    }
 
 
 # ─────────────────────────────────────────────────────────────

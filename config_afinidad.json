@@ -1,0 +1,54 @@
+{
+  "tiendas_excluir": [
+    "TV PI", "FSF MAC LO", "ASIA", "VTAS CORP", "BTQ BBB",
+    "MAC LARCO", "MAC PLN", "EST CHI", "EST TRU", "EST VES",
+    "OPLN", "OSI", "TV"
+  ],
+  "filtro_estacional": {
+    "temporada_actual": "INVIERNO",
+    "lineas_excluir_invierno": [
+      "CAMISAS M/C", "SHORTS", "TRAJES DE BANO"
+    ],
+    "lineas_excluir_verano": [
+      "CASACAS", "POLERONES", "CHOMPAS", "POLOS M/L"
+    ],
+    "lineas_excluir_siempre": [
+      "OTROS", "REBATES"
+    ],
+    "nota_cortes": "Invierno=Mar-Ago. Verano=Sep-Feb. Verano->Invierno: líneas verano mueren desde 1-May. Invierno->Verano: líneas invierno venden avance Sep-Oct, mueren desde 1-Nov."
+  },
+  "clustering": {
+    "n_clusters": 4,
+    "min_venta_tienda": 50,
+    "metrica": "rotacion"
+  },
+  "umbrales": {
+    "rotacion_alta": 0.04,
+    "rotacion_baja": 0.015,
+    "cobertura_baja_sem": 4,
+    "stock_alto_unidades": 10,
+    "min_tiendas_senal_produccion": 3,
+    "min_skus_anomalia": 3,
+    "antiguedad_liquidacion_sem": 26,
+    "margen_min_por_marca": {
+      "MARQUIS": 40,
+      "NAVIGATA": 40,
+      "CACHAREL": 40,
+      "SPAVALDI": 40,
+      "OSCAR DE LA RENTA": 30,
+      "NAUTICA": 30,
+      "US POLO": 30,
+      "_default": 30
+    }
+  },
+  "empujes": {
+    "min_stock_cd": 5,
+    "max_empuje_por_tienda": 200,
+    "semanas_cobertura_target": 12,
+    "priorizar_marcas_propias": true
+  },
+  "marcas_propias": [
+    "MARQUIS", "NAVIGATA", "CACHAREL", "OSCAR DE LA RENTA",
+    "NAUTICA", "US POLO", "SPAVALDI"
+  ]
+}

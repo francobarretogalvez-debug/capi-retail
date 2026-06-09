@@ -1,0 +1,22 @@
+{
+  "_nota": "Lead time en días por marca. Marcas propias = 3 días (logística interna). Terceras = según proveedor.",
+  "_actualizado": "2026-05-24",
+  "MARQUIS": 3,
+  "NAVIGATA": 3,
+  "CACHAREL": 3,
+  "SPAVALDI": 3,
+  "OSCAR DE LA RENTA": 3,
+  "US POLO": 3,
+  "NAUTICA": 3,
+  "LACOSTE": 21,
+  "DOCKERS": 14,
+  "DOCKERS2": 14,
+  "SELECTED": 14,
+  "PIERRE CARDIN": 10,
+  "JOHN HOLDEN": 7,
+  "SILBON": 28,
+  "PSYCHO BUNNY": 21,
+  "BROOKSFIELD": 14,
+  "GIVENCHY": 21,
+  "_default": 14
+}

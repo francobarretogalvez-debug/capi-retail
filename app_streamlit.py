@@ -33,6 +33,13 @@ importlib.reload(R_at)
 import transformar_profundidad as etl_profundidad
 importlib.reload(etl_profundidad)
 
+# Snapshots Engine — histórico semanal (Prompt B)
+try:
+    import snapshots_engine
+    _HAS_SNAPSHOTS = True
+except ImportError:
+    _HAS_SNAPSHOTS = False
+
 # Cargar .env antes de importar chat_engine
 try:
     from dotenv import load_dotenv
@@ -83,6 +90,11 @@ STATUS_LIQUIDAR   = "#EC4899"
 STATUS_NUEVO_SV   = "#94A3B8"
 STATUS_DORMIDO    = "#78716C"
 STATUS_MUERTO     = "#374151"
+# Sprint 1 Capi — nombres nuevos de la taxonomía (Prompt A1)
+STATUS_QUIEBRE     = STATUS_CRITICO       # alias semántico
+STATUS_BAJA        = STATUS_PRECRITICO    # alias semántico
+STATUS_ESTANCADO   = "#475569"            # gris medio (entre SOBRESTOCK y MUERTO)
+STATUS_LANZAMIENTO = "#60A5FA"            # azul claro (positivo, "está en rampa")
 
 # ── Tema (corporate light — sin toggle) ──
 if "theme_mode" not in st.session_state:
@@ -682,8 +694,8 @@ st.markdown(f"""
 # ══════════════════════════════════════════════════════════════
 
 BADGE_CSS = {
-    "CRÍTICO":          f"background:{STATUS_CRITICO}; color:#FFFFFF",
-    "PRE-CRÍTICO":      f"background:{STATUS_PRECRITICO}; color:#FFFFFF",
+    "QUIEBRE":          f"background:{STATUS_QUIEBRE}; color:#FFFFFF",
+    "PRE-QUIEBRE":      f"background:{STATUS_BAJA}; color:#FFFFFF",
     "ÓPTIMO":           f"background:{STATUS_OPTIMO}; color:#FFFFFF",
     "ALTO":             f"background:{STATUS_ALTO}; color:#FFFFFF",
     "SOBRESTOCK":       f"background:{STATUS_SOBRESTOCK}; color:#FFFFFF",
@@ -691,6 +703,7 @@ BADGE_CSS = {
     "NUEVO SIN VENTA":  f"background:{STATUS_NUEVO_SV}; color:#FFFFFF",
     "DORMIDO":          f"background:{STATUS_DORMIDO}; color:#FFFFFF",
     "MUERTO":           f"background:{STATUS_MUERTO}; color:#FFFFFF",
+    "ESTANCADO":        f"background:{STATUS_ESTANCADO}; color:#FFFFFF",
 }
 
 
@@ -701,8 +714,8 @@ def _badge(val):
 
 def color_estado(val):
     colors = {
-        "CRÍTICO":          f"background-color:{STATUS_CRITICO}; color:#FFFFFF",
-        "PRE-CRÍTICO":      f"background-color:{STATUS_PRECRITICO}; color:#FFFFFF",
+        "QUIEBRE":          f"background-color:{STATUS_QUIEBRE}; color:#FFFFFF",
+        "PRE-QUIEBRE":      f"background-color:{STATUS_BAJA}; color:#FFFFFF",
         "ÓPTIMO":           f"background-color:{STATUS_OPTIMO}; color:#FFFFFF",
         "ALTO":             f"background-color:{STATUS_ALTO}; color:#FFFFFF",
         "SOBRESTOCK":       f"background-color:{STATUS_SOBRESTOCK}; color:#FFFFFF",
@@ -710,6 +723,7 @@ def color_estado(val):
         "NUEVO SIN VENTA":  f"background-color:{STATUS_NUEVO_SV}; color:#FFFFFF",
         "DORMIDO":          f"background-color:{STATUS_DORMIDO}; color:#FFFFFF",
         "MUERTO":           f"background-color:{STATUS_MUERTO}; color:#FFFFFF",
+        "ESTANCADO":        f"background-color:{STATUS_ESTANCADO}; color:#FFFFFF",
     }
     return colors.get(str(val), "")
 
@@ -809,6 +823,7 @@ with st.sidebar:
 
         _NAV_VISION = [
             ("🏠", "Dashboard"),
+            ("🩺", "Salud del Stock"),
             ("📲", "Briefing Semanal"),
             ("📝", "Diario de Gestión"),
         ]
@@ -833,6 +848,7 @@ with st.sidebar:
             ("🔄", "Transferencias"),
             ("🚚", "Predistribución"),
             ("📊", "Sobrestock"),
+            ("🎯", "Acciones de Stock"),
         ]
 
         for _icon, _label in _NAV_STOCK:
@@ -871,6 +887,9 @@ with st.sidebar:
 
         _NAV_PREDICTIVO = [
             ("📦", "Ventana de Compra"),
+            ("📈", "Evolución Semanal"),
+            ("🌡️", "Fenómeno del Niño"),
+            ("🏪", "Afinidad Producto×Plaza"),
             ("🤖", "Alertas IA"),
             ("🔮", "Simulador Predictivo"),
         ]
@@ -904,8 +923,8 @@ with st.sidebar:
     # ── Paso 3: Parámetros avanzados (colapsados por defecto) ──
     with st.expander("⚙️ Configuración avanzada", expanded=False):
         st.markdown("**Umbrales de cobertura**")
-        umbral_critico    = st.slider("CRÍTICO — menor a (sem)",      min_value=1,  max_value=8,  value=4,  step=1)
-        umbral_precritico = st.slider("PRE-CRÍTICO — hasta (sem)",    min_value=4,  max_value=12, value=8,  step=1)
+        umbral_critico    = st.slider("QUIEBRE — menor a (sem)",       min_value=1,  max_value=8,  value=4,  step=1)
+        umbral_precritico = st.slider("PRE-QUIEBRE — hasta (sem)",   min_value=4,  max_value=12, value=8,  step=1)
         umbral_optimo     = st.slider("ÓPTIMO — hasta (sem)",         min_value=6,  max_value=16, value=12, step=1)
         umbral_alto       = st.slider("ALTO — hasta (sem)",           min_value=8,  max_value=32, value=16, step=1)
         umbral_edad       = st.slider("LIQUIDAR — antigüedad (sem)",  min_value=12, max_value=52, value=26, step=2)
@@ -1042,6 +1061,15 @@ if run_btn:
             # Auto-detectar formato
             if _is_base_profundidad(tmp_path):
                 with st.spinner("Detectada Base Profundidad de Ripley. Transformando..."):
+                    # Guardar copia en data2/bases antiguas/ para Afinidad y snapshots
+                    _bases_dir = os.path.join(os.path.dirname(__file__), "data2", "bases antiguas")
+                    os.makedirs(_bases_dir, exist_ok=True)
+                    _base_copy_name = uploaded.name if uploaded.name else "Base_subida.xlsx"
+                    _base_copy_path = os.path.join(_bases_dir, _base_copy_name)
+                    import shutil as _shutil_cp
+                    _shutil_cp.copy2(tmp_path, _base_copy_path)
+                    st.session_state["_base_profundidad_path"] = _base_copy_path
+
                     plantilla_path = tmp_path.replace(".xlsx", "_plantilla.xlsx")
                     etl_profundidad.transform(tmp_path, output_path=plantilla_path)
                     os.unlink(tmp_path)
@@ -1050,6 +1078,14 @@ if run_btn:
 
             with st.spinner("Ejecutando análisis..."):
                 results = motor_v2.run_analysis(tmp_path, params=params_ui, formato=formato_input)
+
+                # Auto-guardar snapshot semanal (Prompt B) — antes del unlink
+                if _HAS_SNAPSHOTS:
+                    try:
+                        snapshots_engine.process_micro_profundidad(tmp_path, force=False)
+                    except Exception:
+                        pass  # Silencioso — no bloquear el flujo si ya existe
+
                 os.unlink(tmp_path)
                 st.session_state["results"] = results
                 st.rerun()  # Forzar rerun para que sidebar se re-renderice con nav
@@ -1266,8 +1302,8 @@ if alertas_venta_cero_dict:
 
 # Recalcular summary con datos filtrados
 s["total_combos"]      = len(df_cob)
-s["n_critico"]         = int((df_cob["estado"] == "CRÍTICO").sum()) if not df_cob.empty else 0
-s["n_precritico"]      = int((df_cob["estado"] == "PRE-CRÍTICO").sum()) if not df_cob.empty else 0
+s["n_critico"]         = int((df_cob["estado"] == "QUIEBRE").sum()) if not df_cob.empty else 0
+s["n_precritico"]      = int((df_cob["estado"] == "PRE-QUIEBRE").sum()) if not df_cob.empty else 0
 s["n_optimo"]          = int((df_cob["estado"] == "ÓPTIMO").sum()) if not df_cob.empty else 0
 s["n_alto"]            = int((df_cob["estado"] == "ALTO").sum()) if not df_cob.empty else 0
 s["n_sobrestock"]      = int((df_cob["estado"] == "SOBRESTOCK").sum()) if not df_cob.empty else 0
@@ -1275,6 +1311,7 @@ s["n_liquidar"]        = int((df_cob["estado"] == "LIQUIDAR").sum()) if not df_c
 s["n_nuevo_sv"]        = int((df_cob["estado"] == "NUEVO SIN VENTA").sum()) if not df_cob.empty else 0
 s["n_dormido"]         = int((df_cob["estado"] == "DORMIDO").sum()) if not df_cob.empty else 0
 s["n_muerto"]          = int((df_cob["estado"] == "MUERTO").sum()) if not df_cob.empty else 0
+s["n_estancado"]       = int((df_cob["estado"] == "ESTANCADO").sum()) if not df_cob.empty else 0
 s["uds_reponer"]       = int(df_rep["a_reponer"].sum()) if not df_rep.empty else 0
 s["uds_transferir"]    = int(df_trans["uds_transferir"].sum()) if not df_trans.empty else 0
 s["n_acciones_precio"] = len(df_prec)
@@ -1314,19 +1351,69 @@ _plotly_layout = dict(
 )
 
 _estado_color_map = {
-    "CRÍTICO":          STATUS_CRITICO,
-    "PRE-CRÍTICO":      STATUS_PRECRITICO,
-    "ÓPTIMO":           STATUS_OPTIMO,
-    "ALTO":             STATUS_ALTO,
-    "SOBRESTOCK":       STATUS_SOBRESTOCK,
-    "LIQUIDAR":         STATUS_LIQUIDAR,
-    "NUEVO SIN VENTA":  STATUS_NUEVO_SV,
-    "DORMIDO":          STATUS_DORMIDO,
-    "MUERTO":           STATUS_MUERTO,
+    "QUIEBRE":      STATUS_QUIEBRE,
+    "PRE-QUIEBRE":  STATUS_BAJA,
+    "ÓPTIMO":       STATUS_OPTIMO,
+    "ALTO":         STATUS_ALTO,
+    "SOBRESTOCK":   STATUS_SOBRESTOCK,
+    "ESTANCADO":    STATUS_ESTANCADO,
+    "LIQUIDAR":     STATUS_LIQUIDAR,
+    "NUEVO SIN VENTA":  STATUS_LANZAMIENTO,
+    "DORMIDO":      STATUS_DORMIDO,
+    "MUERTO":       STATUS_MUERTO,
 }
 
 if nav_page == "🏠 Dashboard":
     st.markdown(f'<div class="section-header"><h3>Dashboard</h3><span class="live-badge">LIVE</span></div>', unsafe_allow_html=True)
+
+    # ── Delta KPIs semanales (Snapshots) ──
+    if _HAS_SNAPSHOTS:
+        _snap_weeks = snapshots_engine.list_available_weeks()
+        if len(_snap_weeks) >= 2:
+            _snap_sem_b = _snap_weeks[-1]
+            _snap_sem_a = _snap_weeks[-2]
+            _snap_cmp = snapshots_engine.compare_weeks(_snap_sem_a, _snap_sem_b)
+            if _snap_cmp:
+                _sd = _snap_cmp['deltas']
+                _sa = _snap_cmp['semana_a']
+                _sb = _snap_cmp['semana_b']
+
+                def _delta_arrow(val, pct, invert=False):
+                    """Genera flecha + color para un delta."""
+                    if pct > 0:
+                        _c = "#10b981" if not invert else "#ef4444"
+                        _arr = "▲"
+                    elif pct < 0:
+                        _c = "#ef4444" if not invert else "#10b981"
+                        _arr = "▼"
+                    else:
+                        _c = "var(--capi-text2)"
+                        _arr = "–"
+                    return f'<span style="color:{_c}; font-weight:600;">{_arr} {abs(pct):.1f}%</span>'
+
+                _delta_cards = [
+                    ("Venta S/", f"S/ {_sb['venta_soles']:,.0f}", _delta_arrow(_sd['venta_soles_delta'], _sd['venta_soles_pct'])),
+                    ("Venta Uds", f"{_sb['venta_unidades']:,}", _delta_arrow(_sd['venta_unidades_delta'], _sd['venta_unidades_pct'])),
+                    ("Stock Uds", f"{_sb['stock_total']:,}", _delta_arrow(_sd['stock_total_delta'], _sd['stock_total_pct'], invert=True)),
+                    ("Cob Prom", f"{_sb['cob_promedio']:.1f} sem", _delta_arrow(_sd['cob_promedio_delta'], _sd['cob_promedio_pct'])),
+                ]
+
+                _delta_html = f"""<div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:12px; padding:14px 18px; margin-bottom:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <span style="font-weight:600; color:var(--capi-text); font-size:0.82rem;">📊 Semana {_snap_sem_b} vs {_snap_sem_a}</span>
+                        <span style="font-size:0.68rem; color:var(--capi-text2);">{len(_snap_weeks)} semanas históricas</span>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px;">"""
+
+                for _lbl, _val, _arr in _delta_cards:
+                    _delta_html += f"""<div style="text-align:center;">
+                        <div style="font-size:0.68rem; color:var(--capi-text2); margin-bottom:2px;">{_lbl}</div>
+                        <div style="font-size:1.1rem; font-weight:700; color:var(--capi-text);">{_val}</div>
+                        <div style="font-size:0.75rem;">{_arr}</div>
+                    </div>"""
+
+                _delta_html += "</div></div>"
+                st.markdown(_delta_html, unsafe_allow_html=True)
 
     # ── Filtros del dashboard ──
     st.markdown(f"""<div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:12px; padding:12px 16px; margin-bottom:16px;">
@@ -1381,14 +1468,14 @@ if nav_page == "🏠 Dashboard":
         estado_counts = _df_donut["estado"].value_counts().reset_index()
         estado_counts.columns = ["Estado", "Cantidad"]
         estado_order = [
-            "CRÍTICO", "PRE-CRÍTICO", "ÓPTIMO", "ALTO", "SOBRESTOCK",
-            "LIQUIDAR", "NUEVO SIN VENTA", "DORMIDO", "MUERTO",
+            "QUIEBRE", "PRE-QUIEBRE", "ÓPTIMO", "ALTO", "SOBRESTOCK",
+            "ESTANCADO", "LIQUIDAR", "NUEVO SIN VENTA", "DORMIDO", "MUERTO",
         ]
         estado_counts["Estado"] = pd.Categorical(estado_counts["Estado"], categories=estado_order, ordered=True)
         estado_counts = estado_counts.sort_values("Estado").dropna(subset=["Estado"])
 
-        _display_labels = {"NUEVO SIN VENTA": "SIN VENTA"}
-        estado_counts["Label"] = estado_counts["Estado"].astype(str).map(lambda x: _display_labels.get(x, x))
+        # Display labels: hoy todos los estados ya son su propio label (no se renombran).
+        estado_counts["Label"] = estado_counts["Estado"].astype(str)
 
         # Capital por estado para hover
         _capital_por_estado = _df_donut.groupby("estado")["stock_valor_costo"].sum()
@@ -1419,17 +1506,18 @@ if nav_page == "🏠 Dashboard":
         st.plotly_chart(fig_donut, use_container_width=True)
 
     with dash_c2:
-        # ── Leyenda: criterio de cada estado ──
+        # ── Leyenda: criterio de cada estado (10 estados de la taxonomía v2) ──
         _estado_criterios = {
-            "CRÍTICO":         {"color": STATUS_CRITICO,    "icon": "🔴", "regla": "Cobertura < 4 semanas"},
-            "PRE-CRÍTICO":     {"color": STATUS_PRECRITICO, "icon": "🟠", "regla": "Cobertura 4–8 semanas"},
-            "ÓPTIMO":          {"color": STATUS_OPTIMO,     "icon": "🟢", "regla": "Cobertura 8–12 semanas"},
-            "ALTO":            {"color": STATUS_ALTO,       "icon": "🟡", "regla": "Cobertura 12–16 semanas"},
-            "SOBRESTOCK":      {"color": STATUS_SOBRESTOCK, "icon": "🔴", "regla": "Cobertura > 16 semanas"},
-            "LIQUIDAR":        {"color": STATUS_LIQUIDAR,   "icon": "💀", "regla": "Edad > 26 semanas"},
-            "NUEVO SIN VENTA": {"color": STATUS_NUEVO_SV,   "icon": "🆕", "regla": "Sin venta, edad 0–3 meses", "label": "SIN VENTA"},
-            "DORMIDO":         {"color": STATUS_DORMIDO,    "icon": "😴", "regla": "Sin venta, edad 3–6 meses"},
-            "MUERTO":          {"color": STATUS_MUERTO,     "icon": "⚫", "regla": "Sin venta, edad > 6 meses"},
+            "QUIEBRE":     {"color": STATUS_QUIEBRE,     "icon": "🔴", "regla": "Cobertura < 4 semanas"},
+            "PRE-QUIEBRE": {"color": STATUS_BAJA,        "icon": "🟠", "regla": "Cobertura 4–8 semanas"},
+            "ÓPTIMO":      {"color": STATUS_OPTIMO,     "icon": "🟢", "regla": "Cobertura 8–16 semanas"},
+            "ALTO":        {"color": STATUS_ALTO,       "icon": "🟡", "regla": "Cobertura 16–26 semanas"},
+            "SOBRESTOCK":  {"color": STATUS_SOBRESTOCK, "icon": "🟤", "regla": "Cobertura 26–52 semanas"},
+            "ESTANCADO":   {"color": STATUS_ESTANCADO,  "icon": "⬛", "regla": "Cob > 52 sem · edad ≤ 6 meses"},
+            "LIQUIDAR":    {"color": STATUS_LIQUIDAR,   "icon": "💀", "regla": "Cob > 52 sem · edad > 6 meses"},
+            "NUEVO SIN VENTA": {"color": STATUS_LANZAMIENTO,"icon": "🆕", "regla": "Sin venta · edad < 2 meses"},
+            "DORMIDO":     {"color": STATUS_DORMIDO,    "icon": "😴", "regla": "Sin venta · edad 2–6 meses"},
+            "MUERTO":      {"color": STATUS_MUERTO,     "icon": "⚫", "regla": "Sin venta · edad > 6 meses"},
         }
 
         st.markdown(f"""<div style="font-weight:600; color:var(--capi-text); font-size:0.95rem; margin-bottom:10px;">
@@ -1464,17 +1552,13 @@ if nav_page == "🏠 Dashboard":
     # ── Desglose por marca del estado seleccionado + descarga ──
     st.markdown("---")
 
-    _est_display_map = {"NUEVO SIN VENTA": "SIN VENTA"}
+    # Display labels: hoy cada estado se muestra con su propio nombre.
     _est_opciones = [e for e in estado_order if e in _df_donut["estado"].values]
-    _est_opciones_display = [_est_display_map.get(e, e) for e in _est_opciones]
-    _est_default = _est_opciones.index("CRÍTICO") if "CRÍTICO" in _est_opciones else 0
+    _est_default = _est_opciones.index("QUIEBRE") if "QUIEBRE" in _est_opciones else 0
 
     _det_c1, _det_c2 = st.columns([1, 2])
     with _det_c1:
-        _est_sel_display = st.selectbox("Ver detalle por estado", _est_opciones_display, index=_est_default, key="donut_estado_sel")
-        # Mapear de vuelta al nombre interno
-        _est_reverse_map = {v: k for k, v in _est_display_map.items()}
-        _est_sel = _est_reverse_map.get(_est_sel_display, _est_sel_display)
+        _est_sel = st.selectbox("Ver detalle por estado", _est_opciones, index=_est_default, key="donut_estado_sel")
 
     _df_est = _df_donut[_df_donut["estado"] == _est_sel]
 
@@ -1493,7 +1577,7 @@ if nav_page == "🏠 Dashboard":
                 "capital": "Capital S/", "vta_sem": "Vta Sem (uds)",
             })
 
-            st.markdown(f"""<div style="background:{'#FEF2F2' if _est_sel in ('CRÍTICO','PRE-CRÍTICO') else TH_BG_SURFACE_PY};
+            st.markdown(f"""<div style="background:{'#FEF2F2' if _est_sel in ('QUIEBRE','PRE-QUIEBRE') else TH_BG_SURFACE_PY};
             border-left:4px solid {_estado_color_map.get(_est_sel, SLATE_500)};
             padding:10px 14px; border-radius:10px; margin-bottom:10px;">
             <strong style="color:{_estado_color_map.get(_est_sel, TH_TEXT_PY)};">{_est_sel}</strong>
@@ -1651,14 +1735,14 @@ if nav_page == "🏠 Dashboard":
 
     # ── KPIs ───────────────────────────────────────────────────────
 
-    st.markdown(f'<div class="section-header"><h3>KPIs de Inventario</h3><span class="live-badge">9 ESTADOS</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-header"><h3>KPIs de Inventario</h3><span class="live-badge">10 ESTADOS</span></div>', unsafe_allow_html=True)
 
     # Fila 1: estados con stock en movimiento
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
-        st.markdown(_kpi_html(s["n_critico"], "🔴 CRÍTICO", "red"), unsafe_allow_html=True)
+        st.markdown(_kpi_html(s["n_critico"], "🔴 QUIEBRE", "red"), unsafe_allow_html=True)
     with c2:
-        st.markdown(_kpi_html(s["n_precritico"], "🟠 PRE-CRÍTICO", "orange"), unsafe_allow_html=True)
+        st.markdown(_kpi_html(s["n_precritico"], "🟠 PRE-QUIEBRE", "orange"), unsafe_allow_html=True)
     with c3:
         st.markdown(_kpi_html(s["n_optimo"], "🟢 ÓPTIMO", "green"), unsafe_allow_html=True)
     with c4:
@@ -1677,7 +1761,7 @@ if nav_page == "🏠 Dashboard":
     with c9:
         st.markdown(_kpi_html(s["n_muerto"], "💀 MUERTO"), unsafe_allow_html=True)
     with c10:
-        st.markdown(_kpi_html(s["total_combos"], "SKU×Tienda total", "blue"), unsafe_allow_html=True)
+        st.markdown(_kpi_html(s["n_estancado"], "📦 ESTANCADO", "gray"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1710,60 +1794,6 @@ if nav_page == "🏠 Dashboard":
 #  Filtros de temporada y rango de antigüedad (obsoletos excluidos por defecto)
 
 if nav_page == "🏠 Dashboard":
-
-    # ═══════════════════════════════════════════════════════════════
-    #  VENTANA DE MERCADERÍA — Aging del inventario (4 capas)
-    # ═══════════════════════════════════════════════════════════════
-    # ═══════════════════════════════════════════════════════════════
-    #  RESUMEN AGING — Tarjeta compacta (detalle completo en "Gestión por Antigüedad")
-    # ═══════════════════════════════════════════════════════════════
-    if not df_aging.empty:
-        import math as _math_mod
-        _ak = aging_kpis
-        _cap_viejo = _ak.get('capital_viejo', 0)
-        _pct_viejo = _ak.get('pct_viejo', 0)
-        _edad_prom = _ak.get('edad_prom_pond', 0)
-        if _edad_prom is None or (isinstance(_edad_prom, float) and _math_mod.isnan(_edad_prom)):
-            _edad_prom = 0
-        _n_riesgo = _ak.get('n_zona_riesgo', 0)
-        _cap_total = _ak.get('capital_total', 1)
-
-        st.markdown(f'<div class="section-header"><h3>🪟 Ventana de Mercadería</h3><span class="live-badge">AGING</span></div>', unsafe_allow_html=True)
-
-        _kc1, _kc2, _kc3 = st.columns(3)
-        with _kc1:
-            st.markdown(f"""<div style="background:#FEF2F2; border-radius:12px; padding:14px 18px; border-left:4px solid #ef4444;">
-                <div style="font-size:0.72rem; color:var(--capi-text2); font-weight:500;">Capital viejo (>16 sem)</div>
-                <div style="font-size:1.5rem; font-weight:700; color:#ef4444;">S/ {_cap_viejo:,.0f}</div>
-                <div style="font-size:0.68rem; color:var(--capi-text2);">{_pct_viejo:.0f}% del inventario</div>
-            </div>""", unsafe_allow_html=True)
-        with _kc2:
-            st.markdown(f"""<div style="background:#FFFBEB; border-radius:12px; padding:14px 18px; border-left:4px solid #f59e0b;">
-                <div style="font-size:0.72rem; color:var(--capi-text2); font-weight:500;">Edad prom. ponderada</div>
-                <div style="font-size:1.5rem; font-weight:700; color:#f59e0b;">{_edad_prom:.1f} sem</div>
-            </div>""", unsafe_allow_html=True)
-        with _kc3:
-            st.markdown(f"""<div style="background:#F0FDF4; border-radius:12px; padding:14px 18px; border-left:4px solid {TEAL_600};">
-                <div style="font-size:0.72rem; color:var(--capi-text2); font-weight:500;">SKUs zona riesgo (8-16 sem)</div>
-                <div style="font-size:1.5rem; font-weight:700; color:{TEAL_700};">{_n_riesgo:,}</div>
-            </div>""", unsafe_allow_html=True)
-
-        # Barra horizontal compacta
-        _dist_edad = _ak.get('dist_edad', {})
-        if _dist_edad and _cap_total > 0:
-            _edad_colors = {'0-4 sem': '#10b981', '4-8 sem': '#84cc16', '8-16 sem': '#f59e0b', '16-26 sem': '#f97316', '26+ sem': '#ef4444'}
-            _bar_parts = ""
-            for _lbl in ['0-4 sem', '4-8 sem', '8-16 sem', '16-26 sem', '26+ sem']:
-                _val = _dist_edad.get(_lbl, 0)
-                _pct = _val / _cap_total * 100 if _cap_total > 0 else 0
-                _clr = _edad_colors.get(_lbl, '#94A3B8')
-                if _pct > 1:
-                    _bar_parts += f'<div style="width:{_pct:.1f}%; background:{_clr}; height:100%; display:inline-block;" title="{_lbl}: S/{_val:,.0f} ({_pct:.0f}%)"></div>'
-            st.markdown(f"""<div style="margin-top:12px; background:var(--capi-bg-card); border-radius:8px; padding:10px 14px; border:1px solid var(--capi-border);">
-                <div style="width:100%; height:16px; border-radius:6px; overflow:hidden; background:var(--capi-border); display:flex;">{_bar_parts}</div>
-            </div>""", unsafe_allow_html=True)
-
-        st.caption("Drill-down completo, alertas por acción y reglas del motor → sección **Gestión por Antigüedad** en el menú lateral.")
 
     # ══════════════════════════════════════════════════════════
     #  MARGEN EFECTIVO — Contribución / VtasMF (4 semanas)
@@ -1933,6 +1963,536 @@ if nav_page == "🏠 Dashboard":
 
     # (Sección "Acciones del Día" eliminada — info disponible en vistas del sidebar)
 
+    # ── Evolución Semanal (Prompt B — Snapshots Engine) ──
+    if _HAS_SNAPSHOTS:
+        _snap_weeks = snapshots_engine.list_available_weeks()
+        if len(_snap_weeks) >= 2:
+            st.markdown("---")
+            st.markdown(f'<div class="section-header"><h3>📊 Evolución Semanal</h3><span class="live-badge">{len(_snap_weeks)} SEM</span></div>', unsafe_allow_html=True)
+
+            _snap_resumenes = []
+            for _sw in _snap_weeks:
+                _sr = snapshots_engine.api.get_resumen_semanal(_sw)
+                if _sr:
+                    _snap_resumenes.append(_sr)
+
+            if _snap_resumenes:
+                _snap_df = pd.DataFrame(_snap_resumenes)
+
+                _evol_c1, _evol_c2 = st.columns(2)
+
+                with _evol_c1:
+                    _fig_vta = go.Figure()
+                    _fig_vta.add_trace(go.Bar(
+                        x=_snap_df['semana_iso'], y=_snap_df['venta_total_unidades'],
+                        marker_color=TEAL_600, name='Vta Unidades',
+                        text=_snap_df['venta_total_unidades'].apply(lambda x: f"{x/1000:.0f}K"),
+                        textposition='outside',
+                    ))
+                    _fig_vta.update_layout(
+                        title="Venta Total Unidades por Semana",
+                        height=300, margin=dict(t=40, b=30, l=40, r=20),
+                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                        font=dict(size=11),
+                        yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.05)'),
+                    )
+                    st.plotly_chart(_fig_vta, use_container_width=True)
+
+                with _evol_c2:
+                    _fig_stk = go.Figure()
+                    _fig_stk.add_trace(go.Bar(
+                        x=_snap_df['semana_iso'], y=_snap_df['stock_total_unidades'],
+                        marker_color=SLATE_500, name='Stock Total',
+                        text=_snap_df['stock_total_unidades'].apply(lambda x: f"{x/1000:.0f}K"),
+                        textposition='outside',
+                    ))
+                    _fig_stk.update_layout(
+                        title="Stock Total Unidades por Semana",
+                        height=300, margin=dict(t=40, b=30, l=40, r=20),
+                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                        font=dict(size=11),
+                        yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.05)'),
+                    )
+                    st.plotly_chart(_fig_stk, use_container_width=True)
+
+                # KPI deltas: última semana vs penúltima
+                if len(_snap_resumenes) >= 2:
+                    _curr = _snap_resumenes[-1]
+                    _prev = _snap_resumenes[-2]
+                    _d_vta = _curr['venta_total_unidades'] - _prev['venta_total_unidades']
+                    _d_stk = _curr['stock_total_unidades'] - _prev['stock_total_unidades']
+                    _d_skus = _curr['n_skus'] - _prev['n_skus']
+                    _pct_vta = (_d_vta / _prev['venta_total_unidades'] * 100) if _prev['venta_total_unidades'] else 0
+
+                    _dc1, _dc2, _dc3, _dc4 = st.columns(4)
+                    _delta_color = lambda v: "#059669" if v >= 0 else "#DC2626"
+                    _dc1.markdown(f'<div style="text-align:center; padding:8px;"><div style="font-size:0.7rem; color:var(--capi-text2);">Δ Venta U</div><div style="font-size:1.2rem; font-weight:700; color:{_delta_color(_d_vta)};">{"+" if _d_vta>=0 else ""}{_d_vta:,.0f}</div></div>', unsafe_allow_html=True)
+                    _dc2.markdown(f'<div style="text-align:center; padding:8px;"><div style="font-size:0.7rem; color:var(--capi-text2);">Δ Venta %</div><div style="font-size:1.2rem; font-weight:700; color:{_delta_color(_pct_vta)};">{"+" if _pct_vta>=0 else ""}{_pct_vta:.1f}%</div></div>', unsafe_allow_html=True)
+                    _dc3.markdown(f'<div style="text-align:center; padding:8px;"><div style="font-size:0.7rem; color:var(--capi-text2);">Δ Stock U</div><div style="font-size:1.2rem; font-weight:700; color:{_delta_color(-_d_stk)};">{"+" if _d_stk>=0 else ""}{_d_stk:,.0f}</div></div>', unsafe_allow_html=True)
+                    _dc4.markdown(f'<div style="text-align:center; padding:8px;"><div style="font-size:0.7rem; color:var(--capi-text2);">Δ SKUs</div><div style="font-size:1.2rem; font-weight:700; color:var(--capi-text);">{"+" if _d_skus>=0 else ""}{_d_skus}</div></div>', unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  SALUD DEL STOCK (Prompt C)
+#  Health Score compuesto: cobertura + quiebre + eficiencia + margen
+# ═══════════════════════════════════════════════════════════════
+
+elif nav_page == "🩺 Salud del Stock":
+    st.markdown(f'<div class="section-header"><h3>Salud del Stock</h3><span class="live-badge">HEALTH SCORE</span></div>', unsafe_allow_html=True)
+
+    if not _HAS_SNAPSHOTS:
+        st.warning("El modulo de snapshots no esta disponible. Se necesitan snapshots para calcular Salud del Stock.")
+    else:
+        _hs_weeks = snapshots_engine.list_available_weeks()
+        if not _hs_weeks:
+            st.info("No hay snapshots disponibles. Carga datos para generar el Health Score.")
+        else:
+            _hs_sem = _hs_weeks[-1]
+            _hs_df = snapshots_engine.api.get_snapshot(_hs_sem)
+
+            if _hs_df is None or _hs_df.empty:
+                st.warning(f"Snapshot de semana {_hs_sem} esta vacio.")
+            else:
+                st.caption(f"Semana: {_hs_sem} | {len(_hs_df):,} SKUs analizados")
+
+                # Calcular scores
+                _hs_global = motor_v2.build_health_score(_hs_df)
+                _hs_marca = motor_v2.build_health_score(_hs_df, grupo_cols=['marca'])
+                _hs_detail = motor_v2.build_health_detail(_hs_df)
+
+                # ── Delta temporal: comparar con semana anterior ──
+                _hs_prev_global = None
+                _hs_prev_marca = None
+                if len(_hs_weeks) >= 2:
+                    _hs_sem_prev = _hs_weeks[-2]
+                    _hs_df_prev = snapshots_engine.api.get_snapshot(_hs_sem_prev)
+                    if _hs_df_prev is not None and not _hs_df_prev.empty:
+                        _hs_prev_global = motor_v2.build_health_score(_hs_df_prev)
+                        _hs_prev_marca = motor_v2.build_health_score(_hs_df_prev, grupo_cols=['marca'])
+
+                _hs_tabs = st.tabs([
+                    "🎯 Diagnostico Rapido",
+                    "🏆 Ranking Marcas",
+                    "🔍 Drill-down",
+                    "📋 Detalle SKU",
+                ])
+
+                # ── Tab 1: Diagnostico Rapido ──
+                with _hs_tabs[0]:
+                    _g = _hs_global.iloc[0]
+                    _hs_score = float(_g['health_score'])
+                    _hs_semaforo = str(_g['semaforo'])
+
+                    # Colores de semaforo
+                    _sem_colors = {
+                        'SALUDABLE': '#059669',
+                        'ACEPTABLE': '#0ea5e9',
+                        'EN RIESGO': '#f59e0b',
+                        'CRITICO': '#dc2626',
+                    }
+                    _sem_color = _sem_colors.get(_hs_semaforo, SLATE_500)
+
+                    # Gauge visual con HTML + delta semanal
+                    _gauge_pct = min(_hs_score / 100, 1.0)
+                    _delta_html = ""
+                    if _hs_prev_global is not None and not _hs_prev_global.empty:
+                        _prev_score = float(_hs_prev_global.iloc[0]['health_score'])
+                        _delta = _hs_score - _prev_score
+                        if abs(_delta) >= 0.1:
+                            _d_arrow = "▲" if _delta > 0 else "▼"
+                            _d_color = "#059669" if _delta > 0 else "#dc2626"
+                            _delta_html = f'<span style="font-size:1rem; color:{_d_color}; margin-left:8px;">{_d_arrow} {abs(_delta):.1f}</span>'
+                    st.markdown(f"""
+                    <div style="text-align:center; padding:24px 0 16px 0;">
+                        <div style="font-size:4rem; font-weight:800; color:{_sem_color}; line-height:1;">{_hs_score:.0f}{_delta_html}</div>
+                        <div style="font-size:0.85rem; font-weight:600; color:{_sem_color}; letter-spacing:2px; margin-top:4px;">{_hs_semaforo}</div>
+                        <div style="margin:12px auto 0; width:200px; height:8px; background:{SLATE_200}; border-radius:4px; overflow:hidden;">
+                            <div style="width:{_gauge_pct*100:.0f}%; height:100%; background:{_sem_color}; border-radius:4px;"></div>
+                        </div>
+                        <div style="font-size:0.7rem; color:var(--capi-text2); margin-top:6px;">Health Score (0-100){' | vs semana anterior' if _delta_html else ''}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # 5 componentes en cards
+                    _comp_data = [
+                        ("Cobertura", f"{float(_g['pct_optimo_alto'])*100:.0f}%", f"{float(_g['score_cobertura']):.0f}/100", "25%",
+                         "SKUs en OPTIMO + ALTO", '#059669' if float(_g['score_cobertura']) >= 70 else '#f59e0b' if float(_g['score_cobertura']) >= 40 else '#dc2626'),
+                        ("Quiebre", f"{float(_g['pct_quiebre'])*100:.0f}%", f"{float(_g['score_quiebre']):.0f}/100", "20%",
+                         "En QUIEBRE + PRE-QUIEBRE", '#059669' if float(_g['score_quiebre']) >= 70 else '#f59e0b' if float(_g['score_quiebre']) >= 40 else '#dc2626'),
+                        ("Sobrestock", f"{float(_g['pct_exceso'])*100:.0f}%", f"{float(_g['score_sobrestock']):.0f}/100", "15%",
+                         "Capital parado (menos = mejor)", '#059669' if float(_g['score_sobrestock']) >= 70 else '#f59e0b' if float(_g['score_sobrestock']) >= 40 else '#dc2626'),
+                        ("Eficiencia", f"{float(_g['rotacion'])*100:.1f}%", f"{float(_g['score_eficiencia']):.0f}/100", "20%",
+                         "Rotacion a costo", '#059669' if float(_g['score_eficiencia']) >= 70 else '#f59e0b' if float(_g['score_eficiencia']) >= 40 else '#dc2626'),
+                        ("Margen", f"{float(_g['margen_pct'])*100:.1f}%", f"{float(_g['score_margen']):.0f}/100", "20%",
+                         "Contribucion / Venta", '#059669' if float(_g['score_margen']) >= 70 else '#f59e0b' if float(_g['score_margen']) >= 40 else '#dc2626'),
+                    ]
+                    _hc1, _hc2, _hc3, _hc4, _hc5 = st.columns(5)
+                    for _col_hs, (_title, _val, _sc, _weight, _desc, _color) in zip([_hc1, _hc2, _hc3, _hc4, _hc5], _comp_data):
+                        with _col_hs:
+                            st.markdown(f"""
+                            <div style="background:var(--capi-bg-surface); border:1px solid {SLATE_200}; border-radius:10px; padding:14px; text-align:center; border-top:3px solid {_color};">
+                                <div style="font-size:0.7rem; color:var(--capi-text2); font-weight:600; letter-spacing:1px;">{_title.upper()}</div>
+                                <div style="font-size:1.6rem; font-weight:700; color:{_color}; margin:4px 0;">{_val}</div>
+                                <div style="font-size:0.75rem; color:var(--capi-text2);">Score: {_sc} | Peso: {_weight}</div>
+                                <div style="font-size:0.65rem; color:{SLATE_400}; margin-top:4px;">{_desc}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                    # KPIs de contexto
+                    st.markdown("---")
+                    _kc1, _kc2, _kc3, _kc4 = st.columns(4)
+                    _kc1.metric("Total SKUs", f"{int(_g['n_skus']):,}")
+                    _kc2.metric("Con Stock", f"{int(_g['n_con_stock']):,}")
+                    _kc3.metric("Capital Parado", f"S/{float(_g['capital_parado']):,.0f}")
+                    _kc4.metric("Venta en Riesgo", f"S/{float(_g['venta_en_riesgo']):,.0f}")
+
+                # ── Tab 2: Ranking Marcas ──
+                with _hs_tabs[1]:
+                    st.markdown("##### Ranking de marcas por Health Score")
+
+                    # ── Filtro de materialidad: excluir marcas insignificantes ──
+                    _MIN_SKUS_MATERIAL = 5
+                    _MIN_VENTA_MATERIAL = 500
+                    _hs_marca_material = _hs_marca[
+                        (_hs_marca['n_skus'] >= _MIN_SKUS_MATERIAL) |
+                        (_hs_marca['venta_total'] >= _MIN_VENTA_MATERIAL)
+                    ].copy()
+                    _n_excluidas = len(_hs_marca) - len(_hs_marca_material)
+                    if _n_excluidas > 0:
+                        st.caption(f"{_n_excluidas} marcas excluidas por baja materialidad (<{_MIN_SKUS_MATERIAL} SKUs activos y <S/{_MIN_VENTA_MATERIAL:,} venta)")
+
+                    # Filtro de semaforo
+                    _hs_fc1, _hs_fc2 = st.columns([2, 1])
+                    with _hs_fc1:
+                        _hs_sem_filter = st.multiselect(
+                            "Filtrar por semaforo",
+                            ['SALUDABLE', 'ACEPTABLE', 'EN RIESGO', 'CRITICO'],
+                            default=['SALUDABLE', 'ACEPTABLE', 'EN RIESGO', 'CRITICO'],
+                            key="hs_sem_filter"
+                        )
+                    with _hs_fc2:
+                        _hs_sort_by = st.selectbox(
+                            "Ordenar por",
+                            ['Health Score', 'Capital Parado', 'Venta en Riesgo', 'Impacto Negocio'],
+                            key="hs_sort_by"
+                        )
+                    _hs_marca_f = _hs_marca_material[_hs_marca_material['semaforo'].isin(_hs_sem_filter)].copy()
+
+                    if _hs_marca_f.empty:
+                        st.info("No hay marcas con el filtro seleccionado.")
+                    else:
+                        # ── Delta semanal por marca ──
+                        if _hs_prev_marca is not None and not _hs_prev_marca.empty:
+                            _prev_map = _hs_prev_marca.set_index('marca')['health_score'].to_dict()
+                            _hs_marca_f['_prev_score'] = _hs_marca_f['marca'].map(_prev_map)
+                            _hs_marca_f['delta_score'] = (_hs_marca_f['health_score'] - _hs_marca_f['_prev_score'].fillna(_hs_marca_f['health_score'])).round(1)
+                            _hs_marca_f = _hs_marca_f.drop(columns=['_prev_score'])
+                        else:
+                            _hs_marca_f['delta_score'] = 0.0
+
+                        # Ordenar según selección
+                        _sort_col_map = {
+                            'Health Score': 'health_score',
+                            'Capital Parado': 'capital_parado',
+                            'Venta en Riesgo': 'venta_en_riesgo',
+                            'Impacto Negocio': 'impacto',
+                        }
+                        _sort_col = _sort_col_map.get(_hs_sort_by, 'health_score')
+                        # Impacto ordena desc (mayor impacto primero); el resto asc (peor score primero)
+                        _sort_asc = False if _sort_col == 'impacto' else True
+                        _hs_marca_sorted = _hs_marca_f.sort_values(_sort_col, ascending=_sort_asc)
+
+                        # Horizontal bar chart con Plotly
+                        _bar_colors = []
+                        for _s in _hs_marca_sorted['semaforo']:
+                            _bar_colors.append(_sem_colors.get(str(_s), SLATE_400))
+
+                        _fig_rank = go.Figure(go.Bar(
+                            x=_hs_marca_sorted['health_score'],
+                            y=_hs_marca_sorted['marca'],
+                            orientation='h',
+                            marker_color=_bar_colors,
+                            text=[f"{v:.0f}" for v in _hs_marca_sorted['health_score']],
+                            textposition='outside',
+                            textfont=dict(size=11),
+                        ))
+                        _fig_rank.update_layout(
+                            height=max(300, len(_hs_marca_sorted) * 28),
+                            margin=dict(l=0, r=40, t=10, b=10),
+                            xaxis=dict(range=[min(_hs_marca_sorted['health_score'].min() - 10, 0), 105], title="Health Score"),
+                            yaxis=dict(automargin=True),
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)',
+                        )
+                        # Lineas de referencia para semaforo
+                        for _thresh, _lbl in [(40, 'CRITICO'), (60, 'EN RIESGO'), (75, 'ACEPTABLE')]:
+                            _fig_rank.add_vline(x=_thresh, line_dash="dot", line_color=SLATE_400, line_width=1,
+                                                annotation_text=_lbl, annotation_position="top")
+                        st.plotly_chart(_fig_rank, use_container_width=True)
+
+                        # ── Scatter Plot: Score vs Capital Parado ──
+                        st.markdown("##### Mapa de Impacto: Score vs Capital")
+                        _fig_scatter = go.Figure()
+                        _scatter_colors = [_sem_colors.get(str(s), SLATE_400) for s in _hs_marca_f['semaforo']]
+                        # Bubble size = impacto (si existe) o n_skus
+                        if 'impacto' in _hs_marca_f.columns and _hs_marca_f['impacto'].max() > 0:
+                            _bubble_raw = _hs_marca_f['impacto'].fillna(0)
+                            _bubble_size = (_bubble_raw / _bubble_raw.max() * 35 + 8).clip(upper=50)
+                            _hover_extra = "Impacto: %{customdata:.1f}<br>"
+                            _customdata = _hs_marca_f['impacto']
+                        else:
+                            _bubble_size = (_hs_marca_f['n_skus'] / _hs_marca_f['n_skus'].max() * 30 + 8).clip(upper=45)
+                            _hover_extra = ""
+                            _customdata = None
+                        _fig_scatter.add_trace(go.Scatter(
+                            x=_hs_marca_f['health_score'],
+                            y=_hs_marca_f['capital_parado'],
+                            mode='markers+text',
+                            marker=dict(
+                                size=_bubble_size,
+                                color=_scatter_colors,
+                                opacity=0.8,
+                                line=dict(width=1, color='white'),
+                            ),
+                            text=_hs_marca_f['marca'],
+                            textposition='top center',
+                            textfont=dict(size=9),
+                            customdata=_customdata,
+                            hovertemplate="<b>%{text}</b><br>Score: %{x:.0f}<br>Capital Parado: S/%{y:,.0f}<br>" + _hover_extra + "<extra></extra>",
+                        ))
+                        # Cuadrante peligroso: bajo score + alto capital
+                        _fig_scatter.add_shape(
+                            type="rect", x0=-100, x1=60, y0=_hs_marca_f['capital_parado'].median(), y1=_hs_marca_f['capital_parado'].max() * 1.1,
+                            fillcolor="rgba(220,38,38,0.05)", line=dict(width=0),
+                        )
+                        _fig_scatter.add_annotation(
+                            x=30, y=_hs_marca_f['capital_parado'].max() * 0.95,
+                            text="ZONA CRITICA", showarrow=False,
+                            font=dict(size=10, color="#dc2626"), opacity=0.6,
+                        )
+                        _fig_scatter.update_layout(
+                            height=400,
+                            margin=dict(l=0, r=0, t=10, b=0),
+                            xaxis=dict(title="Health Score", zeroline=True),
+                            yaxis=dict(title="Capital Parado (S/)", tickformat=","),
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)',
+                        )
+                        st.plotly_chart(_fig_scatter, use_container_width=True)
+
+                        # Tabla resumen
+                        st.markdown("##### Detalle por marca")
+                        _tbl_cols = ['marca', 'health_score', 'semaforo', 'n_skus', 'n_con_stock',
+                                     'pct_optimo_alto', 'pct_quiebre', 'pct_exceso', 'rotacion', 'margen_pct',
+                                     'capital_parado', 'venta_en_riesgo']
+                        _tbl_headers = ['Marca', 'Score', 'Semaforo', 'SKUs', 'Con Stock',
+                                        '% Opt+Alto', '% Quiebre', '% Exceso', 'Rotación %', 'Margen %',
+                                        'Capital Parado', 'Vta en Riesgo']
+                        # Agregar impacto y prioridad si existen (motor los genera a nivel marca)
+                        if 'impacto' in _hs_marca_f.columns:
+                            _tbl_cols.extend(['impacto', 'prioridad'])
+                            _tbl_headers.extend(['Impacto', 'Prioridad'])
+                        # Agregar delta si existe
+                        if 'delta_score' in _hs_marca_f.columns and _hs_marca_f['delta_score'].abs().sum() > 0:
+                            _tbl_cols.insert(2, 'delta_score')
+                            _tbl_headers.insert(2, 'Delta')
+                        _tbl_marca = _hs_marca_f[_tbl_cols].copy()
+                        _tbl_marca.columns = _tbl_headers
+                        _tbl_marca['% Opt+Alto'] = (_tbl_marca['% Opt+Alto'] * 100).round(1)
+                        _tbl_marca['% Quiebre'] = (_tbl_marca['% Quiebre'] * 100).round(1)
+                        _tbl_marca['% Exceso'] = (_tbl_marca['% Exceso'] * 100).round(1)
+                        _tbl_marca['Rotación %'] = (_tbl_marca['Rotación %'] * 100).round(1)
+                        _tbl_marca['Margen %'] = (_tbl_marca['Margen %'] * 100).round(1)
+                        _tbl_marca['Capital Parado'] = _tbl_marca['Capital Parado'].apply(lambda x: f"S/{x:,.0f}")
+                        _tbl_marca['Vta en Riesgo'] = _tbl_marca['Vta en Riesgo'].apply(lambda x: f"S/{x:,.0f}")
+                        _tbl_marca = _tbl_marca.sort_values('Score', ascending=False)
+                        st.dataframe(_tbl_marca, use_container_width=True, hide_index=True, height=500)
+
+                        # Tags de prioridad con color (debajo de la tabla)
+                        if 'impacto' in _hs_marca_f.columns:
+                            _foco = _hs_marca_f[_hs_marca_f['prioridad'] == 'FOCO URGENTE']['marca'].tolist()
+                            _monit = _hs_marca_f[_hs_marca_f['prioridad'] == 'MONITOREAR']['marca'].tolist()
+                            if _foco:
+                                _foco_tags = " ".join([f"<span style='background:#dc2626;color:white;padding:2px 8px;border-radius:4px;font-size:0.82em;font-weight:600;'>{m}</span>" for m in _foco])
+                                st.markdown(f"🔴 **FOCO URGENTE**: {_foco_tags}", unsafe_allow_html=True)
+                            if _monit:
+                                _monit_tags = " ".join([f"<span style='background:#f59e0b;color:white;padding:2px 8px;border-radius:4px;font-size:0.82em;font-weight:600;'>{m}</span>" for m in _monit])
+                                st.markdown(f"🟡 **MONITOREAR**: {_monit_tags}", unsafe_allow_html=True)
+
+                        # Excel download
+                        _buf_marca = io.BytesIO()
+                        _tbl_marca.to_excel(_buf_marca, index=False, sheet_name='Ranking Marcas')
+                        st.download_button(
+                            "Descargar ranking Excel",
+                            data=_buf_marca.getvalue(),
+                            file_name=f"health_ranking_marcas_{_hs_sem}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="hs_dl_ranking"
+                        )
+
+                # ── Tab 3: Drill-down ──
+                with _hs_tabs[2]:
+                    st.markdown("##### Drill-down: Marca > Linea > Temporada")
+
+                    _dd_marca_sel = st.selectbox(
+                        "Seleccionar marca",
+                        sorted(_hs_marca['marca'].unique()),
+                        key="hs_dd_marca"
+                    )
+
+                    if _dd_marca_sel:
+                        # Score de la marca
+                        _dd_marca_row = _hs_marca[_hs_marca['marca'] == _dd_marca_sel].iloc[0]
+                        _dd_color = _sem_colors.get(str(_dd_marca_row['semaforo']), SLATE_500)
+                        st.markdown(f"""
+                        <div style="background:var(--capi-bg-surface); border:1px solid {SLATE_200}; border-radius:10px; padding:12px 16px; margin-bottom:12px; display:flex; align-items:center; gap:16px;">
+                            <div style="font-size:2rem; font-weight:800; color:{_dd_color};">{float(_dd_marca_row['health_score']):.0f}</div>
+                            <div>
+                                <div style="font-size:1rem; font-weight:600; color:var(--capi-text);">{_dd_marca_sel}</div>
+                                <div style="font-size:0.75rem; color:{_dd_color}; font-weight:600;">{_dd_marca_row['semaforo']}</div>
+                            </div>
+                            <div style="margin-left:auto; display:flex; gap:20px;">
+                                <div style="text-align:center;"><div style="font-size:0.65rem; color:var(--capi-text2);">SKUs</div><div style="font-weight:600;">{int(_dd_marca_row['n_skus'])}</div></div>
+                                <div style="text-align:center;"><div style="font-size:0.65rem; color:var(--capi-text2);">Rotación %</div><div style="font-weight:600;">{float(_dd_marca_row['rotacion'])*100:.1f}%</div></div>
+                                <div style="text-align:center;"><div style="font-size:0.65rem; color:var(--capi-text2);">Margen</div><div style="font-weight:600;">{float(_dd_marca_row['margen_pct'])*100:.1f}%</div></div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        # Drill-down por linea
+                        _dd_df_marca = _hs_df[_hs_df['marca'] == _dd_marca_sel]
+                        _dd_linea = motor_v2.build_health_score(_dd_df_marca, grupo_cols=['linea'])
+
+                        if not _dd_linea.empty:
+                            st.markdown(f"###### Por Linea ({len(_dd_linea)} lineas)")
+                            _dd_linea_sorted = _dd_linea.sort_values('health_score', ascending=False)
+                            _dd_bar_colors = [_sem_colors.get(str(s), SLATE_400) for s in _dd_linea_sorted['semaforo']]
+
+                            _fig_dd = go.Figure(go.Bar(
+                                x=_dd_linea_sorted['linea'],
+                                y=_dd_linea_sorted['health_score'],
+                                marker_color=_dd_bar_colors,
+                                text=[f"{v:.0f}" for v in _dd_linea_sorted['health_score']],
+                                textposition='outside',
+                            ))
+                            _fig_dd.update_layout(
+                                height=350,
+                                margin=dict(l=0, r=0, t=10, b=0),
+                                yaxis=dict(range=[0, 105], title="Health Score"),
+                                xaxis=dict(automargin=True),
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                paper_bgcolor='rgba(0,0,0,0)',
+                            )
+                            st.plotly_chart(_fig_dd, use_container_width=True)
+
+                        # Drill-down por temporada dentro de la marca
+                        _dd_temp = motor_v2.build_health_score(_dd_df_marca, grupo_cols=['temporada'])
+                        if not _dd_temp.empty:
+                            st.markdown("###### Por Temporada")
+                            _tc1, _tc2, _tc3 = st.columns(3)
+                            for _col_t, _temp in zip([_tc1, _tc2, _tc3], ['OI', 'PV', 'TT']):
+                                with _col_t:
+                                    _tr = _dd_temp[_dd_temp['temporada'] == _temp]
+                                    if not _tr.empty:
+                                        _tr = _tr.iloc[0]
+                                        _tc = _sem_colors.get(str(_tr['semaforo']), SLATE_400)
+                                        st.markdown(f"""
+                                        <div style="background:var(--capi-bg-surface); border:1px solid {SLATE_200}; border-radius:8px; padding:12px; text-align:center;">
+                                            <div style="font-size:0.7rem; color:var(--capi-text2); font-weight:600;">{_temp}</div>
+                                            <div style="font-size:1.8rem; font-weight:700; color:{_tc};">{float(_tr['health_score']):.0f}</div>
+                                            <div style="font-size:0.65rem; color:{_tc};">{_tr['semaforo']}</div>
+                                            <div style="font-size:0.6rem; color:var(--capi-text2); margin-top:4px;">{int(_tr['n_skus'])} SKUs | {float(_tr['pct_quiebre'])*100:.0f}% quiebre</div>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                    else:
+                                        st.markdown(f"""
+                                        <div style="background:var(--capi-bg-surface); border:1px solid {SLATE_200}; border-radius:8px; padding:12px; text-align:center;">
+                                            <div style="font-size:0.7rem; color:var(--capi-text2);">{_temp}</div>
+                                            <div style="font-size:1rem; color:{SLATE_400};">Sin data</div>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+
+                        # Heatmap linea × temporada
+                        _dd_lt = motor_v2.build_health_score(_dd_df_marca, grupo_cols=['linea', 'temporada'])
+                        if not _dd_lt.empty and len(_dd_lt) > 1:
+                            st.markdown("###### Heatmap: Linea x Temporada")
+                            _pivot_hs = _dd_lt.pivot_table(index='linea', columns='temporada', values='health_score', aggfunc='first')
+                            # Reorder temporada columns
+                            _temp_order = [t for t in ['OI', 'PV', 'TT'] if t in _pivot_hs.columns]
+                            _pivot_hs = _pivot_hs[_temp_order]
+
+                            _fig_hm = go.Figure(go.Heatmap(
+                                z=_pivot_hs.values,
+                                x=_pivot_hs.columns.tolist(),
+                                y=_pivot_hs.index.tolist(),
+                                colorscale=[[0, '#dc2626'], [0.4, '#f59e0b'], [0.6, '#0ea5e9'], [0.75, '#059669'], [1, '#059669']],
+                                zmin=0, zmax=100,
+                                text=[[f"{v:.0f}" if pd.notna(v) else "" for v in row] for row in _pivot_hs.values],
+                                texttemplate="%{text}",
+                                textfont=dict(size=14, color="white"),
+                                hovertemplate="Linea: %{y}<br>Temporada: %{x}<br>Health Score: %{z:.0f}<extra></extra>",
+                                colorbar=dict(title="Score", tickvals=[0, 25, 50, 75, 100]),
+                            ))
+                            _fig_hm.update_layout(
+                                height=max(200, len(_pivot_hs) * 35 + 60),
+                                margin=dict(l=0, r=0, t=10, b=0),
+                                yaxis=dict(automargin=True),
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                paper_bgcolor='rgba(0,0,0,0)',
+                            )
+                            st.plotly_chart(_fig_hm, use_container_width=True)
+
+                # ── Tab 4: Detalle SKU ──
+                with _hs_tabs[3]:
+                    st.markdown("##### Detalle a nivel SKU")
+
+                    # Filtros
+                    _dt_c1, _dt_c2, _dt_c3 = st.columns(3)
+                    with _dt_c1:
+                        _dt_marca = st.selectbox("Marca", ['Todas'] + sorted(_hs_detail['marca'].unique()), key="hs_dt_marca")
+                    with _dt_c2:
+                        _lineas_avail = sorted(_hs_detail['linea'].dropna().unique()) if _dt_marca == 'Todas' else sorted(_hs_detail[_hs_detail['marca'] == _dt_marca]['linea'].dropna().unique())
+                        _dt_linea = st.selectbox("Linea", ['Todas'] + list(_lineas_avail), key="hs_dt_linea")
+                    with _dt_c3:
+                        _dt_estado = st.multiselect("Estado", sorted(_hs_detail['estado'].unique()), default=[], key="hs_dt_estado")
+
+                    _dt_df = _hs_detail.copy()
+                    if _dt_marca != 'Todas':
+                        _dt_df = _dt_df[_dt_df['marca'] == _dt_marca]
+                    if _dt_linea != 'Todas':
+                        _dt_df = _dt_df[_dt_df['linea'] == _dt_linea]
+                    if _dt_estado:
+                        _dt_df = _dt_df[_dt_df['estado'].isin(_dt_estado)]
+
+                    st.caption(f"{len(_dt_df):,} SKUs filtrados")
+
+                    # Tabla
+                    _dt_show = _dt_df[['sku', 'descripcion', 'marca', 'linea', 'temporada', 'estado',
+                                       'cobertura_sem', 'stock_total', 'stock_cd', 'venta_soles',
+                                       'contribucion_soles', 'stock_valor_costo', 'pct_descuento',
+                                       'edad_semanas']].copy()
+                    _dt_show.columns = ['SKU', 'Descripcion', 'Marca', 'Linea', 'Temp', 'Estado',
+                                        'Cob (sem)', 'Stock Total', 'Stock CD', 'Venta S/',
+                                        'Contrib S/', 'Stock Costo', '% Dscto', 'Edad (sem)']
+                    _dt_show['Cob (sem)'] = _dt_show['Cob (sem)'].round(1)
+                    _dt_show['Venta S/'] = _dt_show['Venta S/'].round(0)
+                    _dt_show['Contrib S/'] = _dt_show['Contrib S/'].round(0)
+                    _dt_show['Stock Costo'] = _dt_show['Stock Costo'].round(0)
+                    _dt_show['% Dscto'] = (_dt_show['% Dscto'] * 100).round(0)
+
+                    st.dataframe(_dt_show, use_container_width=True, hide_index=True, height=500)
+
+                    # Excel download
+                    _buf_detail = io.BytesIO()
+                    _dt_show.to_excel(_buf_detail, index=False, sheet_name='Detalle SKU')
+                    st.download_button(
+                        "Descargar detalle Excel",
+                        data=_buf_detail.getvalue(),
+                        file_name=f"health_detalle_sku_{_hs_sem}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="hs_dl_detail"
+                    )
+
 
 # ═══════════════════════════════════════════════════════════════
 #  VISTA CAPI 1: REPOSICIÓN
@@ -1945,7 +2505,7 @@ elif nav_page == "📦 Reposición":
     _n_critico = s.get('n_critico', 0)
     _n_total = s.get('total_combos', 1)
     _pct_critico = (_n_critico / _n_total * 100) if _n_total > 0 else 0
-    _capital_critico = df_cob[df_cob['estado'] == 'CRÍTICO']['stock_valor_costo'].sum() if 'estado' in df_cob.columns else 0
+    _capital_critico = df_cob[df_cob['estado'] == 'QUIEBRE']['stock_valor_costo'].sum() if 'estado' in df_cob.columns else 0
     _tiendas_cob_baja = df_cob[df_cob['cobertura_sem'] < params['umbral_critico']]['tienda'].nunique() if 'tienda' in df_cob.columns else 0
 
     st.markdown(f'<div class="section-header"><h3>Vista Reposición</h3><span class="live-badge">GESTIÓN DE STOCK</span></div>', unsafe_allow_html=True)
@@ -1970,7 +2530,7 @@ elif nav_page == "📦 Reposición":
         <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
             <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Capital atrapado en críticos</div>
             <div style="font-size:1.6rem; font-weight:700; color:{TEAL_700};">S/ {_capital_critico:,.0f}</div>
-            <div style="font-size:0.7rem; color:var(--capi-text2);">SKUs en estado CRÍTICO</div>
+            <div style="font-size:0.7rem; color:var(--capi-text2);">SKUs en estado QUIEBRE</div>
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
@@ -2329,6 +2889,78 @@ elif nav_page == "📦 Reposición":
             key="dl_reposicion_vista",
         )
 
+    # ── REPO EN RIESGO — Mini-vista Prompt F ──
+    # SKUs con repo calculada pero riesgo de que no se materialice
+    if not df_rep.empty and 'riesgo_repo' in df_rep.columns:
+        _df_riesgo = df_rep[df_rep['riesgo_repo'] == True].copy()
+        if not _df_riesgo.empty:
+            st.markdown("---")
+            _n_riesgo = len(_df_riesgo)
+            _n_inminente = _df_riesgo['quiebre_inminente'].sum() if 'quiebre_inminente' in _df_riesgo.columns else 0
+            _n_proveedor = _df_riesgo['requiere_proveedor'].sum() if 'requiere_proveedor' in _df_riesgo.columns else 0
+            _n_descont = _df_riesgo['descontinuado_temporal'].sum() if 'descontinuado_temporal' in _df_riesgo.columns else 0
+
+            st.markdown(f"""<div style="background:#FEF2F2; border-left:4px solid #DC2626; padding:12px 16px; border-radius:10px; margin-bottom:12px;">
+            <strong style="color:#DC2626;">Repo en Riesgo</strong>
+            <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; {_n_riesgo} líneas con repo calculada pero riesgo de no materializarse</span>
+            </div>""", unsafe_allow_html=True)
+
+            _rk1, _rk2, _rk3 = st.columns(3)
+            with _rk1:
+                st.markdown(f"""
+                <div style="background:var(--capi-bg-surface); border-radius:10px; padding:12px 16px; border-left:3px solid #DC2626;">
+                    <div style="font-size:0.72rem; color:var(--capi-text2);">Quiebre Inminente</div>
+                    <div style="font-size:1.4rem; font-weight:700; color:#DC2626;">{int(_n_inminente)}</div>
+                    <div style="font-size:0.68rem; color:var(--capi-text2);">Cobertura &lt; lead time proveedor</div>
+                </div>""", unsafe_allow_html=True)
+            with _rk2:
+                st.markdown(f"""
+                <div style="background:var(--capi-bg-surface); border-radius:10px; padding:12px 16px; border-left:3px solid #F59E0B;">
+                    <div style="font-size:0.72rem; color:var(--capi-text2);">Depende de Proveedor</div>
+                    <div style="font-size:1.4rem; font-weight:700; color:#F59E0B;">{int(_n_proveedor)}</div>
+                    <div style="font-size:0.68rem; color:var(--capi-text2);">Terceras sin stock CD</div>
+                </div>""", unsafe_allow_html=True)
+            with _rk3:
+                st.markdown(f"""
+                <div style="background:var(--capi-bg-surface); border-radius:10px; padding:12px 16px; border-left:3px solid #8B5CF6;">
+                    <div style="font-size:0.72rem; color:var(--capi-text2);">Descontinuado Temporal</div>
+                    <div style="font-size:1.4rem; font-weight:700; color:#8B5CF6;">{int(_n_descont)}</div>
+                    <div style="font-size:0.68rem; color:var(--capi-text2);">Temporada opuesta + edad &gt;16 sem</div>
+                </div>""", unsafe_allow_html=True)
+
+            # Tabla detalle de riesgo
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            _riesgo_cols = ['marca', 'sku', 'nombre', 'tienda', 'cobertura_actual', 'a_reponer',
+                            'lead_time_dias', 'stock_cd', 'temporada', 'urgencia']
+            _riesgo_show = [c for c in _riesgo_cols if c in _df_riesgo.columns]
+
+            # Agregar columna legible de tipo de riesgo
+            def _tipo_riesgo(row):
+                tipos = []
+                if row.get('quiebre_inminente', False):
+                    tipos.append('Quiebre Inminente')
+                if row.get('requiere_proveedor', False):
+                    tipos.append('Sin Stock CD')
+                if row.get('descontinuado_temporal', False):
+                    tipos.append('Descontinuado')
+                return ' · '.join(tipos) if tipos else ''
+
+            _df_riesgo_show = _df_riesgo[_riesgo_show].copy()
+            _df_riesgo_show['tipo_riesgo'] = _df_riesgo.apply(_tipo_riesgo, axis=1)
+
+            _riesgo_rename = {
+                'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Nombre',
+                'tienda': 'Tienda', 'cobertura_actual': 'Cob Sem',
+                'a_reponer': 'A Reponer', 'lead_time_dias': 'Lead Time (d)',
+                'stock_cd': 'Stock CD', 'temporada': 'Temp', 'urgencia': 'Urgencia',
+                'tipo_riesgo': 'Tipo Riesgo',
+            }
+            _df_riesgo_show = _df_riesgo_show.rename(columns=_riesgo_rename)
+
+            with st.expander(f"Ver detalle — {_n_riesgo} líneas en riesgo", expanded=False):
+                st.dataframe(_df_riesgo_show, use_container_width=True, hide_index=True)
+
+
     # ── Alertas y recomendaciones de reposición ──
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
     st.markdown("##### Recomendaciones de gestión")
@@ -2428,9 +3060,14 @@ elif nav_page == "📊 Sobrestock":
 
     with _sobre_tab3:
         st.markdown("##### Obsoletos por antigüedad")
-        _df_obs_tab = df_cob[df_cob['estado'].isin(['DORMIDO', 'MUERTO', 'LIQUIDAR'])].copy() if 'estado' in df_cob.columns else pd.DataFrame()
+        # Solo MUERTO (>26 sem sin venta) y LIQUIDAR (>52 sem cob + edad >26)
+        # DORMIDO (8-26 sem sin venta) NO es obsoleto — necesita empuje/precio, no liquidación
+        _df_obs_tab = df_cob[
+            (df_cob['estado'].isin(['MUERTO', 'LIQUIDAR'])) &
+            (df_cob['edad_semanas'].fillna(0) >= 26)
+        ].copy() if 'estado' in df_cob.columns else pd.DataFrame()
         if _df_obs_tab.empty:
-            st.info("No hay mercadería obsoleta detectada.")
+            st.info("No hay mercadería obsoleta detectada (edad > 26 semanas).")
         else:
             _obs_cols = [c for c in ['marca', 'sku', 'nombre', 'tienda', 'stock_total', 'edad_semanas',
                                       'cobertura_sem', 'pct_descuento', 'stock_valor_costo'] if c in _df_obs_tab.columns]
@@ -2442,7 +3079,7 @@ elif nav_page == "📊 Sobrestock":
             st.dataframe(_df_obs_d.head(300).style.format({
                 'Cob (sem)': '{:.1f}', 'Dscto': '{:.0%}', 'Capital S/': 'S/ {:,.0f}',
             }, na_rep="—"), use_container_width=True, hide_index=True, height=400)
-            st.caption(f"{len(_df_obs_tab):,} combos en estados DORMIDO/MUERTO/LIQUIDAR · Capital: S/ {_df_obs_tab['stock_valor_costo'].sum():,.0f}")
+            st.caption(f"{len(_df_obs_tab):,} combos en estados MUERTO/LIQUIDAR (edad ≥ 26 sem) · Capital: S/ {_df_obs_tab['stock_valor_costo'].sum():,.0f}")
 
     # ── Descarga Excel Sobrestock ──
     if not _df_sobre.empty:
@@ -2477,6 +3114,174 @@ elif nav_page == "📊 Sobrestock":
                 st.markdown(_as['mensaje'])
     else:
         st.info("Sin alertas de sobrestock activas.")
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  ACCIONES DE STOCK — sección Sprint 1 Capi (Prompt C-light)
+#  Unifica venta cero + sobrestock + alto bajo lógica de tiers (A1-A4/B1-B3/C)
+# ═════════════════════════════════════════════════════════════════════
+
+elif nav_page == "🎯 Acciones de Stock":
+
+    from acciones_stock import build_acciones_stock, build_resumen_acciones, filtrar_acciones
+
+    # ── Calcular tabla (lazy, on-demand) ──
+    # df_maestro=None: la función no requiere maestro hoy (reservado para Sprint 3).
+    df_acciones = build_acciones_stock(df_cob, df_maestro=None, params=params)
+    _resumen = build_resumen_acciones(df_acciones)
+
+    # ── Header ──
+    st.markdown(
+        '<div class="section-header"><h3>Acciones de Stock</h3>'
+        '<span class="live-badge">GESTIÓN DE STOCK</span></div>',
+        unsafe_allow_html=True
+    )
+    st.caption(
+        "SKUs que requieren intervención, agrupados por tier de criticidad. "
+        "Markdown NO es palanca primaria — la acción sugerida prioriza exhibición y transferencia primero."
+    )
+
+    if df_acciones.empty:
+        st.info("No hay SKUs en estados accionables con la data actual.")
+    else:
+        # ── KPIs ejecutivos (4 cards) ──
+        _k1, _k2, _k3, _k4 = st.columns(4)
+        with _k1:
+            st.markdown(f"""
+            <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_SOBRESTOCK};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Capital inmovilizado</div>
+                <div style="font-size:1.6rem; font-weight:700; color:{STATUS_SOBRESTOCK};">S/ {_resumen['capital_total']:,.0f}</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">{_resumen['n_combos']:,} combos · {_resumen['n_skus']:,} SKUs</div>
+            </div>""", unsafe_allow_html=True)
+        with _k2:
+            _pct_pareto = (_resumen['capital_pareto'] / _resumen['capital_total'] * 100) if _resumen['capital_total'] > 0 else 0
+            st.markdown(f"""
+            <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_ALTO};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Pareto 80% (concentración)</div>
+                <div style="font-size:1.6rem; font-weight:700; color:{STATUS_ALTO};">S/ {_resumen['capital_pareto']:,.0f}</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">{_pct_pareto:.0f}% del total · foco prioritario</div>
+            </div>""", unsafe_allow_html=True)
+        with _k3:
+            st.markdown(f"""
+            <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_LIQUIDAR};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Sin markdown intentado</div>
+                <div style="font-size:1.6rem; font-weight:700; color:{STATUS_LIQUIDAR};">{_resumen['n_sin_markdown']:,}</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">SKUs ESTANCADO/LIQUIDAR con dscto &lt;20%</div>
+            </div>""", unsafe_allow_html=True)
+        with _k4:
+            st.markdown(f"""
+            <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_MUERTO};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Tiendas afectadas</div>
+                <div style="font-size:1.6rem; font-weight:700; color:{STATUS_MUERTO};">{_resumen['n_tiendas_afectadas']}</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">de las 32 tiendas + ecommerce</div>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+        # ── Top marcas + top tiendas (lado a lado) ──
+        _top1, _top2 = st.columns(2)
+        with _top1:
+            st.markdown("##### Top 5 marcas con capital parado")
+            if _resumen['top_marcas']:
+                _df_top_m = pd.DataFrame(
+                    [(m, c) for m, c in _resumen['top_marcas'].items()],
+                    columns=['Marca', 'Capital S/']
+                )
+                st.dataframe(
+                    _df_top_m.style.format({'Capital S/': 'S/ {:,.0f}'}),
+                    use_container_width=True, hide_index=True
+                )
+        with _top2:
+            st.markdown("##### Top 5 tiendas con capital parado")
+            if _resumen['top_tiendas']:
+                _df_top_t = pd.DataFrame(
+                    [(t, c) for t, c in _resumen['top_tiendas'].items()],
+                    columns=['Tienda', 'Capital S/']
+                )
+                st.dataframe(
+                    _df_top_t.style.format({'Capital S/': 'S/ {:,.0f}'}),
+                    use_container_width=True, hide_index=True
+                )
+
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+        # ── Filtros ──
+        with st.expander("🔍 Filtros", expanded=False):
+            _f1, _f2, _f3, _f4 = st.columns(4)
+            _marcas_disp  = sorted(df_acciones['marca'].dropna().unique()) if 'marca' in df_acciones.columns else []
+            _tiendas_disp = sorted(df_acciones['tienda'].dropna().unique()) if 'tienda' in df_acciones.columns else []
+            _cats_disp    = sorted(df_acciones['categoria'].dropna().unique()) if 'categoria' in df_acciones.columns else []
+            _tiers_disp   = sorted(df_acciones['tier'].dropna().unique())
+
+            with _f1:
+                _marcas_sel = st.multiselect("Marca", _marcas_disp, default=[])
+            with _f2:
+                _tiendas_sel = st.multiselect("Tienda", _tiendas_disp, default=[])
+            with _f3:
+                _cats_sel = st.multiselect("Categoría", _cats_disp, default=[])
+            with _f4:
+                _tiers_sel = st.multiselect("Tier", _tiers_disp, default=[])
+
+            _t1, _t2 = st.columns(2)
+            with _t1:
+                _solo_pareto = st.toggle("Solo Pareto 80% por tienda", value=False, key="ac_pareto")
+            with _t2:
+                _solo_sin_mkdn = st.toggle("Solo sin markdown intentado", value=False, key="ac_sin_mkdn")
+
+        # ── Aplicar filtros ──
+        df_filt = filtrar_acciones(
+            df_acciones,
+            marcas=_marcas_sel or None,
+            tiendas=_tiendas_sel or None,
+            categorias=_cats_sel or None,
+            tiers=_tiers_sel or None,
+            solo_pareto=_solo_pareto,
+            solo_sin_markdown=_solo_sin_mkdn,
+        )
+
+        st.caption(
+            f"{len(df_filt):,} combos · S/ {df_filt['stock_valor_costo'].sum():,.0f} capital filtrado"
+            + (f" (de {len(df_acciones):,} totales)" if len(df_filt) < len(df_acciones) else "")
+        )
+
+        # ── Tabla principal ──
+        _cols_show = ['tier', 'criticidad', 'marca', 'sku', 'nombre', 'categoria', 'tienda',
+                      'stock_total', 'stock_valor_costo', 'cobertura_sem', 'edad_semanas',
+                      'estado', 'accion_sugerida', 'pct_descuento']
+        _cols_disp = [c for c in _cols_show if c in df_filt.columns]
+        _df_show = df_filt[_cols_disp].rename(columns={
+            'tier': 'Tier', 'criticidad': 'Criticidad', 'marca': 'Marca', 'sku': 'SKU',
+            'nombre': 'Producto', 'categoria': 'Categoría', 'tienda': 'Tienda',
+            'stock_total': 'Stock', 'stock_valor_costo': 'Capital S/',
+            'cobertura_sem': 'Cob (sem)', 'edad_semanas': 'Edad (sem)',
+            'estado': 'Estado', 'accion_sugerida': 'Acción sugerida',
+            'pct_descuento': 'Dscto',
+        })
+
+        _format_dict = {}
+        if 'Capital S/' in _df_show.columns:  _format_dict['Capital S/']  = 'S/ {:,.0f}'
+        if 'Cob (sem)' in _df_show.columns:   _format_dict['Cob (sem)']   = '{:.1f}'
+        if 'Edad (sem)' in _df_show.columns:  _format_dict['Edad (sem)']  = '{:.0f}'
+        if 'Dscto' in _df_show.columns:       _format_dict['Dscto']       = '{:.0%}'
+
+        st.dataframe(
+            _df_show.head(500).style.format(_format_dict, na_rep="—"),
+            use_container_width=True, hide_index=True, height=500
+        )
+        if len(df_filt) > 500:
+            st.caption(f"Mostrando primeros 500 de {len(df_filt):,}. Refina con filtros o exporta Excel.")
+
+        # ── Export Excel ──
+        _buf = io.BytesIO()
+        with pd.ExcelWriter(_buf, engine='openpyxl') as _writer:
+            df_filt.to_excel(_writer, index=False, sheet_name='Acciones de Stock')
+        st.download_button(
+            "📥 Exportar a Excel",
+            data=_buf.getvalue(),
+            file_name=f"acciones_stock_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=False,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2991,7 +3796,7 @@ elif nav_page == "📊 Gestión por Antigüedad":
         if df_aging.empty:
             st.info("ℹ️ No hay datos de aging disponibles. Sube archivos con información de antigüedad.")
         else:
-            import math as _math_mod
+            import math as _math_mod  # necesario: cada elif es scope independiente
 
             # ────────────────────────────────────────────────────
             #  CAPA 1 — Resumen ejecutivo (KPIs + barra horizontal)
@@ -3602,7 +4407,7 @@ elif nav_page == "📊 Gestión por Antigüedad":
 
 elif nav_page == "🔄 Transferencias":
     if df_trans.empty:
-        st.info("ℹ️ No hay transferencias sugeridas. Esto ocurre cuando no hay simultáneamente tiendas en SOBRESTOCK y CRÍTICO del mismo SKU.")
+        st.info("ℹ️ No hay transferencias sugeridas. Esto ocurre cuando no hay simultáneamente tiendas en SOBRESTOCK y QUIEBRE del mismo SKU.")
     else:
         st.markdown(f"#### Transferencias sugeridas — {len(df_trans)} movimientos · **{s['uds_transferir']} unidades**")
 
@@ -3682,11 +4487,11 @@ elif nav_page == "💰 Acciones Precio":
             idx = row.index.tolist()
             if "Estado" in idx:
                 estado_colors = {
-                    "CRÍTICO": STATUS_CRITICO, "PRE-CRÍTICO": STATUS_PRECRITICO,
+                    "QUIEBRE": STATUS_QUIEBRE, "PRE-QUIEBRE": STATUS_BAJA,
                     "ÓPTIMO": STATUS_OPTIMO, "ALTO": STATUS_ALTO,
                     "SOBRESTOCK": STATUS_SOBRESTOCK, "LIQUIDAR": STATUS_LIQUIDAR,
                     "NUEVO SIN VENTA": STATUS_NUEVO_SV, "DORMIDO": STATUS_DORMIDO,
-                    "MUERTO": STATUS_MUERTO,
+                    "MUERTO": STATUS_MUERTO, "ESTANCADO": STATUS_ESTANCADO,
                 }
                 bg = estado_colors.get(row["Estado"], "")
                 if bg:
@@ -3745,6 +4550,596 @@ elif nav_page == "💰 Acciones Precio":
         )
 
 
+# ─── FENÓMENO DEL NIÑO ───────────────────────────────────────
+
+elif nav_page == "🌡️ Fenómeno del Niño":
+    st.markdown("#### 🌡️ Fenómeno del Niño — Análisis Climático de Inventario")
+    st.caption("Análisis del impacto del Fenómeno del Niño en la demanda por categoría calórica.")
+
+    # ── Cargar snapshots y temperatura ──
+    import clima_engine as _ce
+    from snapshots_engine import load_snapshot as _nino_load_snap, list_available_weeks as _nino_list_weeks
+
+    _nino_weeks = _nino_list_weeks()
+    if not _nino_weeks:
+        st.warning("No hay snapshots disponibles para el análisis del Fenómeno del Niño.")
+    else:
+        _nino_snaps = {}
+        for _w in _nino_weeks:
+            try:
+                _nino_snaps[_w] = _nino_load_snap(_w)
+            except Exception:
+                pass
+
+        # Temperatura semanal
+        _nino_start, _nino_end = _ce.get_snapshot_date_range()
+        _nino_temp = []
+        if _nino_start and _nino_end:
+            try:
+                _nino_temp = _ce.get_weekly_temperature(_nino_start, _nino_end)
+            except Exception:
+                _nino_temp = []
+
+        # Ejecutar motor
+        from motor_v2 import build_fenomeno_nino as _build_nino
+        _nino_result = _build_nino(_nino_snaps, _nino_temp)
+
+        if 'error' in _nino_result:
+            st.error(_nino_result['error'])
+        else:
+            _nino_resumen = _nino_result['resumen_ejecutivo']
+
+            # ── KPIs resumen ejecutivo (Output 6) ──
+            _k1, _k2, _k3, _k4 = st.columns(4)
+            with _k1:
+                _temp_act = _nino_resumen.get('temp_promedio_actual')
+                _delta_t = _nino_resumen.get('delta_temp_vs_normal')
+                _delta_str = f"+{_delta_t}°C" if _delta_t and _delta_t > 0 else f"{_delta_t}°C" if _delta_t else ""
+                st.markdown(f"""<div style="background:{SLATE_50};border:1px solid {SLATE_200};border-radius:8px;padding:12px;text-align:center;">
+                    <div style="font-size:0.75rem;color:{SLATE_500};text-transform:uppercase;letter-spacing:0.5px;">Temp. Promedio</div>
+                    <div style="font-size:1.8rem;font-weight:700;color:#dc2626;">{_temp_act or '—'}°C</div>
+                    <div style="font-size:0.75rem;color:#dc2626;">{_delta_str} vs normal</div>
+                </div>""", unsafe_allow_html=True)
+            with _k2:
+                _ratio = _nino_resumen.get('ratio_venta_ligero_grueso', 0)
+                st.markdown(f"""<div style="background:{SLATE_50};border:1px solid {SLATE_200};border-radius:8px;padding:12px;text-align:center;">
+                    <div style="font-size:0.75rem;color:{SLATE_500};text-transform:uppercase;letter-spacing:0.5px;">Ratio Ligero/Grueso</div>
+                    <div style="font-size:1.8rem;font-weight:700;color:{TEAL_600};">{_ratio}x</div>
+                    <div style="font-size:0.75rem;color:{SLATE_500};">venta LIGERO vs GRUESO</div>
+                </div>""", unsafe_allow_html=True)
+            with _k3:
+                _cap_riesgo = _nino_resumen.get('capital_grueso_en_riesgo', 0)
+                st.markdown(f"""<div style="background:{SLATE_50};border:1px solid {SLATE_200};border-radius:8px;padding:12px;text-align:center;">
+                    <div style="font-size:0.75rem;color:{SLATE_500};text-transform:uppercase;letter-spacing:0.5px;">Capital GRUESO</div>
+                    <div style="font-size:1.8rem;font-weight:700;color:#dc2626;">S/{_cap_riesgo:,.0f}</div>
+                    <div style="font-size:0.75rem;color:{SLATE_500};">{_nino_resumen.get('pct_capital_en_grueso', 0)}% del total</div>
+                </div>""", unsafe_allow_html=True)
+            with _k4:
+                _n_riesgo = _nino_resumen.get('n_skus_ligero_riesgo_quiebre', 0)
+                st.markdown(f"""<div style="background:{SLATE_50};border:1px solid {SLATE_200};border-radius:8px;padding:12px;text-align:center;">
+                    <div style="font-size:0.75rem;color:{SLATE_500};text-transform:uppercase;letter-spacing:0.5px;">SKUs Ligero en Riesgo</div>
+                    <div style="font-size:1.8rem;font-weight:700;color:#f59e0b;">{_n_riesgo}</div>
+                    <div style="font-size:0.75rem;color:{SLATE_500};">cobertura &lt; 4 sem</div>
+                </div>""", unsafe_allow_html=True)
+
+            st.markdown(f"<div style='border-bottom:1px solid {SLATE_200};margin:16px 0;'></div>", unsafe_allow_html=True)
+
+            # ── Tabs para los 5 outputs restantes ──
+            _nino_tab1, _nino_tab2, _nino_tab3, _nino_tab4, _nino_tab5 = st.tabs([
+                "📊 Riesgo Quiebre por Línea",
+                "🚨 SKUs en Riesgo",
+                "💰 Capital por Calórica",
+                "🏷️ Marcas Expuestas",
+                "📈 Tendencia Temp×Venta",
+            ])
+
+            # ── Tab 1: Output 1 — Riesgo quiebre por línea ──
+            with _nino_tab1:
+                st.markdown("##### Cobertura restante por línea — ¿Cuántas semanas de stock quedan?")
+                st.caption("Decisión: Si cobertura < 4 semanas → hablar con comprador para adelantar reposición")
+                _df_riesgo = _nino_result['riesgo_quiebre_linea'].copy()
+                _df_riesgo_display = _df_riesgo[_df_riesgo['cat_calorica'] != 'NEUTRO'].copy()
+
+                # Formatear tabla
+                _rows_riesgo = ""
+                for _, _r in _df_riesgo_display.iterrows():
+                    _cat = _r['cat_calorica']
+                    _cat_color = '#dc2626' if _cat == 'GRUESO' else '#f59e0b' if _cat == 'MEDIO' else '#10b981'
+                    _estado = str(_r['estado_riesgo'])
+                    _cob = _r['cobertura_semanas']
+                    _cob_color = '#dc2626' if _cob < 4 else '#f59e0b' if _cob < 8 else SLATE_700
+                    _rows_riesgo += f"""<tr>
+                        <td style="padding:8px 10px;font-weight:600;">{_r['linea']}</td>
+                        <td style="padding:8px 10px;"><span style="background:{_cat_color}15;color:{_cat_color};padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;">{_cat}</span></td>
+                        <td style="padding:8px 10px;text-align:right;">{_r['n_skus']:,}</td>
+                        <td style="padding:8px 10px;text-align:right;">{_r['stock_total']:,.0f}</td>
+                        <td style="padding:8px 10px;text-align:right;">{_r['vta_semanal_uds']:,.0f}</td>
+                        <td style="padding:8px 10px;text-align:right;font-weight:700;color:{_cob_color};">{_cob:.1f}</td>
+                        <td style="padding:8px 10px;">{_estado}</td>
+                    </tr>"""
+
+                st.markdown(f"""<div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                <thead><tr style="background:{SLATE_100};border-bottom:2px solid {SLATE_200};">
+                    <th style="padding:8px 10px;text-align:left;">Línea</th>
+                    <th style="padding:8px 10px;text-align:left;">Calórica</th>
+                    <th style="padding:8px 10px;text-align:right;">SKUs</th>
+                    <th style="padding:8px 10px;text-align:right;">Stock Uds</th>
+                    <th style="padding:8px 10px;text-align:right;">Venta/Sem</th>
+                    <th style="padding:8px 10px;text-align:right;">Cob. Semanas</th>
+                    <th style="padding:8px 10px;text-align:left;">Estado</th>
+                </tr></thead>
+                <tbody>{_rows_riesgo}</tbody>
+                </table></div>""", unsafe_allow_html=True)
+
+            # ── Tab 2: Output 2 — SKUs en riesgo de quiebre ──
+            with _nino_tab2:
+                st.markdown("##### SKUs LIGERO con riesgo de quiebre — Priorizar reposición")
+                st.caption("Decisión: Enviar lista al comprador con urgencia de reposición")
+                _df_skus_r = _nino_result['skus_riesgo_quiebre']
+                if _df_skus_r.empty:
+                    st.success("No hay SKUs LIGERO en riesgo de quiebre en este momento.")
+                else:
+                    st.warning(f"**{len(_df_skus_r)} SKUs** de productos LIGERO con cobertura < 4 semanas y venta superior a mediana")
+
+                    _rows_sku = ""
+                    for _, _s in _df_skus_r.head(30).iterrows():
+                        _sem_rest = _s.get('semanas_restantes', 0)
+                        _sem_color = '#dc2626' if _sem_rest < 2 else '#f59e0b' if _sem_rest < 3 else SLATE_700
+                        _rows_sku += f"""<tr>
+                            <td style="padding:6px 8px;font-size:0.78rem;">{_s['sku']}</td>
+                            <td style="padding:6px 8px;font-size:0.78rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{_s.get('descripcion','')}</td>
+                            <td style="padding:6px 8px;font-size:0.78rem;">{_s.get('marca','')}</td>
+                            <td style="padding:6px 8px;font-size:0.78rem;">{_s.get('linea','')}</td>
+                            <td style="padding:6px 8px;text-align:right;font-size:0.78rem;">{_s.get('stock_total',0):,.0f}</td>
+                            <td style="padding:6px 8px;text-align:right;font-size:0.78rem;font-weight:700;color:{_sem_color};">{_sem_rest:.1f}</td>
+                            <td style="padding:6px 8px;text-align:right;font-size:0.78rem;">S/{_s.get('venta_soles',0):,.0f}</td>
+                        </tr>"""
+
+                    st.markdown(f"""<div style="overflow-x:auto;max-height:500px;overflow-y:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                    <thead><tr style="background:{SLATE_100};border-bottom:2px solid {SLATE_200};position:sticky;top:0;">
+                        <th style="padding:6px 8px;text-align:left;">SKU</th>
+                        <th style="padding:6px 8px;text-align:left;">Descripción</th>
+                        <th style="padding:6px 8px;text-align:left;">Marca</th>
+                        <th style="padding:6px 8px;text-align:left;">Línea</th>
+                        <th style="padding:6px 8px;text-align:right;">Stock</th>
+                        <th style="padding:6px 8px;text-align:right;">Sem. Rest.</th>
+                        <th style="padding:6px 8px;text-align:right;">Venta S/</th>
+                    </tr></thead>
+                    <tbody>{_rows_sku}</tbody>
+                    </table></div>""", unsafe_allow_html=True)
+
+            # ── Tab 3: Output 3 — Capital por categoría calórica ──
+            with _nino_tab3:
+                st.markdown("##### Capital invertido por categoría calórica")
+                st.caption("Decisión: Si GRUESO crece >5% semana a semana → activar liquidación")
+                _df_cap = _nino_result['capital_por_calorica']
+
+                _rows_cap = ""
+                for _, _c in _df_cap.iterrows():
+                    _cat = _c['cat_calorica']
+                    _cat_color = '#dc2626' if _cat == 'GRUESO' else '#f59e0b' if _cat == 'MEDIO' else '#10b981' if _cat == 'LIGERO' else SLATE_500
+                    _rot = _c['rotacion']
+                    _rot_color = '#10b981' if _rot > 1.5 else '#f59e0b' if _rot > 0.5 else '#dc2626'
+                    _rows_cap += f"""<tr>
+                        <td style="padding:10px 12px;"><span style="background:{_cat_color}15;color:{_cat_color};padding:3px 10px;border-radius:4px;font-weight:700;font-size:0.82rem;">{_cat}</span></td>
+                        <td style="padding:10px 12px;text-align:right;">{_c['n_skus']:,}</td>
+                        <td style="padding:10px 12px;text-align:right;font-weight:700;">S/{_c['capital_invertido']:,.0f}</td>
+                        <td style="padding:10px 12px;text-align:right;">{_c['pct_capital']:.1f}%</td>
+                        <td style="padding:10px 12px;text-align:right;">S/{_c['venta_soles']:,.0f}</td>
+                        <td style="padding:10px 12px;text-align:right;font-weight:700;color:{_rot_color};">{_rot*100:.1f}%</td>
+                    </tr>"""
+
+                st.markdown(f"""<div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                <thead><tr style="background:{SLATE_100};border-bottom:2px solid {SLATE_200};">
+                    <th style="padding:10px 12px;text-align:left;">Categoría</th>
+                    <th style="padding:10px 12px;text-align:right;">SKUs</th>
+                    <th style="padding:10px 12px;text-align:right;">Capital S/</th>
+                    <th style="padding:10px 12px;text-align:right;">% Capital</th>
+                    <th style="padding:10px 12px;text-align:right;">Venta S/</th>
+                    <th style="padding:10px 12px;text-align:right;">Rotación</th>
+                </tr></thead>
+                <tbody>{_rows_cap}</tbody>
+                </table></div>""", unsafe_allow_html=True)
+
+                # Insight box
+                _cap_grueso_val = _df_cap[_df_cap['cat_calorica']=='GRUESO']['capital_invertido'].sum()
+                _rot_grueso = _df_cap[_df_cap['cat_calorica']=='GRUESO']['rotacion'].values
+                _rot_grueso_val = _rot_grueso[0] if len(_rot_grueso) > 0 else 0
+                _rot_ligero = _df_cap[_df_cap['cat_calorica']=='LIGERO']['rotacion'].values
+                _rot_ligero_val = _rot_ligero[0] if len(_rot_ligero) > 0 else 0
+                st.markdown(f"""<div style="background:#fef2f2;border-left:4px solid #dc2626;padding:12px 16px;border-radius:4px;margin-top:12px;font-size:0.85rem;">
+                    <strong>GRUESO tiene S/{_cap_grueso_val:,.0f} de capital invertido con rotación de solo {_rot_grueso_val*100:.1f}%</strong>,
+                    mientras que LIGERO rota a {_rot_ligero_val*100:.1f}% — {_rot_ligero_val/_rot_grueso_val:.0f}x más rápido.
+                    El Fenómeno del Niño está generando que el capital en prendas abrigadoras se quede parado.
+                </div>""", unsafe_allow_html=True)
+
+            # ── Tab 4: Output 4 — Marcas expuestas ──
+            with _nino_tab4:
+                st.markdown("##### Marcas más expuestas al Fenómeno del Niño")
+                st.caption("Decisión: Priorizar negociación con proveedores de marcas más vulnerables")
+                _df_exp = _nino_result['marcas_expuestas']
+
+                _rows_exp = ""
+                for _, _m in _df_exp.head(15).iterrows():
+                    _vuln = _m['idx_vulnerabilidad']
+                    _vuln_color = '#dc2626' if _vuln > 0.3 else '#f59e0b' if _vuln > 0.15 else '#10b981'
+                    _vuln_label = 'ALTA' if _vuln > 0.3 else 'MEDIA' if _vuln > 0.15 else 'BAJA'
+                    _rows_exp += f"""<tr>
+                        <td style="padding:8px 10px;font-weight:600;">{_m['marca']}</td>
+                        <td style="padding:8px 10px;text-align:right;">S/{_m['capital_total']:,.0f}</td>
+                        <td style="padding:8px 10px;text-align:right;">S/{_m['capital_grueso']:,.0f}</td>
+                        <td style="padding:8px 10px;text-align:right;">{_m['pct_capital_grueso']:.1f}%</td>
+                        <td style="padding:8px 10px;text-align:right;">{_m['rotacion_grueso']*100:.1f}%</td>
+                        <td style="padding:8px 10px;text-align:center;"><span style="background:{_vuln_color}15;color:{_vuln_color};padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;">{_vuln_label} ({_vuln:.3f})</span></td>
+                    </tr>"""
+
+                st.markdown(f"""<div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                <thead><tr style="background:{SLATE_100};border-bottom:2px solid {SLATE_200};">
+                    <th style="padding:8px 10px;text-align:left;">Marca</th>
+                    <th style="padding:8px 10px;text-align:right;">Capital Total</th>
+                    <th style="padding:8px 10px;text-align:right;">Capital GRUESO</th>
+                    <th style="padding:8px 10px;text-align:right;">% GRUESO</th>
+                    <th style="padding:8px 10px;text-align:right;">Rotación GRUESO</th>
+                    <th style="padding:8px 10px;text-align:center;">Vulnerabilidad</th>
+                </tr></thead>
+                <tbody>{_rows_exp}</tbody>
+                </table></div>""", unsafe_allow_html=True)
+
+            # ── Tab 5: Output 5 — Tendencia Temp × Venta ──
+            with _nino_tab5:
+                st.markdown("##### Tendencia: Temperatura vs Venta semanal por categoría calórica")
+                st.caption("Insight: Cómo responde la venta de cada categoría a los cambios de temperatura")
+                _df_tend = _nino_result['tendencia_temp_venta']
+                if _df_tend.empty:
+                    st.info("Se necesitan al menos 2 snapshots para calcular tendencia.")
+                else:
+                    # Chart con Plotly
+                    import plotly.graph_objects as go
+                    from plotly.subplots import make_subplots
+
+                    _fig_nino = make_subplots(specs=[[{"secondary_y": True}]])
+
+                    for _cat, _color in [('GRUESO', '#dc2626'), ('LIGERO', '#10b981'), ('MEDIO', '#f59e0b')]:
+                        _sub = _df_tend[_df_tend['cat_calorica'] == _cat].sort_values('semana_iso')
+                        if not _sub.empty:
+                            _fig_nino.add_trace(
+                                go.Bar(x=_sub['semana_iso'], y=_sub['delta_venta'],
+                                       name=f'Venta {_cat}', marker_color=_color, opacity=0.7),
+                                secondary_y=False,
+                            )
+
+                    # Temperatura como línea
+                    _temp_df = _df_tend[['semana_iso', 'temp_avg']].drop_duplicates().dropna().sort_values('semana_iso')
+                    if not _temp_df.empty:
+                        _fig_nino.add_trace(
+                            go.Scatter(x=_temp_df['semana_iso'], y=_temp_df['temp_avg'],
+                                       name='Temp. Promedio °C', line=dict(color='#6366f1', width=3),
+                                       mode='lines+markers'),
+                            secondary_y=True,
+                        )
+
+                    _fig_nino.update_layout(
+                        barmode='group',
+                        height=400,
+                        margin=dict(l=40, r=40, t=30, b=40),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        plot_bgcolor='rgba(0,0,0,0)',
+                    )
+                    _fig_nino.update_yaxes(title_text="Venta Semanal S/", secondary_y=False)
+                    _fig_nino.update_yaxes(title_text="Temperatura °C", secondary_y=True)
+
+                    st.plotly_chart(_fig_nino, use_container_width=True)
+
+                    st.markdown(f"""<div style="background:{TEAL_50};border-left:4px solid {TEAL_600};padding:12px 16px;border-radius:4px;font-size:0.85rem;">
+                        <strong>Nota:</strong> Con solo {len(_temp_df)} semanas de datos, la tendencia es visual — no estadística.
+                        Cuando se integre la data 2023, se podrá calcular la correlación formal temperatura × venta.
+                    </div>""", unsafe_allow_html=True)
+
+            # ── Comparación histórica ──
+            st.markdown(f"<div style='border-bottom:1px solid {SLATE_200};margin:16px 0;'></div>", unsafe_allow_html=True)
+            st.markdown("##### 🌍 Comparación Histórica — Temperatura Mar-May por año")
+            try:
+                _hist = _ce.get_historical_comparison()
+                _rows_hist = ""
+                for _h in _hist:
+                    _label_color = '#dc2626' if _h['label'] == 'Niño' else '#10b981'
+                    _rows_hist += f"""<tr>
+                        <td style="padding:8px 12px;font-weight:700;font-size:1rem;">{_h['year']}</td>
+                        <td style="padding:8px 12px;text-align:center;"><span style="background:{_label_color}15;color:{_label_color};padding:2px 10px;border-radius:4px;font-weight:600;">{_h['label']}</span></td>
+                        <td style="padding:8px 12px;text-align:right;font-weight:700;font-size:1rem;">{_h['temp_avg']}°C</td>
+                        <td style="padding:8px 12px;text-align:right;">{_h['temp_max_periodo']}°C</td>
+                        <td style="padding:8px 12px;text-align:right;">{_h['temp_min_periodo']}°C</td>
+                        <td style="padding:8px 12px;text-align:right;">{_h['n_dias']} días</td>
+                    </tr>"""
+                st.markdown(f"""<div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                <thead><tr style="background:{SLATE_100};border-bottom:2px solid {SLATE_200};">
+                    <th style="padding:8px 12px;text-align:left;">Año</th>
+                    <th style="padding:8px 12px;text-align:center;">Clima</th>
+                    <th style="padding:8px 12px;text-align:right;">Temp Prom</th>
+                    <th style="padding:8px 12px;text-align:right;">Máx Período</th>
+                    <th style="padding:8px 12px;text-align:right;">Mín Período</th>
+                    <th style="padding:8px 12px;text-align:right;">Datos</th>
+                </tr></thead>
+                <tbody>{_rows_hist}</tbody>
+                </table></div>""", unsafe_allow_html=True)
+
+                st.markdown(f"""<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:4px;margin-top:12px;font-size:0.85rem;">
+                    <strong>2023 vs 2026:</strong> Temperatura similar (Niño), pero contexto económico opuesto.
+                    2023 = economía débil → venta desastre. 2026 = economía fuerte → oportunidad real.
+                    La data 2023 servirá como control para aislar el efecto temperatura del efecto económico.
+                </div>""", unsafe_allow_html=True)
+            except Exception as _e_hist:
+                st.info(f"No se pudo cargar la comparación histórica: {_e_hist}")
+
+
+# ─── Afinidad Producto × Plaza ────────────────────────────────
+
+elif nav_page == "🏪 Afinidad Producto×Plaza":
+    import glob as _glob_mod
+    import io as _io_af
+    from afinidad_engine import build_afinidad
+    from transformar_profundidad import STORE_NAMES as _STORE_NAMES_AF
+
+    st.markdown(f'<h2 style="color:{SLATE_900};margin-bottom:4px;">🏪 Afinidad Producto × Plaza</h2>', unsafe_allow_html=True)
+    st.caption("Qué productos funcionan en qué tiendas — empujes inteligentes, redistribución y señales de producción")
+
+    # Detectar base más reciente — priorizar la última subida por el usuario
+    _base_path_af = st.session_state.get("_base_profundidad_path")
+    if _base_path_af and os.path.exists(_base_path_af):
+        _base_name_af = os.path.basename(_base_path_af)
+    else:
+        _bases_af = _glob_mod.glob("data2/bases antiguas/Base*.xlsx")
+        _bases_af = sorted(_bases_af, key=os.path.getmtime)  # por fecha real, no alfabético
+        if _bases_af:
+            _base_path_af = _bases_af[-1]
+            _base_name_af = os.path.basename(_base_path_af)
+        else:
+            _base_path_af = None
+    if _base_path_af is None:
+        st.warning("No se encontraron Bases de Profundidad. Sube tu archivo y ejecuta el análisis primero.")
+    else:
+        st.info(f"📂 Base: **{_base_name_af}**")
+
+        with st.spinner("Analizando afinidad producto × plaza..."):
+            try:
+                _af_result = build_afinidad(_base_path_af)
+            except Exception as _e_af:
+                st.error(f"Error en análisis de afinidad: {_e_af}")
+                _af_result = None
+
+        if _af_result is not None:
+            _rm = _af_result['rotation_matrix']
+            _cl = _af_result['clusters_df']
+            _an = _af_result['anomalias_df']
+            _emp = _af_result['empujes_df']
+            _red = _af_result['redistribucion_df']
+            _prod = _af_result['produccion_df']
+            _tiendas_af = _af_result['tiendas_activas']
+
+            # KPI cards
+            _n_empujes = len(_emp)
+            _u_empujes = int(_emp['unidades_sugeridas'].sum()) if _n_empujes > 0 else 0
+            _n_redist = len(_red)
+            _n_anomalias = len(_an)
+            _n_prod = len(_prod)
+
+            _kpi_html_af = f"""<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+              <div style="background:{SLATE_100};border-radius:8px;padding:14px 16px;">
+                <div style="font-size:12px;color:{SLATE_500};">Empujes CD→Tiendas</div>
+                <div style="font-size:22px;font-weight:600;color:{TEAL_600};">{_n_empujes:,}</div>
+                <div style="font-size:11px;color:{SLATE_400};">{_u_empujes:,} unidades</div>
+              </div>
+              <div style="background:{SLATE_100};border-radius:8px;padding:14px 16px;">
+                <div style="font-size:12px;color:{SLATE_500};">Redistribuciones</div>
+                <div style="font-size:22px;font-weight:600;color:{TEAL_600};">{_n_redist:,}</div>
+                <div style="font-size:11px;color:{SLATE_400};">entre tiendas</div>
+              </div>
+              <div style="background:{SLATE_100};border-radius:8px;padding:14px 16px;">
+                <div style="font-size:12px;color:{SLATE_500};">Anomalías</div>
+                <div style="font-size:22px;font-weight:600;color:#B45309;">{_n_anomalias:,}</div>
+                <div style="font-size:11px;color:{SLATE_400};">producto malo + mal match</div>
+              </div>
+              <div style="background:{SLATE_100};border-radius:8px;padding:14px 16px;">
+                <div style="font-size:12px;color:{SLATE_500};">Señales Producción</div>
+                <div style="font-size:22px;font-weight:600;color:#059669;">{_n_prod}</div>
+                <div style="font-size:11px;color:{SLATE_400};">líneas con demanda insatisfecha</div>
+              </div>
+            </div>"""
+            st.markdown(_kpi_html_af, unsafe_allow_html=True)
+
+            # Tabs
+            _tab_hm, _tab_cl, _tab_emp, _tab_red, _tab_an, _tab_prod = st.tabs([
+                "🗺️ Heatmap Rotación", "🔗 Clusters", "📦 Empujes CD→Tiendas",
+                "🔄 Redistribución", "⚠️ Anomalías", "🏭 Producción"
+            ])
+
+            # ── TAB 1: Heatmap ──
+            with _tab_hm:
+                import plotly.graph_objects as _go_af
+                _rm_display = _rm.copy()
+                _rm_display.index = [l.title() for l in _rm_display.index]
+                _rm_display.columns = [_STORE_NAMES_AF.get(c, c) for c in _rm_display.columns]
+
+                _fig_hm = _go_af.Figure(data=_go_af.Heatmap(
+                    z=_rm_display.values,
+                    x=_rm_display.columns.tolist(),
+                    y=_rm_display.index.tolist(),
+                    colorscale=[[0, '#FEE2E2'], [0.25, '#FECACA'], [0.5, '#FDE68A'], [0.75, '#A7F3D0'], [1, '#059669']],
+                    text=[[f"{v*100:.1f}%" for v in row] for row in _rm_display.values],
+                    texttemplate="%{text}",
+                    textfont={"size": 10},
+                    hovertemplate="Línea: %{y}<br>Tienda: %{x}<br>Rotación: %{z:.2%}<extra></extra>",
+                    colorbar=dict(title=dict(text="Rotación %", side="right"), tickformat=".0%"),
+                ))
+                _fig_hm.update_layout(
+                    height=500, margin=dict(l=120, r=20, t=30, b=80),
+                    xaxis=dict(tickangle=-45, tickfont=dict(size=10)),
+                    yaxis=dict(tickfont=dict(size=11)),
+                    plot_bgcolor='white',
+                )
+                st.plotly_chart(_fig_hm, use_container_width=True)
+                st.caption("Rotación = Vta / Stk. Verde = alta rotación (oportunidad). Rojo = baja rotación (capital parado).")
+
+            # ── TAB 2: Clusters ──
+            with _tab_cl:
+                for _cid in sorted(_cl['cluster_id'].unique()):
+                    _sub_cl = _cl[_cl['cluster_id'] == _cid]
+                    _nombre_cl = _sub_cl['cluster_nombre'].iloc[0]
+                    _n_tiendas_cl = len(_sub_cl)
+                    _vta_cl = _sub_cl['vta_total'].sum()
+
+                    _tiendas_list = ", ".join([
+                        f"{_STORE_NAMES_AF.get(t, t)}" for t in _sub_cl['tienda'].tolist()
+                    ])
+
+                    _perfiles_af = _af_result['perfiles']
+                    _perfil_cl = _perfiles_af.get(_cid, {})
+                    _top3_lineas = sorted(_perfil_cl.items(), key=lambda x: -x[1])[:3]
+                    _top3_str = ", ".join([f"{l.title()} ({r:.3f})" for l, r in _top3_lineas])
+
+                    st.markdown(f"""<div style="background:{SLATE_100};border-radius:8px;padding:14px 18px;margin-bottom:10px;">
+                      <div style="font-weight:600;color:{SLATE_900};font-size:14px;">{_nombre_cl}</div>
+                      <div style="color:{SLATE_500};font-size:12px;margin:4px 0;">{_n_tiendas_cl} tiendas — Vta total: {_vta_cl:,}u</div>
+                      <div style="color:{SLATE_700};font-size:13px;">{_tiendas_list}</div>
+                      <div style="color:{TEAL_600};font-size:12px;margin-top:4px;">Top líneas: {_top3_str}</div>
+                    </div>""", unsafe_allow_html=True)
+
+            # ── TAB 3: Empujes CD→Tiendas ──
+            with _tab_emp:
+                if len(_emp) == 0:
+                    st.info("No se encontraron oportunidades de empuje con los umbrales actuales.")
+                else:
+                    _col_filt1, _col_filt2 = st.columns(2)
+                    with _col_filt1:
+                        _marca_filt_emp = st.selectbox("Marca", ["Todas"] + sorted(_emp['marca'].unique().tolist()), key="af_emp_marca")
+                    with _col_filt2:
+                        _tienda_filt_emp = st.selectbox("Tienda destino", ["Todas"] + sorted(_emp['tienda'].unique().tolist()), key="af_emp_tienda")
+
+                    _emp_show = _emp.copy()
+                    if _marca_filt_emp != "Todas":
+                        _emp_show = _emp_show[_emp_show['marca'] == _marca_filt_emp]
+                    if _tienda_filt_emp != "Todas":
+                        _emp_show = _emp_show[_emp_show['tienda'] == _tienda_filt_emp]
+
+                    _emp_show['tienda_nombre'] = _emp_show['tienda'].map(lambda t: _STORE_NAMES_AF.get(t, t))
+                    _emp_cols = ['marca', 'descripcion', 'tienda_nombre', 'stk_actual_tienda',
+                                 'stock_cd', 'rotacion_linea_tienda']
+                    # Nuevas columnas de cobertura (si existen en el output del motor)
+                    _has_cob = 'vta_semanal_est' in _emp_show.columns and 'target_stock' in _emp_show.columns
+                    if _has_cob:
+                        _emp_cols += ['vta_semanal_est', 'target_stock']
+                    _emp_cols += ['unidades_sugeridas', 'es_marca_propia']
+                    _emp_display = _emp_show[_emp_cols].head(100)
+                    _emp_headers = ['Marca', 'Descripción', 'Tienda', 'Stk Tienda', 'Stk CD', 'Rot. %']
+                    if _has_cob:
+                        _emp_headers += ['Vta/Sem Est', 'Target 12s']
+                    _emp_headers += ['Empujar', 'Propia']
+                    _emp_display.columns = _emp_headers
+                    _emp_display['Rot. %'] = (_emp_display['Rot. %'] * 100).round(1)
+
+                    _cob_sem = 12  # default
+                    try:
+                        import json as _json_emp
+                        _cfg_path_emp = os.path.join(os.path.dirname(__file__), 'config_afinidad.json')
+                        with open(_cfg_path_emp) as _f_emp:
+                            _cob_sem = _json_emp.load(_f_emp).get('empujes', {}).get('semanas_cobertura_target', 12)
+                    except Exception:
+                        pass
+                    st.markdown(f"**{len(_emp_show):,}** empujes — **{_emp_show['unidades_sugeridas'].sum():,}** unidades"
+                                f" — Cobertura target: **{_cob_sem} semanas**")
+                    st.dataframe(_emp_display, use_container_width=True, hide_index=True)
+
+                    # Descarga Excel
+                    _buf_emp = _io_af.BytesIO()
+                    _emp_show.to_excel(_buf_emp, index=False, sheet_name="Empujes CD")
+                    st.download_button("📥 Descargar empujes", _buf_emp.getvalue(),
+                                       file_name="empujes_cd_tiendas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                       key="dl_empujes_af")
+
+            # ── TAB 4: Redistribución ──
+            with _tab_red:
+                if len(_red) == 0:
+                    st.info("No se encontraron oportunidades de redistribución con los umbrales actuales.")
+                else:
+                    _red_show = _red.copy()
+                    _red_show['origen_nombre'] = _red_show['tienda_origen'].map(lambda t: _STORE_NAMES_AF.get(t, t))
+                    _red_show['destino_nombre'] = _red_show['tienda_destino'].map(lambda t: _STORE_NAMES_AF.get(t, t))
+
+                    _red_display = _red_show[['marca', 'descripcion', 'linea', 'origen_nombre', 'stk_origen',
+                                               'destino_nombre', 'stk_destino', 'rotacion_destino',
+                                               'unidades_sugeridas', 'mismo_cluster']].head(100)
+                    _red_display.columns = ['Marca', 'Descripción', 'Línea', 'Origen', 'Stk Origen',
+                                            'Destino', 'Stk Destino', 'Rot. Destino %', 'Mover', 'Mismo Cluster']
+                    _red_display['Rot. Destino %'] = (_red_display['Rot. Destino %'] * 100).round(1)
+
+                    st.markdown(f"**{len(_red_show):,}** oportunidades — **{_red_show['unidades_sugeridas'].sum():,}** unidades a redistribuir")
+                    st.dataframe(_red_display, use_container_width=True, hide_index=True)
+
+                    _buf_red = _io_af.BytesIO()
+                    _red_show.to_excel(_buf_red, index=False, sheet_name="Redistribución")
+                    st.download_button("📥 Descargar redistribución", _buf_red.getvalue(),
+                                       file_name="redistribucion_tiendas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                       key="dl_redist_af")
+
+            # ── TAB 5: Anomalías ──
+            with _tab_an:
+                if len(_an) == 0:
+                    st.info("No se detectaron anomalías cruzadas.")
+                else:
+                    _pm_af = _an[_an['tipo_anomalia'] == 'producto_malo']
+                    _mm_af = _an[_an['tipo_anomalia'] == 'mal_match_plaza']
+
+                    st.markdown(f"""<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                      <div style="background:#FEF2F2;border-radius:8px;padding:12px 16px;">
+                        <div style="font-size:12px;color:#991B1B;">Producto malo (no vende en ninguna tienda)</div>
+                        <div style="font-size:20px;font-weight:600;color:#B91C1C;">{len(_pm_af)}</div>
+                        <div style="font-size:11px;color:#DC2626;">Stk parado: {_pm_af['stk_parado'].sum():,}u → Liquidar</div>
+                      </div>
+                      <div style="background:#FFF7ED;border-radius:8px;padding:12px 16px;">
+                        <div style="font-size:12px;color:#92400E;">Mal match plaza (vende en unas, no en otras)</div>
+                        <div style="font-size:20px;font-weight:600;color:#B45309;">{len(_mm_af)}</div>
+                        <div style="font-size:11px;color:#D97706;">Stk parado: {_mm_af['stk_parado'].sum():,}u → Redistribuir</div>
+                      </div>
+                    </div>""", unsafe_allow_html=True)
+
+                    _tipo_filt_an = st.radio("Tipo", ["Todos", "Producto malo", "Mal match plaza"], horizontal=True, key="af_an_tipo")
+                    _an_show = _an.copy()
+                    if _tipo_filt_an == "Producto malo":
+                        _an_show = _pm_af
+                    elif _tipo_filt_an == "Mal match plaza":
+                        _an_show = _mm_af
+
+                    _an_display = _an_show[['marca', 'descripcion', 'linea', 'tipo_anomalia',
+                                            'n_tiendas_sin_venta', 'n_tiendas_con_venta', 'stk_parado', 'accion']].head(100)
+                    _an_display.columns = ['Marca', 'Descripción', 'Línea', 'Tipo', 'Sin Venta', 'Con Venta', 'Stk Parado', 'Acción']
+
+                    st.dataframe(_an_display, use_container_width=True, hide_index=True)
+
+            # ── TAB 6: Producción ──
+            with _tab_prod:
+                if len(_prod) == 0:
+                    st.info("No se detectaron señales de producción con los umbrales actuales.")
+                else:
+                    st.markdown("**Líneas con alta rotación + baja cobertura en múltiples tiendas del mismo cluster**")
+
+                    _prod_display = _prod[['marca', 'linea', 'n_tiendas', 'tiendas', 'vta_total',
+                                            'stk_total', 'rotacion_prom', 'es_marca_propia', 'accion']].copy()
+                    _prod_display.columns = ['Marca', 'Línea', 'N Tiendas', 'Tiendas', 'Vta Total',
+                                             'Stk Total', 'Rotación %', 'Propia', 'Acción']
+                    _prod_display['Rotación %'] = (_prod_display['Rotación %'] * 100).round(1)
+
+                    st.dataframe(_prod_display, use_container_width=True, hide_index=True)
+
+                    _propias_prod = _prod[_prod['es_marca_propia']]
+                    if len(_propias_prod) > 0:
+                        st.success(f"🏭 **{len(_propias_prod)} señales de marcas propias** — tienes control de producción para responder.")
+
+
 # ─── TAB 6: Alertas IA ───────────────────────────────────────
 
 elif nav_page == "🤖 Alertas IA":
@@ -3763,7 +5158,7 @@ elif nav_page == "🤖 Alertas IA":
                 ("🔴 Frenando",     "FRENANDO",     "#FFF7ED", "#EA580C"),
                 ("🟢 Acelerando",   "ACELERANDO",   "#ECFDF5", "#059669"),
                 ("🆕 Sin Tracción", "SIN TRACCIÓN", TEAL_50,   TEAL_600),
-                ("🔮 Riesgo Crít.", "RIESGO CRÍTICO", "#FDF4FF", "#9333EA"),
+                ("🔮 Riesgo Quiebre", "RIESGO QUIEBRE", "#FDF4FF", "#9333EA"),
             ]
             for col, (label, keyword, bg, fg) in zip(_kpi_cols, _tipos_kpi):
                 _count = int(df_alertas["tipo_alerta"].str.contains(keyword, na=False).sum())
@@ -3779,12 +5174,12 @@ elif nav_page == "🤖 Alertas IA":
 
             # Capital total en riesgo
             _capital_total_riesgo = df_alertas[
-                df_alertas["tipo_alerta"].str.contains("SE DETUVO|FRENANDO|RIESGO CRÍTICO", na=False)
+                df_alertas["tipo_alerta"].str.contains("SE DETUVO|FRENANDO|RIESGO QUIEBRE", na=False)
             ]["capital_stock"].sum()
             if _capital_total_riesgo > 0:
                 st.markdown(
                     f'<div style="background:linear-gradient(135deg,#FEF2F2,#FFF7ED); border-radius:12px; padding:10px 16px; margin-top:8px; text-align:center;">'
-                    f'<span style="font-size:0.85em; color:var(--capi-text);">Capital en riesgo (detuvo + frenando + riesgo crítico): </span>'
+                    f'<span style="font-size:0.85em; color:var(--capi-text);">Capital en riesgo (detuvo + frenando + riesgo quiebre):</span>'
                     f'<strong style="font-size:1.1em; color:#DC2626;">S/ {_capital_total_riesgo:,.0f}</strong>'
                     f'</div>',
                     unsafe_allow_html=True
@@ -3822,7 +5217,7 @@ elif nav_page == "🤖 Alertas IA":
             _COLOR_MAP = {
                 "SE DETUVO": ("#FEF2F2", "#DC2626"), "FRENANDO": ("#FFF7ED", "#EA580C"),
                 "ACELERANDO": ("#ECFDF5", "#059669"), "SIN TRACCIÓN": (TEAL_50, TEAL_600),
-                "RIESGO CRÍTICO": ("#FDF4FF", "#9333EA"),
+                "RIESGO QUIEBRE": ("#FDF4FF", "#9333EA"),
             }
 
             # Agrupar alertas por marca
@@ -5378,6 +6773,389 @@ elif nav_page == "🚚 Predistribución":
                     with open(_matriz_linea_path, 'w', encoding='utf-8') as _mlf:
                         _json_mod.dump(_matriz_linea_actual, _mlf, ensure_ascii=False, indent=2)
                     st.success(f"Matriz actualizada: {_linea_editar} → {len(_nuevas_tiendas_l)} tiendas. Re-corre el análisis para ver el efecto.")
+
+
+# ══════════════════════════════════════════════════════════════
+#  EVOLUCIÓN SEMANAL — Análisis histórico de snapshots
+# ══════════════════════════════════════════════════════════════
+
+elif nav_page == "📈 Evolución Semanal":
+    st.markdown(f'<div class="section-header"><h3>📈 Evolución Semanal</h3><span class="live-badge">SNAPSHOTS</span></div>', unsafe_allow_html=True)
+
+    if not _HAS_SNAPSHOTS:
+        st.warning("El módulo de snapshots no está disponible.")
+    else:
+        _evol_weeks = snapshots_engine.list_available_weeks()
+        if len(_evol_weeks) < 2:
+            st.info(f"Se necesitan al menos 2 snapshots para análisis comparativo. Disponibles: {len(_evol_weeks)}")
+        else:
+            st.caption(f"Analizando {len(_evol_weeks)} semanas: {_evol_weeks[0]} → {_evol_weeks[-1]}")
+
+            _evol_tabs = st.tabs([
+                "📊 Resumen Semanal",
+                "🔄 Cambios de Estado",
+                "🏷️ Tendencia Marcas",
+                "📦 Cumplimiento Repo",
+                "🚀 SKUs Acelerando",
+                "⚠️ Predicción Quiebre",
+            ])
+
+            # ── Tab 1: Resumen Semanal (compare_weeks) ──
+            with _evol_tabs[0]:
+                st.markdown("##### Comparativo semana a semana")
+                _evol_sem_opts = _evol_weeks[::-1]
+                _ec1, _ec2 = st.columns(2)
+                with _ec1:
+                    _evol_sem_b = st.selectbox("Semana actual", _evol_sem_opts, index=0, key="evol_sem_b")
+                with _ec2:
+                    _evol_sem_a_opts = [w for w in _evol_sem_opts if w < _evol_sem_b]
+                    _evol_sem_a = st.selectbox("Comparar con", _evol_sem_a_opts, index=0, key="evol_sem_a") if _evol_sem_a_opts else None
+
+                if _evol_sem_a:
+                    _cmp = snapshots_engine.compare_weeks(_evol_sem_a, _evol_sem_b)
+                    if _cmp:
+                        _cd = _cmp['deltas']
+                        _ca = _cmp['semana_a']
+                        _cb = _cmp['semana_b']
+
+                        _metrics = [
+                            ("Venta S/", f"S/ {_ca['venta_soles']:,.0f}", f"S/ {_cb['venta_soles']:,.0f}", _cd['venta_soles_pct']),
+                            ("Venta Uds", f"{_ca['venta_unidades']:,}", f"{_cb['venta_unidades']:,}", _cd['venta_unidades_pct']),
+                            ("Stock Total", f"{_ca['stock_total']:,}", f"{_cb['stock_total']:,}", _cd['stock_total_pct']),
+                            ("Stock Valorizado", f"S/ {_ca['stock_valorizado']:,.0f}", f"S/ {_cb['stock_valorizado']:,.0f}", _cd['stock_valorizado_pct']),
+                            ("Contribución", f"S/ {_ca['contribucion']:,.0f}", f"S/ {_cb['contribucion']:,.0f}", _cd['contribucion_pct']),
+                            ("Cob Promedio", f"{_ca['cob_promedio']:.1f} sem", f"{_cb['cob_promedio']:.1f} sem", _cd['cob_promedio_pct']),
+                        ]
+
+                        _tbl_html = f"""<table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+                        <thead><tr style="border-bottom:2px solid var(--capi-border);">
+                            <th style="text-align:left; padding:8px; color:var(--capi-text2);">KPI</th>
+                            <th style="text-align:right; padding:8px; color:var(--capi-text2);">Sem {_evol_sem_a}</th>
+                            <th style="text-align:right; padding:8px; color:var(--capi-text2);">Sem {_evol_sem_b}</th>
+                            <th style="text-align:right; padding:8px; color:var(--capi-text2);">Δ %</th>
+                        </tr></thead><tbody>"""
+
+                        for _m_lbl, _m_va, _m_vb, _m_pct in _metrics:
+                            _m_color = "#10b981" if _m_pct > 0 else "#ef4444" if _m_pct < 0 else "var(--capi-text2)"
+                            _m_arr = "▲" if _m_pct > 0 else "▼" if _m_pct < 0 else "–"
+                            _tbl_html += f"""<tr style="border-bottom:1px solid var(--capi-border);">
+                                <td style="padding:8px; font-weight:500; color:var(--capi-text);">{_m_lbl}</td>
+                                <td style="padding:8px; text-align:right; color:var(--capi-text2);">{_m_va}</td>
+                                <td style="padding:8px; text-align:right; font-weight:600; color:var(--capi-text);">{_m_vb}</td>
+                                <td style="padding:8px; text-align:right; font-weight:600; color:{_m_color};">{_m_arr} {abs(_m_pct):.1f}%</td>
+                            </tr>"""
+
+                        _tbl_html += "</tbody></table>"
+                        st.markdown(_tbl_html, unsafe_allow_html=True)
+
+                        # ── Sparklines: tendencia de cada KPI a lo largo de todas las semanas ──
+                        if len(_evol_weeks) >= 3:
+                            st.markdown("")
+                            st.markdown("##### Tendencia histórica")
+                            _spark_data = {}
+                            for _sw in _evol_weeks:
+                                _sr = snapshots_engine.get_resumen_semanal(_sw)
+                                if _sr:
+                                    _spark_data[_sw] = _sr
+
+                            if len(_spark_data) >= 3:
+                                _spark_kpis = [
+                                    ("Venta S/", 'venta_total_soles', "S/"),
+                                    ("Venta Uds", 'venta_total_unidades', ""),
+                                    ("Stock Uds", 'stock_total_unidades', ""),
+                                ]
+                                _spark_cols = st.columns(len(_spark_kpis))
+                                for _si, (_slbl, _skey, _sprefix) in enumerate(_spark_kpis):
+                                    with _spark_cols[_si]:
+                                        _svals = [_spark_data[w].get(_skey, 0) for w in _evol_weeks if w in _spark_data]
+                                        _sweeks = [w for w in _evol_weeks if w in _spark_data]
+                                        if _svals:
+                                            _sfig = go.Figure()
+                                            _sfig.add_trace(go.Scatter(
+                                                x=_sweeks, y=_svals,
+                                                mode='lines+markers',
+                                                line=dict(color=TEAL_600, width=2),
+                                                marker=dict(size=6),
+                                                hovertemplate="%{x}: %{y:,.0f}<extra></extra>",
+                                            ))
+                                            _sfig.update_layout(
+                                                height=120, margin=dict(l=0, r=0, t=24, b=0),
+                                                title=dict(text=_slbl, font=dict(size=11)),
+                                                xaxis=dict(showticklabels=False, showgrid=False),
+                                                yaxis=dict(showticklabels=False, showgrid=False),
+                                                plot_bgcolor='rgba(0,0,0,0)',
+                                                paper_bgcolor='rgba(0,0,0,0)',
+                                                showlegend=False,
+                                            )
+                                            st.plotly_chart(_sfig, use_container_width=True, key=f"spark_{_skey}")
+
+                    else:
+                        st.warning("No se pudo comparar las semanas seleccionadas.")
+
+            # ── Tab 2: Cambios de Estado ──
+            with _evol_tabs[1]:
+                st.markdown("##### SKUs que cambiaron de estado")
+                _sc_c1, _sc_c2 = st.columns(2)
+                with _sc_c1:
+                    _sc_sem_b = st.selectbox("Semana actual", _evol_sem_opts, index=0, key="sc_sem_b")
+                with _sc_c2:
+                    _sc_a_opts = [w for w in _evol_sem_opts if w < _sc_sem_b]
+                    _sc_sem_a = st.selectbox("Comparar con", _sc_a_opts, index=0, key="sc_sem_a") if _sc_a_opts else None
+
+                if _sc_sem_a:
+                    with st.spinner("Clasificando estados..."):
+                        _sc_df = snapshots_engine.detect_state_changes(_sc_sem_a, _sc_sem_b)
+
+                    if _sc_df.empty:
+                        st.success("No hubo cambios de estado entre las semanas seleccionadas.")
+                    else:
+                        _sc_k1, _sc_k2, _sc_k3 = st.columns(3)
+                        _n_mejora = int((_sc_df['cambio'] == 'mejora').sum())
+                        _n_empeora = int((_sc_df['cambio'] == 'empeora').sum())
+                        with _sc_k1:
+                            st.metric("Total cambios", len(_sc_df))
+                        with _sc_k2:
+                            st.metric("Mejoran", _n_mejora, delta=f"{_n_mejora}", delta_color="normal")
+                        with _sc_k3:
+                            st.metric("Empeoran", _n_empeora, delta=f"-{_n_empeora}", delta_color="inverse")
+
+                        _sc_filter = st.radio("Filtrar", ["Todos", "Empeoran", "Mejoran"], horizontal=True, key="sc_filter")
+                        _sc_show = _sc_df.copy()
+                        if _sc_filter == "Empeoran":
+                            _sc_show = _sc_show[_sc_show['cambio'] == 'empeora']
+                        elif _sc_filter == "Mejoran":
+                            _sc_show = _sc_show[_sc_show['cambio'] == 'mejora']
+
+                        st.dataframe(
+                            _sc_show[['sku', 'marca', 'estado_a', 'estado_b', 'cambio']].rename(columns={
+                                'sku': 'SKU', 'marca': 'Marca', 'estado_a': f'Estado {_sc_sem_a}',
+                                'estado_b': f'Estado {_sc_sem_b}', 'cambio': 'Dirección'
+                            }),
+                            use_container_width=True, hide_index=True,
+                        )
+
+            # ── Tab 3: Tendencia Marcas ──
+            with _evol_tabs[2]:
+                st.markdown("##### Evolución por marca a lo largo del tiempo")
+                with st.spinner("Calculando tendencias por marca..."):
+                    _em_df = snapshots_engine.evolucion_marca()
+
+                if _em_df.empty:
+                    st.info("Sin datos de evolución.")
+                else:
+                    _em_marcas = sorted(_em_df['marca'].unique())
+                    _em_marca_sel = st.selectbox("Marca", ["Todas"] + _em_marcas, key="em_marca")
+
+                    _em_show = _em_df if _em_marca_sel == "Todas" else _em_df[_em_df['marca'] == _em_marca_sel]
+
+                    if _em_marca_sel == "Todas":
+                        # Agregar por semana
+                        _em_agg = _em_show.groupby('semana_iso', as_index=False).agg(
+                            cob_promedio=('cob_promedio', 'mean'),
+                            pct_quiebre=('pct_quiebre', 'mean'),
+                            venta_unidades=('venta_unidades', 'sum'),
+                            venta_soles=('venta_soles', 'sum'),
+                            stock_total=('stock_total', 'sum'),
+                        )
+                    else:
+                        _em_agg = _em_show.copy()
+
+                    _em_fig = go.Figure()
+                    _em_fig.add_trace(go.Bar(
+                        x=_em_agg['semana_iso'], y=_em_agg['venta_unidades'],
+                        name='Venta Uds', marker_color=TEAL_600, opacity=0.7,
+                    ))
+                    _em_fig.add_trace(go.Scatter(
+                        x=_em_agg['semana_iso'], y=_em_agg['cob_promedio'],
+                        name='Cob Prom (sem)', yaxis='y2',
+                        line=dict(color=STATUS_QUIEBRE, width=2), mode='lines+markers',
+                    ))
+                    _em_fig.update_layout(
+                        **_plotly_layout,
+                        title=f"Venta y Cobertura — {_em_marca_sel}",
+                        yaxis=dict(title="Venta Uds"),
+                        yaxis2=dict(title="Cob Prom (sem)", overlaying='y', side='right'),
+                        legend=dict(orientation='h', y=-0.15),
+                        barmode='group',
+                    )
+                    st.plotly_chart(_em_fig, use_container_width=True)
+
+                    # Tabla resumen
+                    st.dataframe(
+                        _em_agg.rename(columns={
+                            'semana_iso': 'Semana', 'cob_promedio': 'Cob Prom',
+                            'pct_quiebre': '% Quiebre', 'venta_unidades': 'Venta Uds',
+                            'venta_soles': 'Venta S/', 'stock_total': 'Stock Total',
+                        }),
+                        use_container_width=True, hide_index=True,
+                    )
+
+            # ── Tab 4: Cumplimiento Repo ──
+            with _evol_tabs[3]:
+                st.markdown("##### ¿Se repuso lo que se pidió?")
+                _rc_c1, _rc_c2 = st.columns(2)
+                with _rc_c1:
+                    _rc_sem_a = st.selectbox("Semana pedido", _evol_sem_opts[1:] if len(_evol_sem_opts) > 1 else _evol_sem_opts, index=0, key="rc_sem_a")
+                with _rc_c2:
+                    _rc_b_opts = [w for w in _evol_sem_opts if w > _rc_sem_a]
+                    _rc_sem_b = st.selectbox("Semana verificación", _rc_b_opts, index=0, key="rc_sem_b") if _rc_b_opts else None
+
+                if _rc_sem_b:
+                    with st.spinner("Analizando movimientos de stock..."):
+                        _rc_df = snapshots_engine.detect_repo_cumplimiento(_rc_sem_a, _rc_sem_b)
+
+                    if _rc_df.empty:
+                        st.info("No se detectaron movimientos de reposición entre las semanas seleccionadas.")
+                    else:
+                        _rc_k1, _rc_k2, _rc_k3 = st.columns(3)
+                        with _rc_k1:
+                            st.metric("SKUs con repo al CD", int(_rc_df['repo_cd'].sum()))
+                        with _rc_k2:
+                            st.metric("SKUs con despacho a tiendas", int(_rc_df['despacho_tiendas'].sum()))
+                        with _rc_k3:
+                            _uds_repo = int(_rc_df['unidades_repo_cd'].sum()) + int(_rc_df['unidades_despacho'].sum())
+                            st.metric("Unidades movidas", f"{_uds_repo:,}")
+
+                        _rc_marca_filter = st.selectbox("Filtrar marca", ["Todas"] + sorted(_rc_df['marca'].unique().tolist()), key="rc_marca")
+                        _rc_show = _rc_df if _rc_marca_filter == "Todas" else _rc_df[_rc_df['marca'] == _rc_marca_filter]
+
+                        st.dataframe(
+                            _rc_show[['sku', 'marca', 'stock_cd_a', 'stock_cd_b', 'stock_tiendas_a',
+                                      'stock_tiendas_b', 'venta_b', 'repo_cd', 'despacho_tiendas',
+                                      'unidades_repo_cd', 'unidades_despacho']].rename(columns={
+                                'sku': 'SKU', 'marca': 'Marca',
+                                'stock_cd_a': f'Stock CD {_rc_sem_a}', 'stock_cd_b': f'Stock CD {_rc_sem_b}',
+                                'stock_tiendas_a': f'Stock Tdas {_rc_sem_a}', 'stock_tiendas_b': f'Stock Tdas {_rc_sem_b}',
+                                'venta_b': f'Venta {_rc_sem_b}',
+                                'repo_cd': 'Repo CD', 'despacho_tiendas': 'Despacho Tdas',
+                                'unidades_repo_cd': 'Uds Repo CD', 'unidades_despacho': 'Uds Despacho',
+                            }),
+                            use_container_width=True, hide_index=True,
+                        )
+
+            # ── Tab 5: SKUs Acelerando ──
+            with _evol_tabs[4]:
+                st.markdown("##### SKUs con velocidad de venta en aumento")
+                _ac_umbral = st.slider("Umbral de aceleración (ratio)", 1.1, 3.0, 1.3, 0.1, key="ac_umbral",
+                                        help="Un ratio de 1.3 significa +30% de venta reciente vs antigua")
+
+                with st.spinner("Detectando aceleración..."):
+                    _ac_df = snapshots_engine.detect_aceleracion(umbral_ratio=_ac_umbral)
+
+                if _ac_df.empty:
+                    st.info("No se pudo calcular aceleración (datos insuficientes).")
+                else:
+                    _ac_k1, _ac_k2, _ac_k3, _ac_k4 = st.columns(4)
+                    _n_acel = int((_ac_df['tendencia'] == 'ACELERANDO').sum())
+                    _n_desacel = int((_ac_df['tendencia'] == 'DESACELERANDO').sum())
+                    _n_estable = int((_ac_df['tendencia'] == 'ESTABLE').sum())
+                    _n_react = int((_ac_df['tendencia'] == 'REACTIVADO').sum())
+                    with _ac_k1:
+                        st.metric("🚀 Acelerando", _n_acel)
+                    with _ac_k2:
+                        st.metric("📉 Desacelerando", _n_desacel)
+                    with _ac_k3:
+                        st.metric("➡️ Estable", _n_estable)
+                    with _ac_k4:
+                        st.metric("🔄 Reactivado", _n_react)
+
+                    _ac_tend_filter = st.radio("Filtrar", ["ACELERANDO", "DESACELERANDO", "ESTABLE", "REACTIVADO", "Todos"],
+                                                horizontal=True, key="ac_tend_filter")
+                    _ac_show = _ac_df if _ac_tend_filter == "Todos" else _ac_df[_ac_df['tendencia'] == _ac_tend_filter]
+
+                    # Filtro por marca
+                    _ac_marcas = ["Todas"] + sorted(_ac_show['marca'].unique().tolist())
+                    _ac_marca_sel = st.selectbox("Marca", _ac_marcas, key="ac_marca")
+                    if _ac_marca_sel != "Todas":
+                        _ac_show = _ac_show[_ac_show['marca'] == _ac_marca_sel]
+
+                    st.dataframe(
+                        _ac_show[['sku', 'marca', 'vta_reciente', 'vta_antigua', 'ratio', 'tendencia']].rename(columns={
+                            'sku': 'SKU', 'marca': 'Marca', 'vta_reciente': 'Vta Reciente (2 sem)',
+                            'vta_antigua': 'Vta Antigua (2 sem)', 'ratio': 'Ratio',
+                            'tendencia': 'Tendencia',
+                        }).head(200),
+                        use_container_width=True, hide_index=True,
+                    )
+                    st.caption(f"Mostrando top 200 de {len(_ac_show)} SKUs")
+
+            # ── Tab 6: Predicción Quiebre ──
+            with _evol_tabs[5]:
+                st.markdown("##### ¿En cuántas semanas quebramos stock?")
+                st.caption("Proyección basada en velocidad de venta ponderada (semanas recientes pesan más)")
+
+                with st.spinner("Proyectando quiebres..."):
+                    _pq_df = snapshots_engine.predict_stockout()
+
+                if _pq_df.empty:
+                    st.info("No se pudo calcular predicción de quiebre.")
+                else:
+                    _pq_k1, _pq_k2, _pq_k3, _pq_k4 = st.columns(4)
+                    with _pq_k1:
+                        _n_crit = int((_pq_df['riesgo'] == 'CRÍTICO').sum())
+                        st.markdown(f"""<div style="background:#FEF2F2; border-radius:10px; padding:12px; text-align:center; border-left:4px solid #DC2626;">
+                            <div style="font-size:0.7rem; color:#991B1B;">CRÍTICO (&lt;2 sem)</div>
+                            <div style="font-size:1.4rem; font-weight:700; color:#DC2626;">{_n_crit}</div>
+                        </div>""", unsafe_allow_html=True)
+                    with _pq_k2:
+                        _n_alto = int((_pq_df['riesgo'] == 'ALTO').sum())
+                        st.markdown(f"""<div style="background:#FFF7ED; border-radius:10px; padding:12px; text-align:center; border-left:4px solid #F59E0B;">
+                            <div style="font-size:0.7rem; color:#92400E;">ALTO (2-4 sem)</div>
+                            <div style="font-size:1.4rem; font-weight:700; color:#F59E0B;">{_n_alto}</div>
+                        </div>""", unsafe_allow_html=True)
+                    with _pq_k3:
+                        _n_medio = int((_pq_df['riesgo'] == 'MEDIO').sum())
+                        st.markdown(f"""<div style="background:#FFFBEB; border-radius:10px; padding:12px; text-align:center; border-left:4px solid #FBBF24;">
+                            <div style="font-size:0.7rem; color:#78350F;">MEDIO (4-8 sem)</div>
+                            <div style="font-size:1.4rem; font-weight:700; color:#FBBF24;">{_n_medio}</div>
+                        </div>""", unsafe_allow_html=True)
+                    with _pq_k4:
+                        _n_bajo = int((_pq_df['riesgo'] == 'BAJO').sum())
+                        st.markdown(f"""<div style="background:#F0FDF4; border-radius:10px; padding:12px; text-align:center; border-left:4px solid #10B981;">
+                            <div style="font-size:0.7rem; color:#065F46;">BAJO (&gt;8 sem)</div>
+                            <div style="font-size:1.4rem; font-weight:700; color:#10B981;">{_n_bajo}</div>
+                        </div>""", unsafe_allow_html=True)
+
+                    _pq_riesgo_filter = st.radio("Filtrar riesgo", ["CRÍTICO", "ALTO", "MEDIO", "BAJO", "Todos"],
+                                                  horizontal=True, key="pq_riesgo", index=0)
+                    _pq_show = _pq_df if _pq_riesgo_filter == "Todos" else _pq_df[_pq_df['riesgo'] == _pq_riesgo_filter]
+
+                    _pq_marcas = ["Todas"] + sorted(_pq_show['marca'].unique().tolist())
+                    _pq_marca_sel = st.selectbox("Marca", _pq_marcas, key="pq_marca")
+                    if _pq_marca_sel != "Todas":
+                        _pq_show = _pq_show[_pq_show['marca'] == _pq_marca_sel]
+
+                    # Columnas disponibles dependen de la versión del motor
+                    _pq_cols = ['sku', 'marca', 'stock_total', 'velocidad_ajustada',
+                                'semanas_hasta_quiebre']
+                    _pq_rename = {
+                        'sku': 'SKU', 'marca': 'Marca', 'stock_total': 'Stock',
+                        'velocidad_ajustada': 'Vel. Ajustada (u/sem)',
+                        'semanas_hasta_quiebre': 'Sem. Quiebre',
+                    }
+                    # Nuevas columnas P1-1: lead_time + margen_real
+                    if 'lead_time_sem' in _pq_show.columns:
+                        _pq_cols += ['lead_time_sem', 'margen_real_sem']
+                        _pq_rename['lead_time_sem'] = 'Lead Time (sem)'
+                        _pq_rename['margen_real_sem'] = 'Margen Real (sem)'
+                    _pq_cols += ['riesgo', 'tendencia_vta']
+                    _pq_rename['riesgo'] = 'Riesgo'
+                    _pq_rename['tendencia_vta'] = 'Tend. Venta'
+                    # P2-6: venta en riesgo
+                    if 'venta_riesgo_soles' in _pq_show.columns:
+                        _pq_cols.append('venta_riesgo_soles')
+                        _pq_rename['venta_riesgo_soles'] = 'Venta Riesgo S/'
+
+                    _pq_display = _pq_show[[c for c in _pq_cols if c in _pq_show.columns]].rename(
+                        columns=_pq_rename
+                    ).head(200)
+
+                    st.dataframe(_pq_display, use_container_width=True, hide_index=True)
+
+                    _pq_caption = f"Mostrando top 200 de {len(_pq_show)} SKUs."
+                    if 'margen_real_sem' in _pq_show.columns:
+                        _pq_caption += " Margen Real = Sem. Quiebre − Lead Time proveedor."
+                    st.caption(_pq_caption)
 
 
 # ══════════════════════════════════════════════════════════════

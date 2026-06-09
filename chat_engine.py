@@ -129,10 +129,10 @@ resultado['Capital Parado S/'] = resultado['Capital Parado S/'].apply(lambda x: 
 titulo = "Capital Parado por Marca"
 ```
 
---- Ejemplo 3: SKUs críticos sin descuento ---
+--- Ejemplo 3: SKUs en QUIEBRE sin descuento (sinónimos: "críticos", "en quiebre") ---
 Pregunta: "SKUs críticos que no tienen descuento"
 ```python
-_df = df[(df['estado'] == 'CRÍTICO') & (df['pct_descuento'].fillna(0) == 0)].copy()
+_df = df[(df['estado'] == 'QUIEBRE') & (df['pct_descuento'].fillna(0) == 0)].copy()
 resultado = (_df.groupby(['sku', 'nombre', 'marca']).agg(
     stock=('stock_total', 'sum'),
     tiendas=('tienda', 'nunique'),
@@ -301,7 +301,7 @@ REGLAS:
 
 Contexto de negocio:
 - cobertura_sem = semanas de stock (stock_total / prom_vta_uds). Menor es más urgente.
-- estado: clasificación del SKU (CRÍTICO <4sem, PRE-CRÍTICO 4-8, ÓPTIMO 8-12, ALTO 12-16, SOBRESTOCK >16, LIQUIDAR >26sem edad, NUEVO SIN VENTA, DORMIDO, MUERTO)
+- estado: clasificación del SKU (QUIEBRE <4sem, PRE-QUIEBRE 4-8, ÓPTIMO 8-12, ALTO 12-16, SOBRESTOCK 16-52, ESTANCADO >52sem edad≤26, LIQUIDAR >26sem edad, NUEVO SIN VENTA, DORMIDO, MUERTO)
 - stock_valor_costo = capital invertido en ese SKU×Tienda (soles)
 - prom_vta_uds = venta promedio semanal en unidades (Semana 1 solamente)
 - edad_semanas = antigüedad del producto
@@ -757,7 +757,7 @@ if __name__ == "__main__":
         "prom_vta_uds": [5, 8, 2],
         "cobertura_sem": [10.0, 1.25, 100.0],
         "stock_valor_costo": [5000, 1200, 30000],
-        "estado": ["ÓPTIMO", "CRÍTICO", "SOBRESTOCK"],
+        "estado": ["ÓPTIMO", "QUIEBRE", "SOBRESTOCK"],
         "costo": [100, 150, 150],
     })
 

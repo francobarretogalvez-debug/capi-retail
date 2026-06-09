@@ -1,0 +1,28 @@
+{
+    "_descripcion": "Mapeo de línea → categoría calórica para módulo Fenómeno del Niño",
+    "_version": "1.0",
+    "_fecha": "2026-05-27",
+    "_categorias": {
+        "GRUESO": "Prendas abrigadoras — alta retención de calor. Más afectadas por Niño (no se venden en invierno cálido).",
+        "MEDIO":  "Prendas de peso medio — uso transicional. Efecto moderado del Niño.",
+        "LIGERO": "Prendas livianas — verano / clima cálido. Oportunidad en Niño (se venden más).",
+        "NEUTRO": "Accesorios y otros sin perfil calórico claro. Se excluyen del análisis Niño."
+    },
+    "mapeo": {
+        "CASACAS":       "GRUESO",
+        "CHOMPAS":       "GRUESO",
+        "POLERONES":     "GRUESO",
+        "BLAZERS":       "GRUESO",
+        "CAMISAS M/L":   "MEDIO",
+        "PANTALONES":    "MEDIO",
+        "JEANS":         "MEDIO",
+        "POLOS M/L":     "MEDIO",
+        "POLOS M/C":     "LIGERO",
+        "CAMISAS M/C":   "LIGERO",
+        "SHORTS":        "LIGERO",
+        "TRAJES DE BANO":"LIGERO",
+        "ACCESORIOS":    "NEUTRO",
+        "REBATES":       "NEUTRO",
+        "OTROS":         "NEUTRO"
+    }
+}
