@@ -786,6 +786,12 @@ def _kpi_html(valor, label, css_class="blue"):
 if "results" not in st.session_state:
     st.session_state["results"] = None
 
+# ── Modo demo (?demo=1 en la URL): nav simplificada + auto-carga de base ──
+try:
+    _DEMO_MODE = st.query_params.get("demo") == "1"
+except Exception:
+    _DEMO_MODE = False
+
 # ══════════════════════════════════════════════════════════════
 #  SIDEBAR
 # ══════════════════════════════════════════════════════════════
@@ -809,6 +815,9 @@ with st.sidebar:
             st.session_state["theme_mode"] = "light" if st.session_state["theme_mode"] == "dark" else "dark"
             st.rerun()
     st.markdown(f'<div style="border-bottom: 1px solid {SLATE_200}; margin-bottom: 0.8rem;"></div>', unsafe_allow_html=True)
+
+    if _DEMO_MODE:
+        st.caption("🎬 Modo demo activo")
 
     # ── Navegación funcional con botones ──
     _has_results = st.session_state["results"] is not None
@@ -839,6 +848,13 @@ with st.sidebar:
             ("📲", "Briefing Semanal"),
             ("📝", "Diario de Gestión"),
         ]
+        if _DEMO_MODE:
+            # Demo: solo las vistas protagonistas del guion de 3 minutos
+            _NAV_VISION = [
+                ("🏠", "Dashboard"),
+                ("🩺", "Salud del Stock"),
+                ("📲", "Briefing Semanal"),
+            ]
 
         for _icon, _label in _NAV_VISION:
             _full = f"{_icon} {_label}"
@@ -862,6 +878,8 @@ with st.sidebar:
             ("📊", "Sobrestock"),
             ("🎯", "Acciones de Stock"),
         ]
+        if _DEMO_MODE:
+            _NAV_STOCK = [("🎯", "Acciones de Stock")]
 
         for _icon, _label in _NAV_STOCK:
             _full = f"{_icon} {_label}"
@@ -874,48 +892,49 @@ with st.sidebar:
                 st.session_state["nav_page"] = _full
                 st.rerun()
 
-        # ── GESTIÓN COMERCIAL ──
-        st.markdown('<div class="sidebar-section-label">GESTIÓN COMERCIAL</div>', unsafe_allow_html=True)
+        if not _DEMO_MODE:
+            # ── GESTIÓN COMERCIAL ──
+            st.markdown('<div class="sidebar-section-label">GESTIÓN COMERCIAL</div>', unsafe_allow_html=True)
 
-        _NAV_COMERCIAL = [
-            ("📊", "Gestión por Antigüedad"),
-            ("💰", "Acciones Precio"),
-            ("🏷️", "Marcas Terceras"),
-        ]
+            _NAV_COMERCIAL = [
+                ("📊", "Gestión por Antigüedad"),
+                ("💰", "Acciones Precio"),
+                ("🏷️", "Marcas Terceras"),
+            ]
 
-        for _icon, _label in _NAV_COMERCIAL:
-            _full = f"{_icon} {_label}"
-            _is_active = st.session_state["nav_page"] == _full
-            if st.button(
-                _full, key=f"nav_{_label}",
-                use_container_width=True,
-                type="primary" if _is_active else "secondary",
-            ):
-                st.session_state["nav_page"] = _full
-                st.rerun()
+            for _icon, _label in _NAV_COMERCIAL:
+                _full = f"{_icon} {_label}"
+                _is_active = st.session_state["nav_page"] == _full
+                if st.button(
+                    _full, key=f"nav_{_label}",
+                    use_container_width=True,
+                    type="primary" if _is_active else "secondary",
+                ):
+                    st.session_state["nav_page"] = _full
+                    st.rerun()
 
-        # ── ANÁLISIS PREDICTIVO ──
-        st.markdown('<div class="sidebar-section-label">ANÁLISIS PREDICTIVO</div>', unsafe_allow_html=True)
+            # ── ANÁLISIS PREDICTIVO ──
+            st.markdown('<div class="sidebar-section-label">ANÁLISIS PREDICTIVO</div>', unsafe_allow_html=True)
 
-        _NAV_PREDICTIVO = [
-            ("📦", "Ventana de Compra"),
-            ("📈", "Evolución Semanal"),
-            ("🌡️", "Fenómeno del Niño"),
-            ("🏪", "Afinidad Producto×Plaza"),
-            ("🤖", "Alertas IA"),
-            ("🔮", "Simulador Predictivo"),
-        ]
+            _NAV_PREDICTIVO = [
+                ("📦", "Ventana de Compra"),
+                ("📈", "Evolución Semanal"),
+                ("🌡️", "Fenómeno del Niño"),
+                ("🏪", "Afinidad Producto×Plaza"),
+                ("🤖", "Alertas IA"),
+                ("🔮", "Simulador Predictivo"),
+            ]
 
-        for _icon, _label in _NAV_PREDICTIVO:
-            _full = f"{_icon} {_label}"
-            _is_active = st.session_state["nav_page"] == _full
-            if st.button(
-                _full, key=f"nav_{_label}",
-                use_container_width=True,
-                type="primary" if _is_active else "secondary",
-            ):
-                st.session_state["nav_page"] = _full
-                st.rerun()
+            for _icon, _label in _NAV_PREDICTIVO:
+                _full = f"{_icon} {_label}"
+                _is_active = st.session_state["nav_page"] == _full
+                if st.button(
+                    _full, key=f"nav_{_label}",
+                    use_container_width=True,
+                    type="primary" if _is_active else "secondary",
+                ):
+                    st.session_state["nav_page"] = _full
+                    st.rerun()
 
         st.markdown(f'<div style="border-bottom:1px solid {SLATE_200}; margin:4px 0 12px 0;"></div>', unsafe_allow_html=True)
 
@@ -1115,6 +1134,49 @@ if run_btn:
 
 
 # ══════════════════════════════════════════════════════════════
+#  MODO DEMO: AUTO-CARGA DE LA ÚLTIMA BASE DISPONIBLE
+#  Con ?demo=1 la app arranca con datos sin pedir upload —
+#  crítico para que la demo muestre insights en segundos.
+# ══════════════════════════════════════════════════════════════
+
+if _DEMO_MODE and st.session_state["results"] is None and not st.session_state.get("_demo_autoload_done"):
+    st.session_state["_demo_autoload_done"] = True
+    import re as _re_demo
+
+    _demo_dir = os.path.join(os.path.dirname(__file__), "data2", "bases antiguas")
+
+    def _demo_fecha_archivo(nombre):
+        """Extrae (año, mes, día) de nombres tipo 'Base al 01.06.26.xlsx' para elegir la más reciente."""
+        _m = _re_demo.search(r"(\d{1,2})\.(\d{1,2})(?:\.(\d{2}))?", nombre)
+        if not _m:
+            return (0, 0, 0)
+        _yy = int(_m.group(3)) if _m.group(3) else 26
+        return (_yy, int(_m.group(2)), int(_m.group(1)))
+
+    try:
+        _demo_bases = [f for f in os.listdir(_demo_dir)
+                       if f.lower().endswith(".xlsx") and not f.startswith("~$")]
+    except OSError:
+        _demo_bases = []
+
+    if _demo_bases:
+        _demo_base = max(_demo_bases, key=_demo_fecha_archivo)
+        _demo_path = os.path.join(_demo_dir, _demo_base)
+        try:
+            with st.spinner(f"Modo demo: cargando {_demo_base}…"):
+                if _is_base_profundidad(_demo_path):
+                    _demo_plantilla = os.path.join(tempfile.gettempdir(), "capi_demo_plantilla.xlsx")
+                    etl_profundidad.transform(_demo_path, output_path=_demo_plantilla)
+                    _demo_input = _demo_plantilla
+                else:
+                    _demo_input = _demo_path
+                st.session_state["results"] = motor_v2.run_analysis(_demo_input, params=params_ui, formato=formato_input)
+            st.rerun()
+        except Exception as _demo_err:
+            st.warning(f"Modo demo: no se pudo auto-cargar la base ({_demo_err}). Sube un archivo manualmente.")
+
+
+# ══════════════════════════════════════════════════════════════
 #  PANTALLA DE BIENVENIDA (sin datos)
 # ══════════════════════════════════════════════════════════════
 
@@ -1150,20 +1212,20 @@ if st.session_state["results"] is None:
 # ══════════════════════════════════════════════════════════════
 
 res    = st.session_state["results"]
-s      = res["summary"]
+s      = res.get("summary", {})
 params = res["params"]
 
-df_cob       = res["cobertura"]
-df_rep       = res["reposiciones"]
-df_rep_pivot = res["reposiciones_pivot"]
-df_trans     = res["transferencias"]
-df_prec      = res["acciones_precio"]
-df_alertas   = res["alertas"]
-df_anomalias = res["anomalias_tienda"]
+df_cob       = res.get("cobertura", pd.DataFrame())
+df_rep       = res.get("reposiciones", pd.DataFrame())
+df_rep_pivot = res.get("reposiciones_pivot", pd.DataFrame())
+df_trans     = res.get("transferencias", pd.DataFrame())
+df_prec      = res.get("acciones_precio", pd.DataFrame())
+df_alertas   = res.get("alertas", pd.DataFrame())
+df_anomalias = res.get("anomalias_tienda", pd.DataFrame())
 alertas_tienda_dict = res.get("alertas_tienda", {})
 alertas_venta_cero_dict = res.get("alertas_venta_cero", {})
-briefing     = res["briefing"]
-briefing_items  = briefing['items']
+briefing     = res.get("briefing") or {}
+briefing_items  = briefing.get('items', [])
 briefing_tablas = briefing.get('tablas', {})
 aging        = res.get("aging", {})
 df_aging     = aging.get('df_aging', pd.DataFrame())
@@ -1886,7 +1948,8 @@ if nav_page == "🏠 Dashboard":
     # ══════════════════════════════════════════════════════════
     #  TICKET PROMEDIO + COMPARATIVO VS AÑO PASADO (LY)
     # ══════════════════════════════════════════════════════════
-    if ly_comparison and ly_comparison.get('ticket_actual_global', 0) > 0:
+    # En modo demo se oculta la sección YoY para aligerar el Dashboard (guion 3 min)
+    if (not _DEMO_MODE) and ly_comparison and ly_comparison.get('ticket_actual_global', 0) > 0:
         st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
         st.markdown(f'<div class="section-header"><h3>🎫 Ticket Promedio & vs Año Pasado</h3><span class="live-badge">YoY</span></div>', unsafe_allow_html=True)
 
@@ -2098,6 +2161,9 @@ elif nav_page == "🩺 Salud del Stock":
 
                 # ── Tab 1: Diagnostico Rapido ──
                 with _hs_tabs[0]:
+                    if _hs_global is None or _hs_global.empty:
+                        st.warning("No se pudo calcular el Health Score con los datos actuales.")
+                        st.stop()
                     _g = _hs_global.iloc[0]
                     _hs_score = float(_g['health_score'])
                     _hs_semaforo = str(_g['semaforo'])
@@ -2359,7 +2425,7 @@ elif nav_page == "🩺 Salud del Stock":
                         key="hs_dd_marca"
                     )
 
-                    if _dd_marca_sel:
+                    if _dd_marca_sel and not _hs_marca[_hs_marca['marca'] == _dd_marca_sel].empty:
                         # Score de la marca
                         _dd_marca_row = _hs_marca[_hs_marca['marca'] == _dd_marca_sel].iloc[0]
                         _dd_color = _sem_colors.get(str(_dd_marca_row['semaforo']), SLATE_500)
@@ -3039,7 +3105,9 @@ elif nav_page == "📊 Sobrestock":
 
     with _sobre_tab1:
         st.markdown("##### Sobrestock real — acción: markdown o transferencia")
-        _df_real = _df_sobre[~_df_sobre['sobrestock_aparente']].copy() if 'sobrestock_aparente' in _df_sobre.columns else _df_sobre.copy()
+        st.caption("Estados SOBRESTOCK y LIQUIDAR. Los SKUs en estado ALTO (16-26 sem) se vigilan pero no se intervienen aquí — solo aparecen en Empuje si su stock está retenido en CD.")
+        # ALTO se excluye del markdown: pertenece al universo 'aparente' (empuje), no al de intervención de precio
+        _df_real = _df_sobre[(~_df_sobre['sobrestock_aparente']) & (_df_sobre['estado'] != 'ALTO')].copy() if 'sobrestock_aparente' in _df_sobre.columns else _df_sobre[_df_sobre['estado'] != 'ALTO'].copy()
         if _df_real.empty:
             st.info("No hay sobrestock real detectado con los filtros actuales.")
         else:
@@ -3108,7 +3176,7 @@ elif nav_page == "📊 Sobrestock":
                                        'pct_descuento', 'stock_valor_costo', 'sobrestock_aparente'] if c in _df_sobre.columns]
         _sobre_xl_buf = io.BytesIO()
         with pd.ExcelWriter(_sobre_xl_buf, engine='openpyxl') as _w:
-            _df_real_xl = _df_sobre[~_df_sobre.get('sobrestock_aparente', pd.Series(False, index=_df_sobre.index))].copy() if 'sobrestock_aparente' in _df_sobre.columns else _df_sobre.copy()
+            _df_real_xl = _df_sobre[(~_df_sobre.get('sobrestock_aparente', pd.Series(False, index=_df_sobre.index))) & (_df_sobre['estado'] != 'ALTO')].copy() if 'sobrestock_aparente' in _df_sobre.columns else _df_sobre[_df_sobre['estado'] != 'ALTO'].copy()
             _df_apar_xl = _df_sobre[_df_sobre['sobrestock_aparente']].copy() if 'sobrestock_aparente' in _df_sobre.columns else pd.DataFrame()
             if not _df_real_xl.empty:
                 _add_pricing_cols(_df_real_xl[_sobre_xl_cols].sort_values('stock_valor_costo', ascending=False), df_cob, 'Sobrestock Real', _w)

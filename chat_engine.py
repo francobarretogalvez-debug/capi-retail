@@ -460,15 +460,23 @@ def _call_claude(messages: list) -> str:
     if Anthropic is None:
         raise ImportError("Instala el SDK: pip install anthropic")
 
-    client = Anthropic(api_key=api_key)
+    client = Anthropic(api_key=api_key, timeout=30.0, max_retries=1)
 
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        temperature=TEMPERATURE,
-        system=SYSTEM_PROMPT,
-        messages=messages,
-    )
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=MAX_TOKENS,
+            temperature=TEMPERATURE,
+            system=SYSTEM_PROMPT,
+            messages=messages,
+        )
+    except Exception as e:
+        _err_name = type(e).__name__
+        if "RateLimit" in _err_name or "Overloaded" in str(e):
+            raise ValueError("El asistente está saturado en este momento. Intenta de nuevo en unos segundos.")
+        if "Timeout" in _err_name or "Connection" in _err_name:
+            raise ValueError("El asistente tardó demasiado en responder. Vuelve a intentarlo.")
+        raise
 
     return response.content[0].text
 
