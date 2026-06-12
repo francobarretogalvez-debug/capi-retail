@@ -2136,6 +2136,40 @@ if nav_page == "🏠 Dashboard":
                 if not _vp_q.empty:
                     _vp_q['perdida_sem_soles'] = (_vp_q['prom_vta_uds'] * _vp_q['precio_vigente'].fillna(0)).round(0)
                     _vp_q['evitable'] = _vp_q['stock_cd'].fillna(0) > 0 if 'stock_cd' in _vp_q.columns else False
+
+                    # ── Solución por quiebre: cruzar con el plan del motor ──
+                    # 1) Plan de reposición (despacho CD u orden a proveedor)
+                    if not df_rep.empty and 'a_reponer' in df_rep.columns and 'tienda' in df_rep.columns:
+                        _vp_rep = df_rep[df_rep['a_reponer'] > 0][
+                            ['sku', 'tienda', 'a_reponer'] +
+                            (['requiere_proveedor'] if 'requiere_proveedor' in df_rep.columns else [])
+                        ].drop_duplicates(['sku', 'tienda'])
+                        _vp_q = _vp_q.merge(_vp_rep, on=['sku', 'tienda'], how='left')
+                    # 2) Transferencias sugeridas (desde tiendas con exceso)
+                    if not df_trans.empty and 'tienda_destino' in df_trans.columns:
+                        _vp_tr = df_trans.groupby(['sku', 'tienda_destino']).agg(
+                            _vp_uds_tr=('uds_transferir', 'sum'),
+                            _vp_origen=('tienda_origen', 'first'),
+                            _vp_n_orig=('tienda_origen', 'nunique'),
+                        ).reset_index().rename(columns={'tienda_destino': 'tienda'})
+                        _vp_q = _vp_q.merge(_vp_tr, on=['sku', 'tienda'], how='left')
+
+                    def _vp_accion(r):
+                        _rep = r.get('a_reponer')
+                        if _rep is not None and not pd.isna(_rep) and _rep > 0:
+                            if r.get('requiere_proveedor') is True:
+                                return f"📋 Orden a proveedor — {int(_rep)} uds"
+                            return f"🚚 Despachar del CD — {int(_rep)} uds"
+                        _tr = r.get('_vp_uds_tr')
+                        if _tr is not None and not pd.isna(_tr) and _tr > 0:
+                            _org = str(r.get('_vp_origen', ''))
+                            _extra = f" (+{int(r['_vp_n_orig']) - 1} tiendas)" if r.get('_vp_n_orig', 1) > 1 else ""
+                            return f"🔄 Transferir {int(_tr)} uds desde {_org}{_extra}"
+                        if r.get('evitable'):
+                            return "🚚 Stock en CD — revisar (excluido del plan por regla de dscto)"
+                        return "📋 Orden de compra (sin stock en cadena)"
+
+                    _vp_q['accion_sugerida'] = _vp_q.apply(_vp_accion, axis=1)
                     _vp_q = _vp_q.sort_values('perdida_sem_soles', ascending=False)
 
             st.markdown("---")
@@ -2170,21 +2204,30 @@ if nav_page == "🏠 Dashboard":
 
             st.caption(" · ".join(_vp['supuestos']))
 
-            with st.expander(f"Ver detalle — top quiebres actuales por tienda ({len(_vp_q):,} combos)", expanded=False):
+            with st.expander(f"Ver detalle y soluciones — top quiebres actuales por tienda ({len(_vp_q):,} combos)", expanded=False):
                 if _vp_q.empty:
                     st.info("No hay quiebres activos con venta en la base cargada.")
                 else:
+                    # Mix de soluciones (resumen accionable)
+                    _vp_n_cd = int(_vp_q['accion_sugerida'].str.startswith('🚚').sum())
+                    _vp_n_tr = int(_vp_q['accion_sugerida'].str.startswith('🔄').sum())
+                    _vp_n_oc = int(_vp_q['accion_sugerida'].str.startswith('📋').sum())
+                    st.markdown(
+                        f"**Cómo se resuelven:** 🚚 **{_vp_n_cd:,}** despachos desde CD · "
+                        f"🔄 **{_vp_n_tr:,}** transferencias entre tiendas · "
+                        f"📋 **{_vp_n_oc:,}** órdenes de compra/proveedor"
+                    )
                     _vp_cols = [c for c in ['marca', 'sku', 'nombre', 'tienda', 'prom_vta_uds',
-                                             'precio_vigente', 'perdida_sem_soles', 'evitable'] if c in _vp_q.columns]
+                                             'precio_vigente', 'perdida_sem_soles', 'accion_sugerida'] if c in _vp_q.columns]
                     _vp_show = _vp_q[_vp_cols].head(20).rename(columns={
                         'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'tienda': 'Tienda',
                         'prom_vta_uds': 'Vta/sem (uds)', 'precio_vigente': 'Precio',
-                        'perdida_sem_soles': 'Pérdida S//sem', 'evitable': 'Evitable (CD)',
+                        'perdida_sem_soles': 'Pérdida S//sem', 'accion_sugerida': 'Acción sugerida',
                     })
                     st.dataframe(_vp_show.style.format({
                         'Vta/sem (uds)': '{:.1f}', 'Precio': 'S/ {:,.2f}', 'Pérdida S//sem': 'S/ {:,.0f}',
                     }, na_rep="—"), use_container_width=True, hide_index=True)
-                    st.caption("Evitable (CD) = la tienda está quebrada pero hay stock en el CD: se resuelve con despacho, no con compra.")
+                    st.caption("La acción sale del plan del motor: despacho si hay stock en CD (cantidades del plan de reposición), transferencia si otra tienda tiene exceso, orden de compra si no hay stock en la cadena.")
 
                 _vp_xl_buf = io.BytesIO()
                 with pd.ExcelWriter(_vp_xl_buf, engine='openpyxl') as _vp_w:
