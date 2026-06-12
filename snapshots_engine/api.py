@@ -677,3 +677,215 @@ def get_resumen_semanal(semana: str = None) -> dict:
         'contribucion_total': float(df['contribucion_soles'].sum()) if 'contribucion_soles' in df.columns else 0,
         'marcas': int(df['marca'].nunique()) if 'marca' in df.columns else 0,
     }
+
+
+def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
+                        min_semanas_velocidad: int = 2) -> dict:
+    """
+    Estima la venta perdida (S/) por quiebres de stock en la ventana de
+    snapshots disponibles. Devuelve una BANDA (conservadora-optimista),
+    nunca un número falso-preciso.
+
+    Metodología:
+      1. Gate de actividad: solo SKUs con venta > 0 en la ventana
+         (excluye mercadería MUERTA/DORMIDA que no es quiebre).
+      2. Semanas en quiebre:
+         - cierre de snapshot con stock_total == 0 → cuenta 0.5 semanas
+           (convención V2: "si stock_cierre=0, semana cuenta como 0.5")
+         - semana gap entre snapshots → cuenta solo si stock == 0 en ambos
+           extremos Y la venta reconstruida (vta_u_sem_Nant) de esa semana
+           es 0 → banda 0.5 (conservadora) / 1.0 (optimista)
+      3. Velocidad de venta: promedio de la serie SEMANAL reconstruida
+         (vta_u_sem_1..4ant de filas válidas — 'unidades_vendidas' es un
+         acumulado y no se usa). Banda: promedio simple vs ponderado reciente.
+      4. Precio: precio_vigente válido más reciente; guard contra precios
+         basura (< S/5 o < 20% del precio blanco) con fallback a
+         venta_soles/unidades_vendidas.
+      5. perdida = velocidad × semanas_quiebre × precio (por banda).
+
+    Args:
+        hasta_semana: YYYY-WW límite superior de la ventana. None = todas.
+        marcas: set de marcas (MAYÚSCULAS) a incluir. None = todas.
+        min_semanas_velocidad: mínimo de semanas con data para estimar
+            velocidad; SKUs bajo el mínimo se excluyen y se cuentan.
+
+    Returns:
+        dict con: banda_min, banda_max, semanas_analizadas, df_detalle,
+        n_skus_afectados, n_skus_excluidos, supuestos (list[str]).
+    """
+    import datetime as _dt
+
+    _empty = {
+        'banda_min': 0.0, 'banda_max': 0.0, 'semanas_analizadas': [],
+        'df_detalle': pd.DataFrame(), 'n_skus_afectados': 0,
+        'n_skus_excluidos': 0, 'supuestos': ['Sin snapshots suficientes para estimar.'],
+    }
+
+    weeks = list_available_weeks()
+    if hasta_semana:
+        weeks = [w for w in weeks if w <= hasta_semana]
+    if len(weeks) < 2:
+        return _empty
+
+    def _week_ord(iso: str) -> int:
+        """YYYY-WW → índice absoluto de semana (ordinal del domingo // 7)."""
+        y, w = iso.split('-')
+        return _dt.date.fromisocalendar(int(y), int(w), 7).toordinal() // 7
+
+    # ── Cargar snapshots de la ventana ──
+    snaps = {}
+    for w in weeks:
+        try:
+            _df = load_snapshot(w)
+        except FileNotFoundError:
+            continue
+        if _df is None or _df.empty:
+            continue
+        if marcas is not None and 'marca' in _df.columns:
+            _df = _df[_df['marca'].astype(str).str.upper().isin(marcas)]
+        snaps[w] = _df
+    if len(snaps) < 2:
+        return _empty
+
+    sem_list = sorted(snaps.keys(), key=_week_ord)
+    ords = {w: _week_ord(w) for w in sem_list}
+
+    # ── Series por SKU ──
+    # IMPORTANTE (verificado contra data real): 'unidades_vendidas' es un ACUMULADO
+    # histórico, NO venta semanal. La venta semanal real solo existe en las columnas
+    # reconstruidas vta_u_sem_1ant..4ant. Además, las filas con stock 0 vienen
+    # "zeroed" (ants en 0 aunque hubo venta antes del quiebre): sus ants NO sirven
+    # para velocidad, solo para confirmar que un gap entre dos cierres en 0 no tuvo venta.
+    # ventas_vel[sku][wk] = (prioridad N, uds)  — solo de filas válidas → velocidad
+    # ventas_any[sku][wk] = uds                 — todas las filas → check de gaps
+    ventas_vel, ventas_any, stocks, meta, precio_valido = {}, {}, {}, {}, {}
+    for w in sem_list:
+        df = snaps[w]
+        wo = ords[w]
+        vta_ant_cols = [c for c in df.columns if c.startswith('vta_u_sem_') and c.endswith('ant')]
+        for row in df.itertuples(index=False):
+            sku = getattr(row, 'sku', None)
+            if sku is None:
+                continue
+            stk_row = float(getattr(row, 'stock_total', 0) or 0)
+            ant_vals = {}
+            for c in vta_ant_cols:
+                n = int(c.replace('vta_u_sem_', '').replace('ant', ''))
+                val = getattr(row, c, None)
+                if val is None or (isinstance(val, float) and np.isnan(val)):
+                    continue
+                ant_vals[n] = float(val)
+            cum = float(getattr(row, 'unidades_vendidas', 0) or 0)
+            fila_zeroed = stk_row == 0 and cum == 0 and all(x == 0 for x in ant_vals.values())
+
+            v_any = ventas_any.setdefault(sku, {})
+            for n, val in ant_vals.items():
+                v_any.setdefault(wo - n, val)
+            if not fila_zeroed:
+                v_vel = ventas_vel.setdefault(sku, {})
+                for n, val in ant_vals.items():
+                    wk = wo - n
+                    prev = v_vel.get(wk)
+                    if prev is None or prev[0] > n:
+                        v_vel[wk] = (n, val)  # reconstrucción más cercana gana
+            stocks.setdefault(sku, {})[wo] = stk_row
+            # metadata del snapshot más reciente donde aparece el SKU
+            _pv = float(getattr(row, 'precio_vigente', 0) or 0)
+            _pb = float(getattr(row, 'precio_blanco', 0) or 0)
+            meta[sku] = {
+                'descripcion': getattr(row, 'descripcion', ''),
+                'marca': getattr(row, 'marca', ''),
+                'venta_soles_w': float(getattr(row, 'venta_soles', 0) or 0),
+                'uds_w': float(getattr(row, 'unidades_vendidas', 0) or 0),
+            }
+            # último precio VÁLIDO de la historia (guard contra basura tipo S/ 0.01)
+            if _pv >= 5 and (_pb <= 0 or _pv >= 0.2 * _pb):
+                precio_valido[sku] = _pv
+
+    # ── Candidatos: stock 0 en algún cierre Y venta semanal real > 0 (gate) ──
+    n_excluidos = 0
+    detalle = []
+    for sku, stk in stocks.items():
+        if min(stk.values()) > 0:
+            continue  # nunca quebró en un cierre observado
+        v = ventas_vel.get(sku, {})
+        venta_total = sum(x[1] for x in v.values())
+        if venta_total <= 0:
+            continue  # mercadería muerta, no quiebre
+
+        # Velocidad: serie semanal reconstruida de filas válidas (incluye semanas
+        # en cero legítimas — el SKU tenía stock y no vendió)
+        vel_weeks = sorted(v.keys())
+        if len(vel_weeks) < min_semanas_velocidad:
+            n_excluidos += 1
+            continue
+
+        vel_vals = [v[wk][1] for wk in vel_weeks]
+        vel_simple = float(np.mean(vel_vals))
+        pesos = list(range(1, len(vel_vals) + 1))  # más reciente pesa más
+        vel_pond = float(np.average(vel_vals, weights=pesos))
+        vel_low, vel_high = min(vel_simple, vel_pond), max(vel_simple, vel_pond)
+        if vel_high <= 0:
+            n_excluidos += 1
+            continue
+
+        # Semanas en quiebre: cierres con stock 0 (0.5 c/u) + gaps confirmados
+        sem_q_min = sem_q_max = 0.0
+        cierres = sorted(stk.keys())
+        for wk in cierres:
+            if stk[wk] == 0:
+                sem_q_min += 0.5
+                sem_q_max += 0.5
+        v_any = ventas_any.get(sku, {})
+        for a, b in zip(cierres, cierres[1:]):
+            if stk[a] == 0 and stk[b] == 0:
+                for gap_wk in range(a + 1, b):
+                    if v_any.get(gap_wk) == 0:
+                        sem_q_min += 0.5
+                        sem_q_max += 1.0
+        if sem_q_max <= 0:
+            continue
+
+        # Precio: último válido de la historia; fallback a venta/unidades
+        m = meta[sku]
+        precio = precio_valido.get(sku, 0.0)
+        if precio <= 0:
+            precio = (m['venta_soles_w'] / m['uds_w']) if m['uds_w'] > 0 else 0.0
+        if precio <= 0:
+            n_excluidos += 1
+            continue
+
+        detalle.append({
+            'sku': sku,
+            'descripcion': m['descripcion'],
+            'marca': m['marca'],
+            'velocidad_uds_sem': round(vel_simple, 2),
+            'semanas_quiebre_min': sem_q_min,
+            'semanas_quiebre_max': sem_q_max,
+            'precio_usado': round(precio, 2),
+            'perdida_min_soles': round(vel_low * sem_q_min * precio, 0),
+            'perdida_max_soles': round(vel_high * sem_q_max * precio, 0),
+        })
+
+    df_detalle = pd.DataFrame(detalle)
+    if not df_detalle.empty:
+        df_detalle = df_detalle.sort_values('perdida_max_soles', ascending=False).reset_index(drop=True)
+
+    supuestos = [
+        f"Ventana: {sem_list[0]} a {sem_list[-1]} ({len(sem_list)} cierres de snapshot).",
+        "Semana de cierre con stock 0 cuenta como 0.5 semanas de quiebre (convención del sistema).",
+        "Semanas entre snapshots cuentan solo si stock 0 en ambos extremos y venta 0: banda 0.5-1.0.",
+        "Velocidad estimada con la serie de venta semanal reconstruida (sem. previas de cada corte); banda = promedio simple vs ponderado reciente.",
+        f"{n_excluidos} SKUs excluidos por historia o precio insuficientes." if n_excluidos else "Sin SKUs excluidos.",
+        "Nivel SKU agregado cadena (el detalle por tienda usa la base actual).",
+    ]
+
+    return {
+        'banda_min': float(df_detalle['perdida_min_soles'].sum()) if not df_detalle.empty else 0.0,
+        'banda_max': float(df_detalle['perdida_max_soles'].sum()) if not df_detalle.empty else 0.0,
+        'semanas_analizadas': sem_list,
+        'df_detalle': df_detalle,
+        'n_skus_afectados': int(len(df_detalle)),
+        'n_skus_excluidos': int(n_excluidos),
+        'supuestos': supuestos,
+    }

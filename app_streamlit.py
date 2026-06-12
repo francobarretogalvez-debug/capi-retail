@@ -2113,6 +2113,94 @@ if nav_page == "🏠 Dashboard":
                     _dc3.markdown(f'<div style="text-align:center; padding:8px;"><div style="font-size:0.7rem; color:var(--capi-text2);">Δ Stock U</div><div style="font-size:1.2rem; font-weight:700; color:{_delta_color(-_d_stk)};">{"+" if _d_stk>=0 else ""}{_d_stk:,.0f}</div></div>', unsafe_allow_html=True)
                     _dc4.markdown(f'<div style="text-align:center; padding:8px;"><div style="font-size:0.7rem; color:var(--capi-text2);">Δ SKUs</div><div style="font-size:1.2rem; font-weight:700; color:var(--capi-text);">{"+" if _d_skus>=0 else ""}{_d_skus}</div></div>', unsafe_allow_html=True)
 
+    # ══════════════════════════════════════════════════════════
+    #  💸 VENTAS PERDIDAS POR QUIEBRE (lost sales)
+    #  Banda histórica (snapshots, nivel SKU) + quiebre actual
+    #  (df_cob, SKU×tienda). Feature estilo RELEX/Blue Yonder.
+    # ══════════════════════════════════════════════════════════
+    if _HAS_SNAPSHOTS:
+        @st.cache_data(show_spinner=False)
+        def _vp_calcular(_clave: str):
+            return snapshots_engine.estimate_lost_sales(marcas=_MARCAS_VIGENTES)
+
+        try:
+            _vp = _vp_calcular("marcas-vigentes")
+        except Exception:
+            _vp = None
+
+        if _vp and _vp.get('banda_max', 0) > 0:
+            # Componente B: quiebre ACTUAL por SKU×tienda (base cargada)
+            _vp_q = pd.DataFrame()
+            if 'estado' in df_cob.columns and 'prom_vta_uds' in df_cob.columns and 'precio_vigente' in df_cob.columns:
+                _vp_q = df_cob[(df_cob['estado'] == 'QUIEBRE') & (df_cob['prom_vta_uds'].fillna(0) > 0)].copy()
+                if not _vp_q.empty:
+                    _vp_q['perdida_sem_soles'] = (_vp_q['prom_vta_uds'] * _vp_q['precio_vigente'].fillna(0)).round(0)
+                    _vp_q['evitable'] = _vp_q['stock_cd'].fillna(0) > 0 if 'stock_cd' in _vp_q.columns else False
+                    _vp_q = _vp_q.sort_values('perdida_sem_soles', ascending=False)
+
+            st.markdown("---")
+            st.markdown(f'<div class="section-header"><h3>💸 Ventas Perdidas por Quiebre</h3><span class="live-badge">NUEVO</span></div>', unsafe_allow_html=True)
+
+            _vp_sem = _vp['semanas_analizadas']
+            _vp_evit_n = int(_vp_q['evitable'].sum()) if not _vp_q.empty else 0
+            _vp_evit_soles = float(_vp_q.loc[_vp_q['evitable'], 'perdida_sem_soles'].sum()) if not _vp_q.empty else 0.0
+
+            _vp_c1, _vp_c2, _vp_c3 = st.columns([2, 1, 1])
+            with _vp_c1:
+                st.markdown(f"""
+                <div style="background:#FEF2F2; border-radius:12px; padding:16px 20px; border-left:4px solid #DC2626;">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Venta perdida estimada — semanas {_vp_sem[0]} a {_vp_sem[-1]}</div>
+                    <div style="font-size:1.6rem; font-weight:700; color:#DC2626;">S/ {_vp['banda_min']:,.0f} – S/ {_vp['banda_max']:,.0f}</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">Dinero que se dejó de vender por quiebres de stock (banda conservadora–optimista)</div>
+                </div>""", unsafe_allow_html=True)
+            with _vp_c2:
+                st.markdown(f"""
+                <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_CRITICO};">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">SKUs con quiebre en el período</div>
+                    <div style="font-size:1.6rem; font-weight:700; color:{STATUS_CRITICO};">{_vp['n_skus_afectados']:,}</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">con venta comprobada antes del quiebre</div>
+                </div>""", unsafe_allow_html=True)
+            with _vp_c3:
+                st.markdown(f"""
+                <div style="background:#FFFBEB; border-radius:12px; padding:16px 20px; border-left:4px solid #D97706;">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Quiebres evitables HOY</div>
+                    <div style="font-size:1.6rem; font-weight:700; color:#D97706;">{_vp_evit_n:,}</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">combos con stock en CD · S/ {_vp_evit_soles:,.0f}/sem en juego</div>
+                </div>""", unsafe_allow_html=True)
+
+            st.caption(" · ".join(_vp['supuestos']))
+
+            with st.expander(f"Ver detalle — top quiebres actuales por tienda ({len(_vp_q):,} combos)", expanded=False):
+                if _vp_q.empty:
+                    st.info("No hay quiebres activos con venta en la base cargada.")
+                else:
+                    _vp_cols = [c for c in ['marca', 'sku', 'nombre', 'tienda', 'prom_vta_uds',
+                                             'precio_vigente', 'perdida_sem_soles', 'evitable'] if c in _vp_q.columns]
+                    _vp_show = _vp_q[_vp_cols].head(20).rename(columns={
+                        'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'tienda': 'Tienda',
+                        'prom_vta_uds': 'Vta/sem (uds)', 'precio_vigente': 'Precio',
+                        'perdida_sem_soles': 'Pérdida S//sem', 'evitable': 'Evitable (CD)',
+                    })
+                    st.dataframe(_vp_show.style.format({
+                        'Vta/sem (uds)': '{:.1f}', 'Precio': 'S/ {:,.2f}', 'Pérdida S//sem': 'S/ {:,.0f}',
+                    }, na_rep="—"), use_container_width=True, hide_index=True)
+                    st.caption("Evitable (CD) = la tienda está quebrada pero hay stock en el CD: se resuelve con despacho, no con compra.")
+
+                _vp_xl_buf = io.BytesIO()
+                with pd.ExcelWriter(_vp_xl_buf, engine='openpyxl') as _vp_w:
+                    if not _vp['df_detalle'].empty:
+                        _vp['df_detalle'].to_excel(_vp_w, sheet_name='Perdida Historica por SKU', index=False)
+                    if not _vp_q.empty:
+                        _vp_q[_vp_cols].to_excel(_vp_w, sheet_name='Quiebre Actual SKUxTienda', index=False)
+                _vp_xl_buf.seek(0)
+                st.download_button(
+                    "📥 Descargar análisis de ventas perdidas (.xlsx)",
+                    data=_vp_xl_buf.getvalue(),
+                    file_name="Capi_Ventas_Perdidas.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_ventas_perdidas",
+                )
+
 
 # ═══════════════════════════════════════════════════════════════
 #  SALUD DEL STOCK (Prompt C)
