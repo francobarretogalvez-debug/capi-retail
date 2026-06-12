@@ -2133,6 +2133,31 @@ if nav_page == "🏠 Dashboard":
             return snapshots_engine.estimate_lost_sales(marcas=_MARCAS_VIGENTES)
 
         @st.cache_data(show_spinner=False)
+        def _vp_procedencia_map(_path: str):
+            """Mapa SKU → procedencia (NAC/IMP) leído de la columna 'Proced.' de la Base Profundidad.
+            Define si un quiebre sin stock en cadena tiene reorder viable (NAC, semanas)
+            o es estructural (IMP, ~2-3 meses — no llega para esta venta)."""
+            try:
+                _dfp = pd.read_excel(_path, usecols=['Cód. Prod.', 'Proced.'])
+                return dict(zip(_dfp['Cód. Prod.'],
+                                _dfp['Proced.'].astype(str).str.strip().str.upper()))
+            except Exception:
+                return {}
+
+        def _vp_base_path():
+            _p = st.session_state.get("_base_profundidad_path")
+            if _p and os.path.exists(_p):
+                return _p
+            _dir = os.path.join(os.path.dirname(__file__), "data2", "bases antiguas")
+            try:
+                _bases = [f for f in os.listdir(_dir) if f.lower().endswith(".xlsx") and not f.startswith("~$")]
+                if _bases:
+                    return os.path.join(_dir, max(_bases, key=lambda f: os.path.getmtime(os.path.join(_dir, f))))
+            except OSError:
+                pass
+            return None
+
+        @st.cache_data(show_spinner=False)
         def _vp_cd_reliability():
             return snapshots_engine.estimate_cd_reliability()
 
@@ -2221,7 +2246,16 @@ if nav_page == "🏠 Dashboard":
                             return f"🔄 Transferir {int(_tr)} uds desde {_org}{_extra}"
                         if r.get('evitable'):
                             return f"🚚 Stock en CD — revisar (excluido del plan por regla de dscto){_vol}"
+                        _proc = str(r.get('procedencia', '') or '')
+                        if _proc.startswith('IMP'):
+                            return "⛔ Importado sin stock en cadena — reorder ~2-3 meses, no llega: evaluar sustituto o asumir pérdida"
+                        if _proc.startswith('NAC'):
+                            return "📋 Reorder nacional — gestionar con proveedor local (semanas)"
                         return "📋 Orden de compra (sin stock en cadena)"
+
+                    _vp_base = _vp_base_path()
+                    _vp_proc = _vp_procedencia_map(_vp_base) if _vp_base else {}
+                    _vp_q['procedencia'] = _vp_q['sku'].map(_vp_proc).fillna('')
 
                     _vp_q['accion_sugerida'] = _vp_q.apply(_vp_accion, axis=1)
                     _vp_q = _vp_q.sort_values('contrib_riesgo_sem', ascending=False)
@@ -2267,18 +2301,20 @@ if nav_page == "🏠 Dashboard":
                     _vp_n_tr = int(_vp_q['accion_sugerida'].str.startswith('🔄').sum())
                     _vp_n_oc = int(_vp_q['accion_sugerida'].str.startswith('📋').sum())
                     _vp_n_ag = int(_vp_q['accion_sugerida'].str.startswith('⏳').sum())
+                    _vp_n_est = int(_vp_q['accion_sugerida'].str.startswith('⛔').sum())
                     st.markdown(
                         f"**Cómo se resuelven:** 🚚 **{_vp_n_cd:,}** despachos desde CD · "
                         f"🔄 **{_vp_n_tr:,}** transferencias entre tiendas · "
                         f"📋 **{_vp_n_oc:,}** órdenes de compra/proveedor"
                         + (f" · ⏳ **{_vp_n_ag:,}** en cola (ATP del CD agotado)" if _vp_n_ag else "")
+                        + (f" · ⛔ **{_vp_n_est:,}** estructurales (importado agotado)" if _vp_n_est else "")
                     )
-                    _vp_cols = [c for c in ['marca', 'sku', 'nombre', 'tienda', 'prom_vta_uds',
+                    _vp_cols = [c for c in ['marca', 'sku', 'nombre', 'tienda', 'procedencia', 'prom_vta_uds',
                                              'precio_vigente', 'pct_descuento', 'margen_efectivo',
                                              'perdida_sem_soles', 'contrib_riesgo_sem', 'accion_sugerida'] if c in _vp_q.columns]
                     _vp_show = _vp_q[_vp_cols].head(20).rename(columns={
                         'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'tienda': 'Tienda',
-                        'prom_vta_uds': 'Vta/sem (uds)', 'precio_vigente': 'Precio',
+                        'procedencia': 'Origen', 'prom_vta_uds': 'Vta/sem (uds)', 'precio_vigente': 'Precio',
                         'pct_descuento': 'Dscto', 'margen_efectivo': 'Margen efect.',
                         'perdida_sem_soles': 'Venta en riesgo S//sem',
                         'contrib_riesgo_sem': 'Contrib. en riesgo S//sem', 'accion_sugerida': 'Acción sugerida',
