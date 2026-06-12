@@ -2148,6 +2148,12 @@ if nav_page == "🏠 Dashboard":
                 _vp_q = df_cob[(df_cob['estado'] == 'QUIEBRE') & (df_cob['prom_vta_uds'].fillna(0) > 0)].copy()
                 if not _vp_q.empty:
                     _vp_q['perdida_sem_soles'] = (_vp_q['prom_vta_uds'] * _vp_q['precio_vigente'].fillna(0)).round(0)
+                    # Contribución en riesgo: lo que de verdad pierde el P&L (feedback Franco:
+                    # "si meto más descuento vendo más, pero no necesariamente mejor contribución")
+                    _vp_q['contrib_riesgo_sem'] = (
+                        (_vp_q['perdida_sem_soles'] * _vp_q['margen_efectivo'].fillna(0)).round(0)
+                        if 'margen_efectivo' in _vp_q.columns else _vp_q['perdida_sem_soles']
+                    )
                     _vp_q['evitable'] = _vp_q['stock_cd'].fillna(0) > 0 if 'stock_cd' in _vp_q.columns else False
 
                     # ── Solución por quiebre: cruzar con el plan del motor ──
@@ -2176,7 +2182,8 @@ if nav_page == "🏠 Dashboard":
                     # de venta en riesgo (no se promete el mismo stock dos veces)
                     _vp_q['uds_despacho'] = 0
                     if 'a_reponer' in _vp_q.columns:
-                        _vp_q = _vp_q.sort_values('perdida_sem_soles', ascending=False)
+                        # Prioridad por CONTRIBUCIÓN en riesgo, no por venta (decisión Franco 2026-06)
+                        _vp_q = _vp_q.sort_values('contrib_riesgo_sem', ascending=False)
                         for _vp_sku_g, _vp_grp in _vp_q.groupby('sku', sort=False):
                             _vp_rem = int(_vp_grp['cd_atp'].iloc[0] or 0)
                             for _vp_gi, _vp_gr in _vp_grp.iterrows():
@@ -2217,7 +2224,7 @@ if nav_page == "🏠 Dashboard":
                         return "📋 Orden de compra (sin stock en cadena)"
 
                     _vp_q['accion_sugerida'] = _vp_q.apply(_vp_accion, axis=1)
-                    _vp_q = _vp_q.sort_values('perdida_sem_soles', ascending=False)
+                    _vp_q = _vp_q.sort_values('contrib_riesgo_sem', ascending=False)
 
             st.markdown("---")
             st.markdown(f'<div class="section-header"><h3>💸 Ventas Perdidas por Quiebre</h3><span class="live-badge">NUEVO</span></div>', unsafe_allow_html=True)
@@ -2268,19 +2275,20 @@ if nav_page == "🏠 Dashboard":
                     )
                     _vp_cols = [c for c in ['marca', 'sku', 'nombre', 'tienda', 'prom_vta_uds',
                                              'precio_vigente', 'pct_descuento', 'margen_efectivo',
-                                             'perdida_sem_soles', 'accion_sugerida'] if c in _vp_q.columns]
+                                             'perdida_sem_soles', 'contrib_riesgo_sem', 'accion_sugerida'] if c in _vp_q.columns]
                     _vp_show = _vp_q[_vp_cols].head(20).rename(columns={
                         'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'tienda': 'Tienda',
                         'prom_vta_uds': 'Vta/sem (uds)', 'precio_vigente': 'Precio',
                         'pct_descuento': 'Dscto', 'margen_efectivo': 'Margen efect.',
-                        'perdida_sem_soles': 'Venta en riesgo S//sem', 'accion_sugerida': 'Acción sugerida',
+                        'perdida_sem_soles': 'Venta en riesgo S//sem',
+                        'contrib_riesgo_sem': 'Contrib. en riesgo S//sem', 'accion_sugerida': 'Acción sugerida',
                     })
                     st.dataframe(_vp_show.style.format({
                         'Vta/sem (uds)': '{:.1f}', 'Precio': 'S/ {:,.2f}',
                         'Dscto': '{:.0%}', 'Margen efect.': '{:.0%}',
-                        'Venta en riesgo S//sem': 'S/ {:,.0f}',
+                        'Venta en riesgo S//sem': 'S/ {:,.0f}', 'Contrib. en riesgo S//sem': 'S/ {:,.0f}',
                     }, na_rep="—"), use_container_width=True, hide_index=True)
-                    st.caption("Dscto y Margen efect. permiten distinguir demanda real de venta inflada por evento de precio o liquidación: un SKU volando al 40% de descuento no justifica la misma reposición que uno a precio full.")
+                    st.caption("La tabla y la asignación del ATP se priorizan por CONTRIBUCIÓN en riesgo (venta × margen efectivo), no por venta: un SKU con descuento alto vende más unidades pero puede aportar menos al P&L. Dscto y Margen efect. dan el contexto para decidir si la velocidad es demanda real o evento de precio.")
                     st.caption(f"La acción sale del plan del motor: despacho si hay stock en CD (cantidades del plan de reposición), transferencia si otra tienda tiene exceso, orden de compra si no hay stock en la cadena. "
                                f"ATP: el reporte de CD no es tiempo real, por eso solo el {cd_prometible_pct}% del CD reportado se considera prometible (configurable en ⚙️) y los SKUs con CD volátil entre cortes van flagueados ⚠️.")
 
