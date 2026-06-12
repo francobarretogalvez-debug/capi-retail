@@ -1009,10 +1009,10 @@ with st.sidebar:
         st.markdown("**Confiabilidad del Stock CD (ATP)**")
         cd_prometible_pct = st.slider(
             "Stock CD prometible (%)",
-            min_value=10, max_value=100, value=20, step=5,
+            min_value=10, max_value=100, value=60, step=5,
             help="El reporte de CD no es tiempo real y el stock varía entre cortes. "
                  "Solo este % del CD reportado se considera disponible para prometer despachos. "
-                 "Calibración Franco 2026-06: 20% (conservador)."
+                 "Calibración Franco 2026-06-12: 60%."
         )
 
     params_ui = {
