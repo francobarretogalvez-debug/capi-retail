@@ -22,6 +22,7 @@ from .api import (
     detect_aceleracion,
     predict_stockout,
     estimate_lost_sales,
+    estimate_cd_reliability,
 )
 from .loader import load_base_antigua, process_micro_profundidad
 from .validators import validate_snapshot_schema
@@ -32,7 +33,7 @@ __all__ = [
     'get_evolucion_stock', 'detect_reposiciones', 'get_resumen_semanal',
     'compare_weeks', 'detect_state_changes', 'evolucion_marca',
     'detect_repo_cumplimiento', 'detect_aceleracion', 'predict_stockout',
-    'estimate_lost_sales',
+    'estimate_lost_sales', 'estimate_cd_reliability',
     'load_base_antigua', 'process_micro_profundidad',
     'validate_snapshot_schema',
 ]

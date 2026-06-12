@@ -1006,6 +1006,15 @@ with st.sidebar:
             help="Top N SKUs por marca dentro de cada tienda, ordenados por capital parado."
         )
 
+        st.markdown("**Confiabilidad del Stock CD (ATP)**")
+        cd_prometible_pct = st.slider(
+            "Stock CD prometible (%)",
+            min_value=10, max_value=100, value=20, step=5,
+            help="El reporte de CD no es tiempo real y el stock varía entre cortes. "
+                 "Solo este % del CD reportado se considera disponible para prometer despachos. "
+                 "Calibración Franco 2026-06: 20% (conservador)."
+        )
+
     params_ui = {
         "umbral_critico":    umbral_critico,
         "umbral_precritico": umbral_precritico,
@@ -2123,6 +2132,10 @@ if nav_page == "🏠 Dashboard":
         def _vp_calcular(_clave: str):
             return snapshots_engine.estimate_lost_sales(marcas=_MARCAS_VIGENTES)
 
+        @st.cache_data(show_spinner=False)
+        def _vp_cd_reliability():
+            return snapshots_engine.estimate_cd_reliability()
+
         try:
             _vp = _vp_calcular("marcas-vigentes")
         except Exception:
@@ -2145,6 +2158,18 @@ if nav_page == "🏠 Dashboard":
                             (['requiere_proveedor'] if 'requiere_proveedor' in df_rep.columns else [])
                         ].drop_duplicates(['sku', 'tienda'])
                         _vp_q = _vp_q.merge(_vp_rep, on=['sku', 'tienda'], how='left')
+                    # 1b) ATP del CD: el reporte no es tiempo real → solo cd_prometible_pct%
+                    #     del CD reportado es prometible; deriva/volatilidad desde snapshots
+                    try:
+                        _vp_cdrel = _vp_cd_reliability()
+                    except Exception:
+                        _vp_cdrel = pd.DataFrame()
+                    if not _vp_cdrel.empty:
+                        _vp_q = _vp_q.merge(_vp_cdrel, on='sku', how='left')
+                    if 'cd_deriva_sem' not in _vp_q.columns:
+                        _vp_q['cd_deriva_sem'] = 0.0
+                        _vp_q['cd_volatil'] = False
+                    _vp_q['cd_atp'] = (_vp_q['stock_cd'].fillna(0) * cd_prometible_pct / 100).astype(int) if 'stock_cd' in _vp_q.columns else 0
                     # 2) Transferencias sugeridas (desde tiendas con exceso)
                     if not df_trans.empty and 'tienda_destino' in df_trans.columns:
                         _vp_tr = df_trans.groupby(['sku', 'tienda_destino']).agg(
@@ -2155,18 +2180,24 @@ if nav_page == "🏠 Dashboard":
                         _vp_q = _vp_q.merge(_vp_tr, on=['sku', 'tienda'], how='left')
 
                     def _vp_accion(r):
+                        _vol = " ⚠️CD volátil" if r.get('cd_volatil') is True else ""
                         _rep = r.get('a_reponer')
                         if _rep is not None and not pd.isna(_rep) and _rep > 0:
                             if r.get('requiere_proveedor') is True:
                                 return f"📋 Orden a proveedor — {int(_rep)} uds"
-                            return f"🚚 Despachar del CD — {int(_rep)} uds"
+                            _atp = int(r.get('cd_atp', 0) or 0)
+                            if _atp <= 0:
+                                return f"🚚 CD reporta stock pero ATP {cd_prometible_pct}% = 0 — verificar antes de despachar{_vol}"
+                            if _rep > _atp:
+                                return f"🚚 Despachar del CD — {_atp} uds (ATP {cd_prometible_pct}%; plan pedía {int(_rep)}){_vol}"
+                            return f"🚚 Despachar del CD — {int(_rep)} uds{_vol}"
                         _tr = r.get('_vp_uds_tr')
                         if _tr is not None and not pd.isna(_tr) and _tr > 0:
                             _org = str(r.get('_vp_origen', ''))
                             _extra = f" (+{int(r['_vp_n_orig']) - 1} tiendas)" if r.get('_vp_n_orig', 1) > 1 else ""
                             return f"🔄 Transferir {int(_tr)} uds desde {_org}{_extra}"
                         if r.get('evitable'):
-                            return "🚚 Stock en CD — revisar (excluido del plan por regla de dscto)"
+                            return f"🚚 Stock en CD — revisar (excluido del plan por regla de dscto){_vol}"
                         return "📋 Orden de compra (sin stock en cadena)"
 
                     _vp_q['accion_sugerida'] = _vp_q.apply(_vp_accion, axis=1)
@@ -2227,7 +2258,8 @@ if nav_page == "🏠 Dashboard":
                     st.dataframe(_vp_show.style.format({
                         'Vta/sem (uds)': '{:.1f}', 'Precio': 'S/ {:,.2f}', 'Venta en riesgo S//sem': 'S/ {:,.0f}',
                     }, na_rep="—"), use_container_width=True, hide_index=True)
-                    st.caption("La acción sale del plan del motor: despacho si hay stock en CD (cantidades del plan de reposición), transferencia si otra tienda tiene exceso, orden de compra si no hay stock en la cadena.")
+                    st.caption(f"La acción sale del plan del motor: despacho si hay stock en CD (cantidades del plan de reposición), transferencia si otra tienda tiene exceso, orden de compra si no hay stock en la cadena. "
+                               f"ATP: el reporte de CD no es tiempo real, por eso solo el {cd_prometible_pct}% del CD reportado se considera prometible (configurable en ⚙️) y los SKUs con CD volátil entre cortes van flagueados ⚠️.")
 
                 _vp_xl_buf = io.BytesIO()
                 with pd.ExcelWriter(_vp_xl_buf, engine='openpyxl') as _vp_w:

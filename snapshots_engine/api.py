@@ -889,3 +889,64 @@ def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
         'n_skus_excluidos': int(n_excluidos),
         'supuestos': supuestos,
     }
+
+
+def estimate_cd_reliability(umbral_volatil: float = 0.3, cd_min_relevante: int = 50) -> pd.DataFrame:
+    """
+    Confiabilidad del stock CD por SKU, a partir del histórico de snapshots.
+
+    El reporte semanal de CD no es tiempo real (problema flagueado por Franco:
+    "no muestra realmente cuál es el stock disponible para empujar"). Esta
+    función mide, por SKU:
+      - cd_deriva_sem: drenaje promedio del CD en uds/semana (solo bajadas;
+        es lo que típicamente "desaparece" del CD entre corte y corte)
+      - cd_volatil: True si entre cortes consecutivos hubo algún salto
+        relativo > umbral_volatil (con base previa >= cd_min_relevante uds)
+
+    Returns:
+        DataFrame con: sku, cd_deriva_sem, cd_volatil. Vacío si no hay
+        snapshots suficientes con columna stock_cd.
+    """
+    import datetime as _dt
+
+    weeks = list_available_weeks()
+    if len(weeks) < 2:
+        return pd.DataFrame(columns=['sku', 'cd_deriva_sem', 'cd_volatil'])
+
+    def _week_ord(iso: str) -> int:
+        y, w = iso.split('-')
+        return _dt.date.fromisocalendar(int(y), int(w), 7).toordinal() // 7
+
+    frames = []
+    for w in weeks:
+        try:
+            _df = load_snapshot(w)
+        except FileNotFoundError:
+            continue
+        if _df is None or _df.empty or 'stock_cd' not in _df.columns:
+            continue
+        frames.append(_df[['sku', 'stock_cd']].assign(_word=_week_ord(w)))
+    if len(frames) < 2:
+        return pd.DataFrame(columns=['sku', 'cd_deriva_sem', 'cd_volatil'])
+
+    piv = pd.concat(frames).pivot_table(index='sku', columns='_word', values='stock_cd')
+    cols = sorted(piv.columns)
+
+    rows = []
+    for sku, serie in piv.iterrows():
+        bajadas, volatil = [], False
+        for a, b in zip(cols, cols[1:]):
+            va, vb = serie.get(a), serie.get(b)
+            if pd.isna(va) or pd.isna(vb):
+                continue
+            delta_sem = (vb - va) / max(b - a, 1)
+            if delta_sem < 0:
+                bajadas.append(-delta_sem)
+            if va >= cd_min_relevante and abs(vb - va) / va > umbral_volatil:
+                volatil = True
+        rows.append({
+            'sku': sku,
+            'cd_deriva_sem': round(float(np.mean(bajadas)), 1) if bajadas else 0.0,
+            'cd_volatil': volatil,
+        })
+    return pd.DataFrame(rows)
