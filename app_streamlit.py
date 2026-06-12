@@ -2222,10 +2222,10 @@ if nav_page == "🏠 Dashboard":
                     _vp_show = _vp_q[_vp_cols].head(20).rename(columns={
                         'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'tienda': 'Tienda',
                         'prom_vta_uds': 'Vta/sem (uds)', 'precio_vigente': 'Precio',
-                        'perdida_sem_soles': 'Pérdida S//sem', 'accion_sugerida': 'Acción sugerida',
+                        'perdida_sem_soles': 'Venta en riesgo S//sem', 'accion_sugerida': 'Acción sugerida',
                     })
                     st.dataframe(_vp_show.style.format({
-                        'Vta/sem (uds)': '{:.1f}', 'Precio': 'S/ {:,.2f}', 'Pérdida S//sem': 'S/ {:,.0f}',
+                        'Vta/sem (uds)': '{:.1f}', 'Precio': 'S/ {:,.2f}', 'Venta en riesgo S//sem': 'S/ {:,.0f}',
                     }, na_rep="—"), use_container_width=True, hide_index=True)
                     st.caption("La acción sale del plan del motor: despacho si hay stock en CD (cantidades del plan de reposición), transferencia si otra tienda tiene exceso, orden de compra si no hay stock en la cadena.")
 
