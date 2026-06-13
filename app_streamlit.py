@@ -68,6 +68,15 @@ except ImportError:
                     _k, _v = _line.split("=", 1)
                     os.environ[_k.strip()] = _v.strip()
 
+# En Streamlit Cloud la API key vive en st.secrets, no en variables de entorno.
+# La propagamos a os.environ para que chat_engine y agente_terceras (que usan
+# os.getenv) la encuentren igual que en local con .env.
+try:
+    if "ANTHROPIC_API_KEY" in st.secrets and not os.getenv("ANTHROPIC_API_KEY"):
+        os.environ["ANTHROPIC_API_KEY"] = str(st.secrets["ANTHROPIC_API_KEY"])
+except Exception:
+    pass
+
 import chat_engine
 import agente_terceras
 
