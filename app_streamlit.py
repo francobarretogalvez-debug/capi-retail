@@ -2227,6 +2227,12 @@ if nav_page == "🏠 Dashboard":
                         ).reset_index().rename(columns={'tienda_destino': 'tienda'})
                         _vp_q = _vp_q.merge(_vp_tr, on=['sku', 'tienda'], how='left')
 
+                    # Regla Franco 2026-06-12: categorías producibles en Perú (reorder
+                    # nacional viable) vs solo-importado (costo nacional alto / mala calidad)
+                    _VP_NACIONALIZABLES = {'POLOS M/C', 'CAMISAS M/L', 'CAMISAS M/C',
+                                           'PANTALONES', 'JEANS', 'POLERONES'}
+                    _VP_SOLO_IMPORTADO = {'CASACAS', 'CHOMPAS'}
+
                     def _vp_accion(r):
                         _vol = " ⚠️CD volátil" if r.get('cd_volatil') is True else ""
                         _rep = r.get('a_reponer')
@@ -2248,6 +2254,11 @@ if nav_page == "🏠 Dashboard":
                             return f"🚚 Stock en CD — revisar (excluido del plan por regla de dscto){_vol}"
                         _proc = str(r.get('procedencia', '') or '')
                         if _proc.startswith('IMP'):
+                            _cat = str(r.get('categoria', '') or '').strip().upper()
+                            if _cat in _VP_NACIONALIZABLES:
+                                return "⛔→🇵🇪 Importado agotado (reorder no llega) — VIABLE producir nacional: esta categoría se hace en Perú"
+                            if _cat in _VP_SOLO_IMPORTADO:
+                                return "⛔ Estructural — solo importado (esta categoría no se hace nacional): sustituto o asumir pérdida"
                             return "⛔ Importado sin stock en cadena — reorder ~2-3 meses, no llega: evaluar sustituto o asumir pérdida"
                         if _proc.startswith('NAC'):
                             return "📋 Reorder nacional — gestionar con proveedor local (semanas)"
@@ -2307,7 +2318,7 @@ if nav_page == "🏠 Dashboard":
                         f"🔄 **{_vp_n_tr:,}** transferencias entre tiendas · "
                         f"📋 **{_vp_n_oc:,}** órdenes de compra/proveedor"
                         + (f" · ⏳ **{_vp_n_ag:,}** en cola (ATP del CD agotado)" if _vp_n_ag else "")
-                        + (f" · ⛔ **{_vp_n_est:,}** estructurales (importado agotado)" if _vp_n_est else "")
+                        + (f" · ⛔ **{_vp_n_est:,}** estructurales (importado agotado{', ' + str(int(_vp_q['accion_sugerida'].str.startswith('⛔→').sum())) + ' con opción de producir nacional' if _vp_q['accion_sugerida'].str.startswith('⛔→').any() else ''})" if _vp_n_est else "")
                     )
                     _vp_cols = [c for c in ['marca', 'sku', 'nombre', 'tienda', 'procedencia', 'prom_vta_uds',
                                              'precio_vigente', 'pct_descuento', 'margen_efectivo',

@@ -20,6 +20,7 @@ Estos archivos capturan decisiones, reglas de negocio, y contexto acumulado de 2
 - [feedback_rotacion_volumen.md](feedback_rotacion_volumen.md) — Vta/Stk infla categorías agotadas
 - [feedback_pricing_omnicanal.md](feedback_pricing_omnicanal.md) — Descuento parejo todas tiendas
 - [feedback_filtro_estacional_afinidad.md](feedback_filtro_estacional_afinidad.md) — Filtrar por temporada, no volumen
+- [feedback_produccion_nacional.md](feedback_produccion_nacional.md) — Categorías producibles en Perú vs solo-importado (quiebres estructurales)
 
 ## Referencias
 - [reference_marcas_propias.md](reference_marcas_propias.md) — MARQUIS, NAVIGATA, CACHAREL, etc.
