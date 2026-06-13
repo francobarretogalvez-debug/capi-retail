@@ -69,6 +69,7 @@ except ImportError:
                     os.environ[_k.strip()] = _v.strip()
 
 import chat_engine
+import agente_terceras
 
 # ══════════════════════════════════════════════════════════════
 #  CONFIG DE PÁGINA
@@ -900,6 +901,7 @@ with st.sidebar:
                 ("📊", "Gestión por Antigüedad"),
                 ("💰", "Acciones Precio"),
                 ("🏷️", "Marcas Terceras"),
+                ("🤝", "Agente Terceras"),
             ]
 
             for _icon, _label in _NAV_COMERCIAL:
@@ -4105,6 +4107,104 @@ elif nav_page == "📈 Cobertura" or nav_page == "📊 Cobertura":
                     st.caption("Sin columna Marca en los datos")
 
 
+
+
+# ═══════════════════════════════════════════════════════════════
+#  🤝 AGENTE TERCERAS — primer agente de Capi
+#  Detecta oportunidades con marcas terceras y genera BORRADORES de
+#  correo a proveedores. Nunca envía solo: Franco aprueba y envía.
+# ═══════════════════════════════════════════════════════════════
+
+elif nav_page == "🤝 Agente Terceras":
+    st.markdown(f'<div class="section-header"><h3>🤝 Agente Terceras</h3><span class="live-badge">AGENTE</span></div>', unsafe_allow_html=True)
+    st.caption("Detecta oportunidades con marcas terceras y redacta el correo al proveedor. "
+               "El agente genera un BORRADOR — tú lo revisas y lo envías. Nunca manda nada solo.")
+
+    _at_prov = agente_terceras.cargar_proveedores()
+    if not _at_prov:
+        st.warning("Aún no hay proveedores cargados. Completa `config_proveedores.json` "
+                   "con al menos una marca tercera (empresa, contacto, email) para generar borradores.")
+
+    _at_tipo = st.radio(
+        "Tipo de oportunidad",
+        ["💰 Capital parado (rebate / markdown support)", "📦 Quiebre (reorder urgente)"],
+        horizontal=True, key="at_tipo",
+    )
+
+    if _at_tipo.startswith("💰"):
+        _at_op = agente_terceras.detectar_capital_parado(df_cob)
+        if _at_op.empty:
+            st.info("No hay marcas terceras con capital parado sobre el umbral.")
+        else:
+            st.markdown(f"**{len(_at_op)} marcas terceras con capital inmovilizado y baja rotación:**")
+            _at_show = _at_op[['marca', 'capital', 'n_skus', 'cob_prom', 'sell_through', 'margen_efectivo']].rename(columns={
+                'marca': 'Marca', 'capital': 'Capital S/', 'n_skus': 'SKUs',
+                'cob_prom': 'Cob (sem)', 'sell_through': 'Sell-through %', 'margen_efectivo': 'Margen %',
+            })
+            st.dataframe(_at_show.style.format({
+                'Capital S/': 'S/ {:,.0f}', 'Cob (sem)': '{:.0f}', 'Sell-through %': '{:.0f}%', 'Margen %': '{:.0f}%',
+            }, na_rep="—"), use_container_width=True, hide_index=True)
+
+            _at_marcas_op = _at_op['marca'].tolist()
+            _at_sel = st.selectbox("Marca para generar el correo", _at_marcas_op, key="at_sel_cap")
+            _at_row = _at_op[_at_op['marca'] == _at_sel].iloc[0]
+            _at_prov_marca = _at_prov.get(_at_sel.upper())
+
+            if not _at_prov_marca:
+                st.warning(f"Falta contacto de **{_at_sel}** en config_proveedores.json — no se puede generar el borrador.")
+            else:
+                st.caption(f"Destinatario: {_at_prov_marca.get('contacto','')} · {_at_prov_marca.get('email','')} ({_at_prov_marca.get('empresa','')})")
+                if st.button("✍️ Generar borrador del correo", key="at_gen_cap", type="primary"):
+                    with st.spinner("Redactando con IA..."):
+                        try:
+                            _at_skus = agente_terceras.top_skus_marca(df_cob, _at_sel)
+                            _at_correo = agente_terceras.generar_correo_capital_parado(_at_row, _at_prov_marca, _at_skus)
+                            st.session_state["at_borrador"] = _at_correo
+                        except Exception as _at_e:
+                            st.error(f"No se pudo generar el borrador: {_at_e}")
+
+    else:
+        _at_op = agente_terceras.detectar_quiebre_tercera(df_cob)
+        if _at_op.empty:
+            st.info("No hay marcas terceras en quiebre con venta relevante.")
+        else:
+            st.markdown(f"**{len(_at_op)} marcas terceras con quiebres que vendían bien:**")
+            _at_show = _at_op.rename(columns={
+                'marca': 'Marca', 'n_skus_quiebre': 'SKUs en quiebre',
+                'venta_riesgo_sem': 'Venta en riesgo S//sem', 'vta_sem_uds': 'Vta/sem (uds)',
+            })
+            st.dataframe(_at_show.style.format({
+                'Venta en riesgo S//sem': 'S/ {:,.0f}', 'Vta/sem (uds)': '{:.0f}',
+            }), use_container_width=True, hide_index=True)
+
+            _at_sel = st.selectbox("Marca para generar el correo", _at_op['marca'].tolist(), key="at_sel_q")
+            _at_row = _at_op[_at_op['marca'] == _at_sel].iloc[0]
+            _at_prov_marca = _at_prov.get(_at_sel.upper())
+            if not _at_prov_marca:
+                st.warning(f"Falta contacto de **{_at_sel}** en config_proveedores.json.")
+            else:
+                st.caption(f"Destinatario: {_at_prov_marca.get('contacto','')} · {_at_prov_marca.get('email','')} ({_at_prov_marca.get('empresa','')})")
+                if st.button("✍️ Generar borrador del correo", key="at_gen_q", type="primary"):
+                    with st.spinner("Redactando con IA..."):
+                        try:
+                            _at_correo = agente_terceras.generar_correo_reorder(_at_row, _at_prov_marca)
+                            st.session_state["at_borrador"] = _at_correo
+                        except Exception as _at_e:
+                            st.error(f"No se pudo generar el borrador: {_at_e}")
+
+    # ── Borrador generado: revisar / editar / copiar ──
+    _at_bor = st.session_state.get("at_borrador")
+    if _at_bor:
+        st.markdown("---")
+        st.markdown(f"##### ✉️ Borrador para {_at_bor.get('marca','')} — revisar antes de enviar")
+        st.text_input("Para", value=_at_bor.get("para", ""), key="at_para")
+        st.text_input("Asunto", value=_at_bor.get("asunto", ""), key="at_asunto")
+        st.text_area("Cuerpo", value=_at_bor.get("cuerpo", ""), height=320, key="at_cuerpo")
+        st.info("Revisa y ajusta el texto. Para enviarlo: copia el contenido a tu correo, "
+                "o pídeme que lo deje como borrador en tu Gmail (yo no envío nada por mi cuenta).")
+        if st.button("🗑️ Descartar borrador", key="at_descartar"):
+            del st.session_state["at_borrador"]
+            st.rerun()
 
 
 # ─── TAB 2: Gestión por Antigüedad ─────────────────────────────────

@@ -1,0 +1,239 @@
+"""
+agente_terceras.py — Primer agente de Capi.
+
+Detecta oportunidades con marcas TERCERAS y genera BORRADORES de correo a
+proveedores que Franco aprueba antes de enviar. Nunca envía solo: el flujo
+seguro es generar texto → dejar borrador en Gmail → Franco revisa y envía.
+(Fase 1 de inducción supervisada del diseño original.)
+
+Dos tipos de oportunidad:
+  - capital_parado: marca tercera con capital inmovilizado alto + sell-through
+    bajo → correo pidiendo rebate / apoyo de markdown / devolución.
+  - quiebre: marca tercera agotada que vendía bien (requiere_proveedor) →
+    correo pidiendo reorder.
+
+Reusa el patrón de llamada a Claude de chat_engine, con system prompt comercial.
+"""
+from __future__ import annotations
+
+import json
+import os
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+
+try:
+    from anthropic import Anthropic
+except ImportError:
+    Anthropic = None
+
+# ── Config ──
+MODEL = "claude-sonnet-4-20250514"
+MAX_TOKENS = 1200
+TEMPERATURE = 0.3  # algo de variación: es redacción, no análisis
+
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROVEEDORES_PATH = os.path.join(_BASE_DIR, "config_proveedores.json")
+
+_MARCAS_PROPIAS = {'MARQUIS', 'NAVIGATA', 'CACHAREL', 'SPAVALDI',
+                   'OSCAR DE LA RENTA', 'US POLO', 'NAUTICA'}
+
+SYSTEM_PROMPT_CORREO = """Eres el asistente de un Senior Fashion Buyer de Ripley (retail de moda, Perú).
+Redactas correos comerciales a proveedores y representantes de marca: profesionales,
+directos, cordiales, en español peruano de negocios. Sin relleno ni adjetivos vacíos.
+El buyer revisará y enviará el correo, así que escribe en su voz (primera persona).
+Estructura: saludo breve, contexto con los datos duros, pedido concreto, cierre cordial.
+Nunca inventes cifras: usa SOLO los datos que se te dan. Devuelve EXACTAMENTE este formato:
+ASUNTO: <línea de asunto>
+---
+<cuerpo del correo>"""
+
+
+# ══════════════════════════════════════════════════════════════
+#  CONTACTOS
+# ══════════════════════════════════════════════════════════════
+
+def cargar_proveedores(path: str = None) -> dict:
+    """Carga el mapa marca -> contacto. Ignora claves que empiezan con '_'."""
+    p = path or _PROVEEDORES_PATH
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    return {k.upper(): v for k, v in raw.items()
+            if not k.startswith("_") and isinstance(v, dict) and v.get("email")}
+
+
+# ══════════════════════════════════════════════════════════════
+#  DETECCIÓN DE OPORTUNIDADES
+# ══════════════════════════════════════════════════════════════
+
+def detectar_capital_parado(df_cob: pd.DataFrame, min_capital: float = 50000,
+                            max_sell_through: float = 15.0) -> pd.DataFrame:
+    """Marcas terceras con capital inmovilizado alto y sell-through bajo.
+    Candidatas a pedir rebate / apoyo de markdown / devolución."""
+    if df_cob.empty or 'marca' not in df_cob.columns:
+        return pd.DataFrame()
+
+    terc = df_cob[~df_cob['marca'].str.upper().str.strip().isin(_MARCAS_PROPIAS)].copy()
+    if terc.empty:
+        return pd.DataFrame()
+
+    g = terc.groupby('marca').agg(
+        capital=('stock_valor_costo', 'sum'),
+        stock_uds=('stock_total', 'sum'),
+        cob_prom=('cobertura_sem', 'mean'),
+        n_skus=('sku', 'nunique'),
+        vta_sem_uds=('prom_vta_uds', 'sum'),
+    ).reset_index()
+
+    # Sell-through aprox (1 semana de venta vs stock)
+    g['sell_through'] = np.where(
+        (g['vta_sem_uds'] + g['stock_uds']) > 0,
+        (g['vta_sem_uds'] / (g['vta_sem_uds'] + g['stock_uds']) * 100).round(1),
+        0.0,
+    )
+
+    # Margen efectivo por marca (dedup SKU)
+    if {'vta_soles_4sem', 'contrib_soles_4sem'}.issubset(terc.columns):
+        sku = terc.drop_duplicates('sku')[['marca', 'vta_soles_4sem', 'contrib_soles_4sem']]
+        m = sku.groupby('marca').agg(vta=('vta_soles_4sem', 'sum'),
+                                     contrib=('contrib_soles_4sem', 'sum')).reset_index()
+        m['margen_efectivo'] = np.where(m['vta'] > 0,
+                                        (m['contrib'] / m['vta'] * 100).round(1), 0.0)
+        g = g.merge(m[['marca', 'margen_efectivo']], on='marca', how='left')
+    else:
+        g['margen_efectivo'] = np.nan
+
+    op = g[(g['capital'] >= min_capital) & (g['sell_through'] <= max_sell_through)].copy()
+    return op.sort_values('capital', ascending=False).reset_index(drop=True)
+
+
+def top_skus_marca(df_cob: pd.DataFrame, marca: str, n: int = 5) -> pd.DataFrame:
+    """Top SKUs por capital parado de una marca (consolidado a SKU único,
+    sumando todas las tiendas), para adjuntar al correo."""
+    sub = df_cob[df_cob['marca'].str.upper().str.strip() == marca.upper().strip()].copy()
+    if sub.empty:
+        return sub
+    agg = {}
+    if 'nombre' in sub.columns:           agg['nombre'] = ('nombre', 'first')
+    if 'stock_total' in sub.columns:      agg['stock_total'] = ('stock_total', 'sum')
+    if 'cobertura_sem' in sub.columns:    agg['cobertura_sem'] = ('cobertura_sem', 'mean')
+    if 'pct_descuento' in sub.columns:    agg['pct_descuento'] = ('pct_descuento', 'max')
+    if 'stock_valor_costo' in sub.columns: agg['stock_valor_costo'] = ('stock_valor_costo', 'sum')
+    g = sub.groupby('sku').agg(**agg).reset_index()
+    if 'stock_valor_costo' in g.columns:
+        g = g.sort_values('stock_valor_costo', ascending=False)
+    return g.head(n).reset_index(drop=True)
+
+
+def detectar_quiebre_tercera(df_cob: pd.DataFrame, min_vta: float = 1.0) -> pd.DataFrame:
+    """Marcas terceras con SKUs en quiebre que vendían bien (requiere reorder)."""
+    if df_cob.empty or 'marca' not in df_cob.columns or 'estado' not in df_cob.columns:
+        return pd.DataFrame()
+    terc = df_cob[~df_cob['marca'].str.upper().str.strip().isin(_MARCAS_PROPIAS)].copy()
+    q = terc[(terc['estado'] == 'QUIEBRE') & (terc['prom_vta_uds'].fillna(0) >= min_vta)].copy()
+    if q.empty:
+        return pd.DataFrame()
+    q['venta_riesgo'] = (q['prom_vta_uds'] * q.get('precio_vigente', 0).fillna(0)).round(0)
+    g = q.groupby('marca').agg(
+        n_skus_quiebre=('sku', 'nunique'),
+        venta_riesgo_sem=('venta_riesgo', 'sum'),
+        vta_sem_uds=('prom_vta_uds', 'sum'),
+    ).reset_index()
+    return g.sort_values('venta_riesgo_sem', ascending=False).reset_index(drop=True)
+
+
+# ══════════════════════════════════════════════════════════════
+#  GENERACIÓN DEL BORRADOR
+# ══════════════════════════════════════════════════════════════
+
+def _call_claude(prompt: str) -> str:
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise ValueError("No se encontró ANTHROPIC_API_KEY. Configúrala en .env")
+    if Anthropic is None:
+        raise ImportError("Instala el SDK: pip install anthropic")
+    client = Anthropic(api_key=api_key, timeout=30.0, max_retries=1)
+    try:
+        resp = client.messages.create(
+            model=MODEL, max_tokens=MAX_TOKENS, temperature=TEMPERATURE,
+            system=SYSTEM_PROMPT_CORREO, messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as e:
+        _n = type(e).__name__
+        if "RateLimit" in _n or "Overloaded" in str(e):
+            raise ValueError("El asistente está saturado. Intenta en unos segundos.")
+        if "Timeout" in _n or "Connection" in _n:
+            raise ValueError("El asistente tardó demasiado. Reintenta.")
+        raise
+    return resp.content[0].text
+
+
+def _parse_correo(texto: str) -> dict:
+    """Separa ASUNTO y cuerpo del formato devuelto por Claude."""
+    asunto, cuerpo = "", texto.strip()
+    if "ASUNTO:" in texto:
+        resto = texto.split("ASUNTO:", 1)[1]
+        if "---" in resto:
+            asunto, cuerpo = resto.split("---", 1)
+        else:
+            partes = resto.split("\n", 1)
+            asunto = partes[0]
+            cuerpo = partes[1] if len(partes) > 1 else ""
+    return {"asunto": asunto.strip(), "cuerpo": cuerpo.strip()}
+
+
+def generar_correo_capital_parado(marca_row: pd.Series, proveedor: dict,
+                                  top_skus: pd.DataFrame, buyer: str = "Franco Barreto") -> dict:
+    """Borrador pidiendo rebate / apoyo de markdown por capital parado."""
+    skus_txt = "\n".join(
+        f"  - {r.get('nombre', r.get('sku'))}: {int(r.get('stock_total', 0))} uds, "
+        f"cobertura {r.get('cobertura_sem', 0):.0f} sem, "
+        f"S/ {r.get('stock_valor_costo', 0):,.0f} a costo"
+        for _, r in top_skus.iterrows()
+    )
+    prompt = f"""Redacta un correo al representante de la marca {marca_row['marca']} en Ripley.
+
+CONTACTO: {proveedor.get('contacto', '')} ({proveedor.get('empresa', '')})
+REMITENTE: {buyer}, Senior Fashion Buyer - Moda Masculina, Ripley.
+
+SITUACIÓN (datos reales del inventario):
+- Capital inmovilizado en la marca: S/ {marca_row['capital']:,.0f} (a costo)
+- {int(marca_row['n_skus'])} SKUs, {int(marca_row['stock_uds']):,} unidades en stock
+- Cobertura promedio: {marca_row['cob_prom']:.0f} semanas (muy por encima del objetivo de 12)
+- Sell-through: {marca_row['sell_through']:.0f}% (bajo)
+- Margen efectivo actual: {marca_row.get('margen_efectivo', 0):.0f}%
+
+SKUs con más capital parado:
+{skus_txt}
+
+PEDIDO: solicitar apoyo comercial para liquidar este stock — rebate (descuento
+post-compra), apoyo de markdown (que la marca cofinancie la rebaja de precio),
+o devolución parcial. Propón una reunión para revisar opciones. Tono colaborativo:
+es una relación de largo plazo, no un reclamo."""
+    return {**_parse_correo(_call_claude(prompt)),
+            "para": proveedor.get("email", ""), "marca": marca_row['marca'],
+            "tipo": "capital_parado"}
+
+
+def generar_correo_reorder(marca_row: pd.Series, proveedor: dict,
+                           buyer: str = "Franco Barreto") -> dict:
+    """Borrador pidiendo reorder por quiebre de marca tercera con venta."""
+    prompt = f"""Redacta un correo al proveedor/fabricante de la marca {marca_row['marca']}.
+
+CONTACTO: {proveedor.get('contacto', '')} ({proveedor.get('empresa', '')})
+REMITENTE: {buyer}, Senior Fashion Buyer - Moda Masculina, Ripley.
+
+SITUACIÓN (datos reales):
+- {int(marca_row['n_skus_quiebre'])} SKUs de la marca están en QUIEBRE de stock
+- Estos productos venden {marca_row['vta_sem_uds']:.0f} unidades/semana en conjunto
+- Venta en riesgo por el quiebre: S/ {marca_row['venta_riesgo_sem']:,.0f} por semana
+
+PEDIDO: solicitar reorder urgente de estos productos, confirmar disponibilidad y
+plazo de entrega. Tono de urgencia comercial pero cordial."""
+    return {**_parse_correo(_call_claude(prompt)),
+            "para": proveedor.get("email", ""), "marca": marca_row['marca'],
+            "tipo": "reorder"}

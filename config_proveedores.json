@@ -1,0 +1,10 @@
+{
+  "_nota": "Mapa marca tercera -> contacto del proveedor o representante. Cargado por Franco. 'tipo' = 'marca' (rep comercial, para rebate/markdown support) o 'fabricante' (para reorder de producción). Las marcas sin entrada aquí no generan borrador (se marcan 'falta contacto').",
+  "_actualizado": "2026-06-12",
+  "_PLACEHOLDER": {
+    "empresa": "",
+    "contacto": "",
+    "email": "",
+    "tipo": "marca"
+  }
+}
