@@ -4121,9 +4121,6 @@ elif nav_page == "🤝 Agente Terceras":
                "El agente genera un BORRADOR — tú lo revisas y lo envías. Nunca manda nada solo.")
 
     _at_prov = agente_terceras.cargar_proveedores()
-    if not _at_prov:
-        st.warning("Aún no hay proveedores cargados. Completa `config_proveedores.json` "
-                   "con al menos una marca tercera (empresa, contacto, email) para generar borradores.")
 
     _at_tipo = st.radio(
         "Tipo de oportunidad",
@@ -4149,19 +4146,16 @@ elif nav_page == "🤝 Agente Terceras":
             _at_sel = st.selectbox("Marca para generar el correo", _at_marcas_op, key="at_sel_cap")
             _at_row = _at_op[_at_op['marca'] == _at_sel].iloc[0]
             _at_prov_marca = _at_prov.get(_at_sel.upper())
-
-            if not _at_prov_marca:
-                st.warning(f"Falta contacto de **{_at_sel}** en config_proveedores.json — no se puede generar el borrador.")
-            else:
-                st.caption(f"Destinatario: {_at_prov_marca.get('contacto','')} · {_at_prov_marca.get('email','')} ({_at_prov_marca.get('empresa','')})")
-                if st.button("✍️ Generar borrador del correo", key="at_gen_cap", type="primary"):
-                    with st.spinner("Redactando con IA..."):
-                        try:
-                            _at_skus = agente_terceras.top_skus_marca(df_cob, _at_sel)
-                            _at_correo = agente_terceras.generar_correo_capital_parado(_at_row, _at_prov_marca, _at_skus)
-                            st.session_state["at_borrador"] = _at_correo
-                        except Exception as _at_e:
-                            st.error(f"No se pudo generar el borrador: {_at_e}")
+            if _at_prov_marca and _at_prov_marca.get('contacto'):
+                st.caption(f"Destinatario sugerido: {_at_prov_marca.get('contacto','')} ({_at_prov_marca.get('empresa','')})")
+            if st.button("✍️ Generar texto del correo", key="at_gen_cap", type="primary"):
+                with st.spinner("Redactando con IA..."):
+                    try:
+                        _at_skus = agente_terceras.top_skus_marca(df_cob, _at_sel)
+                        _at_correo = agente_terceras.generar_correo_capital_parado(_at_row, _at_prov_marca, _at_skus)
+                        st.session_state["at_borrador"] = _at_correo
+                    except Exception as _at_e:
+                        st.error(f"No se pudo generar el texto: {_at_e}")
 
     else:
         _at_op = agente_terceras.detectar_quiebre_tercera(df_cob)
@@ -4180,29 +4174,26 @@ elif nav_page == "🤝 Agente Terceras":
             _at_sel = st.selectbox("Marca para generar el correo", _at_op['marca'].tolist(), key="at_sel_q")
             _at_row = _at_op[_at_op['marca'] == _at_sel].iloc[0]
             _at_prov_marca = _at_prov.get(_at_sel.upper())
-            if not _at_prov_marca:
-                st.warning(f"Falta contacto de **{_at_sel}** en config_proveedores.json.")
-            else:
-                st.caption(f"Destinatario: {_at_prov_marca.get('contacto','')} · {_at_prov_marca.get('email','')} ({_at_prov_marca.get('empresa','')})")
-                if st.button("✍️ Generar borrador del correo", key="at_gen_q", type="primary"):
-                    with st.spinner("Redactando con IA..."):
-                        try:
-                            _at_correo = agente_terceras.generar_correo_reorder(_at_row, _at_prov_marca)
-                            st.session_state["at_borrador"] = _at_correo
-                        except Exception as _at_e:
-                            st.error(f"No se pudo generar el borrador: {_at_e}")
+            if _at_prov_marca and _at_prov_marca.get('contacto'):
+                st.caption(f"Destinatario sugerido: {_at_prov_marca.get('contacto','')} ({_at_prov_marca.get('empresa','')})")
+            if st.button("✍️ Generar texto del correo", key="at_gen_q", type="primary"):
+                with st.spinner("Redactando con IA..."):
+                    try:
+                        _at_correo = agente_terceras.generar_correo_reorder(_at_row, _at_prov_marca)
+                        st.session_state["at_borrador"] = _at_correo
+                    except Exception as _at_e:
+                        st.error(f"No se pudo generar el texto: {_at_e}")
 
     # ── Borrador generado: revisar / editar / copiar ──
     _at_bor = st.session_state.get("at_borrador")
     if _at_bor:
         st.markdown("---")
-        st.markdown(f"##### ✉️ Borrador para {_at_bor.get('marca','')} — revisar antes de enviar")
-        st.text_input("Para", value=_at_bor.get("para", ""), key="at_para")
+        st.markdown(f"##### ✉️ Texto para {_at_bor.get('marca','')} — revisar y copiar")
         st.text_input("Asunto", value=_at_bor.get("asunto", ""), key="at_asunto")
         st.text_area("Cuerpo", value=_at_bor.get("cuerpo", ""), height=320, key="at_cuerpo")
-        st.info("Revisa y ajusta el texto. Para enviarlo: copia el contenido a tu correo, "
-                "o pídeme que lo deje como borrador en tu Gmail (yo no envío nada por mi cuenta).")
-        if st.button("🗑️ Descartar borrador", key="at_descartar"):
+        st.caption("Revisa y ajusta el texto, luego cópialo a tu correo de Ripley para enviarlo al proveedor. "
+                   "El agente solo redacta — el envío lo haces tú.")
+        if st.button("🗑️ Descartar", key="at_descartar"):
             del st.session_state["at_borrador"]
             st.rerun()
 

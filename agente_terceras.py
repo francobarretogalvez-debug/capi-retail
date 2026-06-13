@@ -63,7 +63,7 @@ def cargar_proveedores(path: str = None) -> dict:
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
     return {k.upper(): v for k, v in raw.items()
-            if not k.startswith("_") and isinstance(v, dict) and v.get("email")}
+            if not k.startswith("_") and isinstance(v, dict) and v.get("contacto")}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -186,18 +186,23 @@ def _parse_correo(texto: str) -> dict:
     return {"asunto": asunto.strip(), "cuerpo": cuerpo.strip()}
 
 
-def generar_correo_capital_parado(marca_row: pd.Series, proveedor: dict,
-                                  top_skus: pd.DataFrame, buyer: str = "Franco Barreto") -> dict:
-    """Borrador pidiendo rebate / apoyo de markdown por capital parado."""
+def generar_correo_capital_parado(marca_row: pd.Series, proveedor: dict = None,
+                                  top_skus: pd.DataFrame = None, buyer: str = "Franco Barreto") -> dict:
+    """Borrador pidiendo rebate / apoyo de markdown por capital parado.
+    proveedor es opcional: si no hay contacto, se dirige al representante de la marca."""
+    proveedor = proveedor or {}
+    top_skus = top_skus if top_skus is not None else pd.DataFrame()
     skus_txt = "\n".join(
         f"  - {r.get('nombre', r.get('sku'))}: {int(r.get('stock_total', 0))} uds, "
         f"cobertura {r.get('cobertura_sem', 0):.0f} sem, "
         f"S/ {r.get('stock_valor_costo', 0):,.0f} a costo"
         for _, r in top_skus.iterrows()
     )
+    _dest = (f"{proveedor.get('contacto','')} ({proveedor.get('empresa','')})"
+             if proveedor.get('contacto') else f"representante comercial de la marca {marca_row['marca']}")
     prompt = f"""Redacta un correo al representante de la marca {marca_row['marca']} en Ripley.
 
-CONTACTO: {proveedor.get('contacto', '')} ({proveedor.get('empresa', '')})
+DESTINATARIO: {_dest}
 REMITENTE: {buyer}, Senior Fashion Buyer - Moda Masculina, Ripley.
 
 SITUACIÓN (datos reales del inventario):
@@ -219,12 +224,16 @@ es una relación de largo plazo, no un reclamo."""
             "tipo": "capital_parado"}
 
 
-def generar_correo_reorder(marca_row: pd.Series, proveedor: dict,
+def generar_correo_reorder(marca_row: pd.Series, proveedor: dict = None,
                            buyer: str = "Franco Barreto") -> dict:
-    """Borrador pidiendo reorder por quiebre de marca tercera con venta."""
+    """Borrador pidiendo reorder por quiebre de marca tercera con venta.
+    proveedor es opcional."""
+    proveedor = proveedor or {}
+    _dest = (f"{proveedor.get('contacto','')} ({proveedor.get('empresa','')})"
+             if proveedor.get('contacto') else f"proveedor/representante de la marca {marca_row['marca']}")
     prompt = f"""Redacta un correo al proveedor/fabricante de la marca {marca_row['marca']}.
 
-CONTACTO: {proveedor.get('contacto', '')} ({proveedor.get('empresa', '')})
+DESTINATARIO: {_dest}
 REMITENTE: {buyer}, Senior Fashion Buyer - Moda Masculina, Ripley.
 
 SITUACIÓN (datos reales):

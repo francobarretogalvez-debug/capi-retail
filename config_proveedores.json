@@ -1,10 +1,8 @@
 {
-  "_nota": "Mapa marca tercera -> contacto del proveedor o representante. Cargado por Franco. 'tipo' = 'marca' (rep comercial, para rebate/markdown support) o 'fabricante' (para reorder de producción). Las marcas sin entrada aquí no generan borrador (se marcan 'falta contacto').",
+  "_nota": "OPCIONAL. Mapa marca tercera -> nombre del contacto/empresa, solo para personalizar el destinatario del texto. Ripley no usa email/Gmail; el agente solo redacta y Franco copia el texto a su correo. Sin entrada aquí, el correo se dirige genéricamente al 'representante de la marca'.",
   "_actualizado": "2026-06-12",
   "_PLACEHOLDER": {
     "empresa": "",
-    "contacto": "",
-    "email": "",
-    "tipo": "marca"
+    "contacto": ""
   }
 }
