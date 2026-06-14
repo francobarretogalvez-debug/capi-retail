@@ -886,6 +886,7 @@ with st.sidebar:
                 ("🤝", "Agente Terceras"),
                 ("📦", "Reposición Terceras"),
                 ("🔄", "Transferencias Terceras"),
+                ("💰", "Gestión de Precios Terceras"),
             ]
             for _icon, _label in _NAV_TERCERAS:
                 _full = f"{_icon} {_label}"
@@ -4216,6 +4217,65 @@ elif nav_page == "🔄 Transferencias Terceras":
                                file_name="Capi_Transferencias_Terceras.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                key="dl_trans_terceras")
+
+
+# ═══════════════════════════════════════════════════════════════
+#  💰 GESTIÓN DE PRECIOS TERCERAS — pirámide de descuentos por antigüedad
+# ═══════════════════════════════════════════════════════════════
+
+elif nav_page == "💰 Gestión de Precios Terceras":
+    st.markdown(f'<div class="section-header"><h3>💰 Gestión de Precios Terceras</h3><span class="live-badge">MARCAS TERCERAS</span></div>', unsafe_allow_html=True)
+    st.caption("Descuento sugerido por antigüedad (pirámide), igual para las 10 marcas terceras. "
+               "Compara el descuento actual de cada SKU con el que le tocaría por su edad.")
+    _gp = agente_terceras.sugerencias_precio_terceras(df_cob)
+    if _gp.empty:
+        st.info("No hay SKUs de marcas terceras para analizar con la base actual.")
+    else:
+        _gp_subir = int((_gp['gap'] >= 0.05).sum())
+        _gp_sobre = int((_gp['gap'] <= -0.05).sum())
+        _gp_ok = int(len(_gp) - _gp_subir - _gp_sobre)
+        _gpc1, _gpc2, _gpc3 = st.columns(3)
+        _gpc1.markdown(f"""<div style="background:#FEF2F2; border-radius:12px; padding:14px 18px; border-left:4px solid #DC2626;">
+            <div style="font-size:0.75rem; color:var(--capi-text2);">SKUs a subir descuento</div>
+            <div style="font-size:1.5rem; font-weight:700; color:#DC2626;">{_gp_subir:,}</div>
+            <div style="font-size:0.7rem; color:var(--capi-text2);">por debajo de la pirámide</div></div>""", unsafe_allow_html=True)
+        _gpc2.markdown(f"""<div style="background:#FFFBEB; border-radius:12px; padding:14px 18px; border-left:4px solid #D97706;">
+            <div style="font-size:0.75rem; color:var(--capi-text2);">Sobre-descontados</div>
+            <div style="font-size:1.5rem; font-weight:700; color:#D97706;">{_gp_sobre:,}</div>
+            <div style="font-size:0.7rem; color:var(--capi-text2);">más descuento del sugerido</div></div>""", unsafe_allow_html=True)
+        _gpc3.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:14px 18px; border-left:4px solid #059669;">
+            <div style="font-size:0.75rem; color:var(--capi-text2);">Alineados</div>
+            <div style="font-size:1.5rem; font-weight:700; color:#059669;">{_gp_ok:,}</div>
+            <div style="font-size:0.7rem; color:var(--capi-text2);">descuento correcto</div></div>""", unsafe_allow_html=True)
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        _gp_filtro = st.radio("Ver", ["Solo a subir descuento", "Todos"], horizontal=True, key="gp_filtro")
+        _gp_v = _gp[_gp['gap'] >= 0.05] if _gp_filtro.startswith("Solo") else _gp
+        _gp_marca = ["Todas"] + sorted(_gp_v['marca'].unique().tolist())
+        _gp_sel = st.selectbox("Marca", _gp_marca, key="gp_marca")
+        if _gp_sel != "Todas":
+            _gp_v = _gp_v[_gp_v['marca'] == _gp_sel]
+
+        _gp_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'edad', 'dscto_actual',
+                                'dscto_sugerido', 'tipo', 'accion', 'capital'] if c in _gp_v.columns]
+        _gp_disp = _gp_v[_gp_cols].rename(columns={
+            'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea',
+            'edad': 'Edad (sem)', 'dscto_actual': 'Dscto actual', 'dscto_sugerido': 'Dscto sugerido',
+            'tipo': 'Tipo', 'accion': 'Acción', 'capital': 'Capital S/',
+        })
+        st.dataframe(_gp_disp.head(300).style.format({
+            'Dscto actual': '{:.0%}', 'Dscto sugerido': '{:.0%}', 'Capital S/': 'S/ {:,.0f}',
+        }, na_rep="—"), use_container_width=True, hide_index=True, height=440)
+        st.caption("Tipo: 'Eventual' = descuento de evento temporal (sem 8-18) · 'Fijo' = markdown permanente (sem 19+).")
+
+        _gp_buf = io.BytesIO()
+        with pd.ExcelWriter(_gp_buf, engine='openpyxl') as _w:
+            _gp_v[_gp_cols].to_excel(_w, sheet_name='Precios Terceras', index=False)
+        _gp_buf.seek(0)
+        st.download_button("📥 Descargar sugerencias de precio (.xlsx)", data=_gp_buf.getvalue(),
+                           file_name="Capi_Precios_Terceras.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           key="dl_precios_terceras")
 
 
 # ═══════════════════════════════════════════════════════════════

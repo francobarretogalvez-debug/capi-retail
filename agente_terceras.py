@@ -200,6 +200,61 @@ def top5_por_marca_linea(df_cob: pd.DataFrame, top_n: int = 5,
     return g.reset_index(drop=True)
 
 
+def descuento_sugerido(edad_sem: float) -> tuple:
+    """Pirámide de descuentos por antigüedad (tabla de Franco, igual para todas
+    las terceras). Devuelve (descuento_fraccion, tipo). 'Eventual' = evento de
+    precio temporal (sem 8-18); 'Fijo' = markdown permanente (sem 19+)."""
+    e = edad_sem or 0
+    if e < 8:    return 0.0, ""
+    if e < 12:   return 0.20, "Eventual"
+    if e < 19:   return 0.30, "Eventual"
+    if e < 30:   return 0.30, "Fijo"
+    if e < 35:   return 0.40, "Fijo"
+    if e < 39:   return 0.50, "Fijo"
+    if e < 44:   return 0.60, "Fijo"
+    if e < 48:   return 0.70, "Fijo"
+    return 0.80, "Fijo"
+
+
+def sugerencias_precio_terceras(df_cob: pd.DataFrame) -> pd.DataFrame:
+    """Para cada SKU de marca tercera: descuento sugerido por su antigüedad
+    (pirámide) vs descuento actual → acción de precio. Nivel SKU (pricing
+    omnicanal: el descuento es parejo en todas las tiendas)."""
+    _req = {'marca', 'sku', 'edad_semanas', 'pct_descuento'}
+    if df_cob.empty or not _req.issubset(df_cob.columns):
+        return pd.DataFrame()
+    terc = df_cob[df_cob['marca'].str.upper().str.strip().isin(MARCAS_AGENTE)].copy()
+    if terc.empty:
+        return pd.DataFrame()
+
+    agg = {'marca': ('marca', 'first'), 'edad': ('edad_semanas', 'max'),
+           'dscto_actual': ('pct_descuento', 'max')}
+    if 'nombre' in terc.columns:            agg['nombre'] = ('nombre', 'first')
+    if 'categoria' in terc.columns:         agg['categoria'] = ('categoria', 'first')
+    if 'stock_valor_costo' in terc.columns: agg['capital'] = ('stock_valor_costo', 'sum')
+    if 'cobertura_sem' in terc.columns:     agg['cobertura'] = ('cobertura_sem', 'mean')
+    g = terc.groupby('sku').agg(**agg).reset_index()
+
+    _sug = g['edad'].apply(descuento_sugerido)
+    g['dscto_sugerido'] = _sug.apply(lambda t: t[0])
+    g['tipo'] = _sug.apply(lambda t: t[1])
+    g['dscto_actual'] = g['dscto_actual'].fillna(0)
+    g['gap'] = (g['dscto_sugerido'] - g['dscto_actual']).round(2)
+
+    def _accion(r):
+        if r['gap'] >= 0.05:
+            return f"⬆️ Subir a {r['dscto_sugerido']:.0%}"
+        if r['gap'] <= -0.05:
+            return f"⬇️ Sobre-descuento ({r['dscto_actual']:.0%} vs {r['dscto_sugerido']:.0%} sugerido)"
+        return "✓ Alineado"
+    g['accion'] = g.apply(_accion, axis=1)
+    # Orden: primero los que requieren subir, por capital parado
+    g['_prio'] = (g['gap'] >= 0.05).astype(int)
+    g = g.sort_values(['_prio', 'capital' if 'capital' in g.columns else 'gap'],
+                      ascending=[False, False]).drop(columns='_prio')
+    return g.reset_index(drop=True)
+
+
 def detectar_quiebre_tercera(df_cob: pd.DataFrame, min_vta: float = 1.0) -> pd.DataFrame:
     """Marcas terceras con SKUs en quiebre que vendían bien (requiere reorder)."""
     if df_cob.empty or 'marca' not in df_cob.columns or 'estado' not in df_cob.columns:
