@@ -5,7 +5,7 @@ Lee la plantilla del cliente (4 pestañas) y muestra:
   - Vista 1: Reposición (quiebres, cobertura, pareto tiendas)
   - Vista 2: Sobrestock (real vs aparente, obsoletos, transferencias)
   - Vista 3: Marcas Terceras (margen, contribución, sell-through)
-  - Alertas IA + Briefing Semanal + Chat IA
+  - Alertas IA + Productos Venta Cero + Chat IA
 """
 
 import io
@@ -855,7 +855,7 @@ with st.sidebar:
         _NAV_VISION = [
             ("🏠", "Dashboard"),
             ("🩺", "Salud del Stock"),
-            ("📲", "Briefing Semanal"),
+            ("📲", "Productos Venta Cero"),
             ("📝", "Diario de Gestión"),
             ("📊", "Gestión por Antigüedad"),
             ("📈", "Cobertura x Tienda"),
@@ -865,7 +865,7 @@ with st.sidebar:
             _NAV_VISION = [
                 ("🏠", "Dashboard"),
                 ("🩺", "Salud del Stock"),
-                ("📲", "Briefing Semanal"),
+                ("📲", "Productos Venta Cero"),
             ]
 
         for _icon, _label in _NAV_VISION:
@@ -1538,6 +1538,32 @@ def _build_excel_propias(_dfc, _dfr, _dft, _gaps, _ret):
         (_r if not _r.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Retenidos CD", index=False)
     _buf.seek(0)
     return _buf.read()
+
+
+def _capi_base_path():
+    """Path de la última Base Profundidad (para leer campos crudos que no pasan por el ETL)."""
+    _p = st.session_state.get("_base_profundidad_path")
+    if _p and os.path.exists(_p):
+        return _p
+    _dir = os.path.join(os.path.dirname(__file__), "data2", "bases antiguas")
+    try:
+        _b = [f for f in os.listdir(_dir) if f.lower().endswith(".xlsx") and not f.startswith("~$")]
+        if _b:
+            return os.path.join(_dir, max(_b, key=lambda f: os.path.getmtime(os.path.join(_dir, f))))
+    except OSError:
+        pass
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def _tipo_evento_map(_path):
+    """Mapa SKU → tipo de evento de precio (MD1=etiquetado / PTR=cartel / MTR=sin evento),
+    leído directo de la Base Profundidad. Cacheado por path (el archivo no cambia)."""
+    try:
+        _df = pd.read_excel(_path, usecols=['Cód. Prod.', 'Tipo de Evento Vigente'])
+        return dict(zip(_df['Cód. Prod.'], _df['Tipo de Evento Vigente'].astype(str).str.strip().str.upper()))
+    except Exception:
+        return {}
 
 
 if nav_page == "🏠 Dashboard":
@@ -6919,285 +6945,74 @@ if _chat_is_open and _col_chat is not None:
                     st.session_state["chat_messages"] = []
                     st.rerun()
 
-elif nav_page == "📲 Briefing Semanal":
-    st.markdown(f'<div class="section-header"><h3>📲 Briefing Semanal — Alertas para Tiendas</h3><span class="live-badge">SEMANAL</span></div>', unsafe_allow_html=True)
+elif nav_page == "📲 Productos Venta Cero":
+    st.markdown(f'<div class="section-header"><h3>📲 Productos Venta Cero</h3><span class="live-badge">REVISIÓN TIENDA</span></div>', unsafe_allow_html=True)
+    st.caption("SKUs con stock en tienda que NO vendieron la semana pasada. Para que cada tienda revise "
+               "exhibición y comunicación de precio. El tipo de evento indica si etiquetar (MD1) o poner cartel (PTR).")
 
-    # ══════════════════════════════════════════════════════════════
-    #  RESUMEN EJECUTIVO PARA GERENCIA
-    # ══════════════════════════════════════════════════════════════
-
-    # Calcular totales para el resumen
-    _vc_n_tiendas = len(alertas_venta_cero_dict)
-    _vc_total_skus = sum(p['resumen']['n_skus'] for p in alertas_venta_cero_dict.values())
-    _vc_total_capital = sum(p['resumen']['capital_parado_total'] for p in alertas_venta_cero_dict.values())
-    _at_n_tiendas = len(alertas_tienda_dict)
-    _at_total_items = sum(p['resumen']['n_items'] for p in alertas_tienda_dict.values())
-    _at_total_capital = sum(p['resumen']['capital_parado_sol'] for p in alertas_tienda_dict.values())
-
-    st.markdown(f"""<div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:14px; padding:18px 22px; margin-bottom:16px;">
-    <span style="font-weight:700; color:var(--capi-text); font-size:1rem;">Resumen Ejecutivo — Criterios de alertas a tiendas</span>
-    <p style="color:var(--capi-text); font-size:0.88rem; margin:10px 0 6px 0;">
-    Se generan <strong>dos tipos de alerta</strong> semanales para el personal de piso:
-    </p>
-    <div style="display:flex; gap:16px; flex-wrap:wrap;">
-    <div style="flex:1; min-width:280px; background:var(--capi-bg-card); border-radius:10px; padding:14px; border-left:4px solid {STATUS_MUERTO};">
-    <strong style="color:var(--capi-text);">1. Productos con venta cero</strong><br>
-    <span style="font-size:0.84rem; color:var(--capi-text);">
-    SKUs con stock a costo &ge; S/ 1,000 que no vendieron la semana pasada.<br>
-    <strong>Acción:</strong> Revisar exhibición del producto y comunicación de precio (si tiene descuento).<br>
-    <strong>Alcance:</strong> {_vc_n_tiendas} tiendas · {_vc_total_skus:,} alertas · S/ {_vc_total_capital:,.0f} capital parado.<br>
-    Top 15 SKUs por marca, ordenados por capital parado.
-    </span>
-    </div>
-    <div style="flex:1; min-width:280px; background:var(--capi-bg-card); border-radius:10px; padding:14px; border-left:4px solid {STATUS_SOBRESTOCK};">
-    <strong style="color:var(--capi-text);">2. Productos con sobrestock</strong><br>
-    <span style="font-size:0.84rem; color:var(--capi-text);">
-    SKUs con cobertura &ge; {params.get('alertas_tienda_cob_min', 16)} semanas y edad &ge; {params.get('alertas_tienda_edad_min', 2)} semanas.<br>
-    <strong>Acción:</strong> Revisar exhibición + comunicación de precio según tipo descuento (MD1/PTR).<br>
-    <strong>Alcance:</strong> {_at_n_tiendas} tiendas · {_at_total_items:,} alertas · S/ {_at_total_capital:,.0f} capital inmovilizado.<br>
-    Top {params.get('alertas_tienda_top_n', 30)} SKUs por tienda, ordenados por capital parado.
-    </span>
-    </div>
-    </div>
-    </div>""", unsafe_allow_html=True)
-
-    # ══════════════════════════════════════════════════════════════
-    #  ALERTA 1: VENTA CERO
-    # ══════════════════════════════════════════════════════════════
-
-    st.markdown("#### 🔴 Productos con Venta Cero la Semana Pasada")
-    st.caption("SKUs con stock a costo ≥ S/ 1,000 que no vendieron. Ordenados por capital parado. Top 15 por marca×tienda.")
-
-    if alertas_venta_cero_dict:
-        # Tabla resumen por tienda
-        _vc_rows = []
-        for _t_name, _t_payload in alertas_venta_cero_dict.items():
-            _r = _t_payload['resumen']
-            _marcas_top = list(_t_payload.get('por_marca', {}).keys())[:5]
-            _vc_rows.append({
-                "Tienda": _t_name,
-                "SKUs": _r['n_skus'],
-                "Marcas": _r['n_marcas'],
-                "Capital Parado S/": _r['capital_parado_total'],
-                "Marcas Principales": ", ".join(_marcas_top) + ("..." if len(_t_payload.get('por_marca', {})) > 5 else ""),
-            })
-        _vc_df = pd.DataFrame(_vc_rows).sort_values("Capital Parado S/", ascending=False)
-
-        st.markdown(f"""<div style="background:#FEF2F2; border-left:4px solid {STATUS_CRITICO}; padding:10px 14px; border-radius:10px; margin-bottom:10px;">
-        <strong style="color:{STATUS_CRITICO};">⚠️ {_vc_n_tiendas} tiendas con SKUs sin venta</strong>
-        <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; Capital parado total: S/ {_vc_total_capital:,.0f}</span>
-        </div>""", unsafe_allow_html=True)
-
-        st.dataframe(
-            _vc_df.style.format({"Capital Parado S/": "S/ {:,.0f}"}),
-            use_container_width=True, hide_index=True,
-        )
-
-        # Botón de descarga del detalle completo
-        _vc_all_rows = []
-        for _t_name, _t_payload in alertas_venta_cero_dict.items():
-            for _marca, _mdata in _t_payload.get('por_marca', {}).items():
-                for _it in _mdata.get('items', []):
-                    _it_copy = dict(_it)
-                    _it_copy['tienda'] = _t_name
-                    _it_copy['marca'] = _marca
-                    _vc_all_rows.append(_it_copy)
-        if _vc_all_rows:
-            _vc_all_df = pd.DataFrame(_vc_all_rows)
-            _vc_export_cols = ["tienda", "sku", "nombre", "marca", "categoria", "stock_total",
-                               "stock_valor_costo", "edad_semanas", "estado", "pct_descuento", "mensaje"]
-            _vc_export_cols = [c for c in _vc_export_cols if c in _vc_all_df.columns]
-            _vc_xl_buf = io.BytesIO()
-            with pd.ExcelWriter(_vc_xl_buf, engine='openpyxl') as _vc_w:
-                _vc_all_df[_vc_export_cols].to_excel(_vc_w, sheet_name='Venta Cero', index=False)
-            st.download_button(
-                "📥 Descargar detalle venta cero (.xlsx)",
-                data=_vc_xl_buf.getvalue(),
-                file_name="detalle_venta_cero.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="download_venta_cero",
-            )
-
-        # ── WhatsApp venta cero ──
-        _vc_tiendas_con_items = [t for t, p in alertas_venta_cero_dict.items() if p.get('resumen', {}).get('n_skus', 0) > 0]
-        if _vc_tiendas_con_items:
-            with st.expander(f"💬 Mensajes WhatsApp — Venta Cero ({len(_vc_tiendas_con_items)} tiendas)", expanded=False):
-                _vc_tienda_wa = st.selectbox(
-                    "Selecciona tienda",
-                    options=sorted(_vc_tiendas_con_items),
-                    key="briefing_vc_wa_tienda",
-                )
-                _vc_wa_txt = R_at.render_whatsapp_venta_cero(alertas_venta_cero_dict[_vc_tienda_wa])
-                st.code(_vc_wa_txt, language=None)
-
-                _vc_b1, _vc_b2 = st.columns(2)
-                with _vc_b1:
-                    _vc_fecha_slug = pd.Timestamp.now().strftime('%Y-%m-%d')
-                    _vc_tienda_slug = (_vc_tienda_wa.replace(' ', '_').replace('/', '_').replace('ñ', 'n'))
-                    st.download_button(
-                        "💬 Descargar WhatsApp (.txt)",
-                        data=_vc_wa_txt,
-                        file_name=f"{_vc_fecha_slug}_VentaCero_{_vc_tienda_slug}.txt",
-                        mime="text/plain",
-                        use_container_width=True,
-                        key="download_vc_wa_txt",
-                    )
-                with _vc_b2:
-                    _vc_zip = R_at.render_batch_zip_venta_cero(alertas_venta_cero_dict)
-                    st.download_button(
-                        f"📦 ZIP todas las tiendas ({len(_vc_tiendas_con_items)})",
-                        data=_vc_zip,
-                        file_name=f"{_vc_fecha_slug}_VentaCero_Todas.zip",
-                        mime="application/zip",
-                        use_container_width=True,
-                        key="download_vc_wa_zip",
-                    )
+    # Reconstrucción desde df_cob (venta=0, con stock) + tipo de evento de la base
+    _vc_min_cap = st.slider("Capital mínimo a costo por SKU (S/)", min_value=0, max_value=5000, value=1000, step=250,
+                            help="Filtra SKUs sin venta con poco capital parado para enfocar la revisión.")
+    _vc = df_cob[(df_cob['prom_vta_uds'].fillna(0) == 0) & (df_cob['stock_total'].fillna(0) > 0)].copy() if 'prom_vta_uds' in df_cob.columns else pd.DataFrame()
+    if not _vc.empty and 'stock_valor_costo' in _vc.columns:
+        _vc = _vc[_vc['stock_valor_costo'].fillna(0) >= _vc_min_cap]
+    if _vc.empty:
+        st.success("No hay productos con venta cero sobre el umbral con la base actual.")
     else:
-        st.success("✅ No hay SKUs relevantes con venta cero esta semana.")
+        # Cruce tipo de evento (MD1 / PTR / MTR) desde la Base Profundidad
+        _vc_base = _capi_base_path()
+        _vc_tev = _tipo_evento_map(_vc_base) if _vc_base else {}
+        _vc['tipo_evento'] = _vc['sku'].map(_vc_tev).fillna('') if 'sku' in _vc.columns else ''
 
-    st.markdown("---")
+        def _vc_accion(r):
+            _tp = str(r.get('tipo_evento', '') or '')
+            _dsc = float(r.get('pct_descuento', 0) or 0)
+            if _dsc > 0 and _tp == 'MD1':
+                return "🏷️ Etiquetar mercadería (precio ya impreso)"
+            if _dsc > 0 and _tp == 'PTR':
+                return "📋 Colocar cartel de precio"
+            return "👁️ Revisar exhibición"
+        _vc['accion'] = _vc.apply(_vc_accion, axis=1)
 
-    # ══════════════════════════════════════════════════════════════
-    #  ALERTA 2: COBERTURA ALTA (sobrestock)
-    # ══════════════════════════════════════════════════════════════
+        _vc_n_tiendas = _vc['tienda'].nunique() if 'tienda' in _vc.columns else 0
+        _vc_n_skus = len(_vc)
+        _vc_cap = _vc['stock_valor_costo'].sum() if 'stock_valor_costo' in _vc.columns else 0
+        _vcc1, _vcc2, _vcc3 = st.columns(3)
+        _vcc1.markdown(f'<div style="background:#FEF2F2; border-radius:12px; padding:14px 18px; border-left:4px solid {STATUS_CRITICO};"><div style="font-size:0.75rem; color:var(--capi-text2);">Combos sin venta</div><div style="font-size:1.5rem; font-weight:700; color:{STATUS_CRITICO};">{_vc_n_skus:,}</div></div>', unsafe_allow_html=True)
+        _vcc2.markdown(f'<div style="background:var(--capi-bg-surface); border-radius:12px; padding:14px 18px; border-left:4px solid {STATUS_SOBRESTOCK};"><div style="font-size:0.75rem; color:var(--capi-text2);">Tiendas</div><div style="font-size:1.5rem; font-weight:700; color:{STATUS_SOBRESTOCK};">{_vc_n_tiendas}</div></div>', unsafe_allow_html=True)
+        _vcc3.markdown(f'<div style="background:var(--capi-bg-surface); border-radius:12px; padding:14px 18px; border-left:4px solid {STATUS_MUERTO};"><div style="font-size:0.75rem; color:var(--capi-text2);">Capital parado</div><div style="font-size:1.5rem; font-weight:700; color:{STATUS_MUERTO};">S/ {_vc_cap:,.0f}</div></div>', unsafe_allow_html=True)
 
-    st.markdown("#### 🟠 Productos con Sobrestock / Cobertura Alta")
-    st.caption("Productos con cobertura alta que requieren revisión de exhibición y/o precio.")
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        _vc_tiendas = ["Todas"] + sorted(_vc['tienda'].dropna().unique().tolist()) if 'tienda' in _vc.columns else ["Todas"]
+        _vc_sel = st.selectbox("Tienda", _vc_tiendas, key="vc_tienda")
+        _vc_v = _vc if _vc_sel == "Todas" else _vc[_vc['tienda'] == _vc_sel]
+        _vc_v = _vc_v.sort_values('stock_valor_costo', ascending=False) if 'stock_valor_costo' in _vc_v.columns else _vc_v
 
-    if alertas_tienda_dict:
-        _at_rows = []
-        for _t_name, _t_payload in alertas_tienda_dict.items():
-            _t_res = _t_payload['resumen']
-            _t_items = _t_payload.get('items', [])
-            _t_marcas = set()
-            for _it in _t_items:
-                _m = _it.get('marca', '')
-                if _m:
-                    _t_marcas.add(_m)
-            _at_rows.append({
-                "Tienda": _t_name,
-                "Productos": _t_res['n_items'],
-                "Capital Parado S/": _t_res['capital_parado_sol'],
-                "Con Dscto": _t_res['n_con_descuento'],
-                "Marcas": ", ".join(sorted(_t_marcas)[:5]) + ("..." if len(_t_marcas) > 5 else ""),
-            })
-        _at_df = pd.DataFrame(_at_rows).sort_values("Capital Parado S/", ascending=False)
+        _vc_cols = [c for c in ['tienda', 'marca', 'sku', 'nombre', 'categoria', 'stock_total',
+                                'stock_valor_costo', 'precio_vigente', 'pct_descuento', 'tipo_evento',
+                                'edad_semanas', 'accion'] if c in _vc_v.columns]
+        _vc_disp = _vc_v[_vc_cols].rename(columns={
+            'tienda': 'Tienda', 'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea',
+            'stock_total': 'Stock (uds)', 'stock_valor_costo': 'Capital S/', 'precio_vigente': 'Precio',
+            'pct_descuento': 'Dscto', 'tipo_evento': 'Tipo evento', 'edad_semanas': 'Edad (sem)', 'accion': 'Acción',
+        })
+        st.dataframe(_vc_disp.head(500).style.format({'Capital S/': 'S/ {:,.0f}', 'Precio': 'S/ {:,.2f}', 'Dscto': '{:.0%}'}, na_rep="—"),
+                     use_container_width=True, hide_index=True, height=460)
+        st.caption("Acción: MD1 = mercadería ya etiquetada (verificar etiqueta) · PTR = colocar cartel de precio · sin evento = revisar exhibición.")
 
-        st.markdown(f"""<div style="background:#FFF7ED; border-left:4px solid {STATUS_SOBRESTOCK}; padding:10px 14px; border-radius:10px; margin-bottom:10px;">
-        <strong style="color:{STATUS_SOBRESTOCK};">📲 {_at_n_tiendas} tiendas con alertas de sobrestock</strong>
-        <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; Capital inmovilizado total: S/ {_at_total_capital:,.0f}</span>
-        </div>""", unsafe_allow_html=True)
-
-        st.dataframe(
-            _at_df.style.format({"Capital Parado S/": "S/ {:,.0f}"}),
-            use_container_width=True, hide_index=True,
-        )
-
-        # Botón de descarga del detalle completo
-        _at_all_rows = []
-        for _t_name, _t_payload in alertas_tienda_dict.items():
-            for _it in _t_payload.get('items', []):
-                _it_copy = dict(_it)
-                _it_copy['tienda'] = _t_name
-                _at_all_rows.append(_it_copy)
-        if _at_all_rows:
-            _at_all_df = pd.DataFrame(_at_all_rows)
-            _at_export_cols = ["tienda", "sku", "nombre", "marca", "categoria",
-                               "stock_actual", "cobertura_sem", "capital_parado_sol", "pct_descuento"]
-            _at_export_cols = [c for c in _at_export_cols if c in _at_all_df.columns]
-            _at_xl_buf = io.BytesIO()
-            with pd.ExcelWriter(_at_xl_buf, engine='openpyxl') as _at_w:
-                _at_all_df[_at_export_cols].to_excel(_at_w, sheet_name='Sobrestock', index=False)
-            st.download_button(
-                "📥 Descargar detalle sobrestock (.xlsx)",
-                data=_at_xl_buf.getvalue(),
-                file_name="detalle_sobrestock.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="download_sobrestock",
-            )
-
-        # ── WhatsApp sobrestock ──
-        _at_tiendas_con_items = [t for t, p in alertas_tienda_dict.items() if p.get('resumen', {}).get('n_items', 0) > 0]
-        if _at_tiendas_con_items:
-            with st.expander(f"💬 Mensajes WhatsApp — Sobrestock ({len(_at_tiendas_con_items)} tiendas)", expanded=False):
-                _at_tienda_wa = st.selectbox(
-                    "Selecciona tienda",
-                    options=sorted(_at_tiendas_con_items),
-                    key="briefing_at_wa_tienda",
-                )
-                _at_wa_txt = R_at.render_whatsapp(alertas_tienda_dict[_at_tienda_wa])
-                st.code(_at_wa_txt, language=None)
-
-                _at_b1, _at_b2 = st.columns(2)
-                with _at_b1:
-                    _at_fecha_slug = pd.Timestamp.now().strftime('%Y-%m-%d')
-                    _at_tienda_slug = (_at_tienda_wa.replace(' ', '_').replace('/', '_').replace('ñ', 'n'))
-                    st.download_button(
-                        "💬 Descargar WhatsApp (.txt)",
-                        data=_at_wa_txt,
-                        file_name=f"{_at_fecha_slug}_Sobrestock_{_at_tienda_slug}.txt",
-                        mime="text/plain",
-                        use_container_width=True,
-                        key="download_at_wa_txt",
-                    )
-                with _at_b2:
-                    _at_zip = R_at.render_batch_zip(alertas_tienda_dict)
-                    st.download_button(
-                        f"📦 ZIP todas las tiendas ({len(_at_tiendas_con_items)})",
-                        data=_at_zip,
-                        file_name=f"{_at_fecha_slug}_Sobrestock_Todas.zip",
-                        mime="application/zip",
-                        use_container_width=True,
-                        key="download_at_wa_zip",
-                    )
-    else:
-        st.info("No se generaron alertas de sobrestock para tiendas en este análisis.")
-
-    # ── Briefing analítico (expandible) ──
-    with st.expander("📊 Ver briefing analítico completo", expanded=False):
-        def _briefing_color(prioridad):
-            if prioridad <= 1: return "#FEF2F2", STATUS_CRITICO
-            if prioridad <= 2: return "#FFF7ED", STATUS_SOBRESTOCK
-            if prioridad <= 3: return TEAL_50, TEAL_600
-            if prioridad <= 5: return TH_BG_SURFACE_PY, TH_TEXT2_PY
-            return "#ECFDF5", STATUS_OPTIMO
-
-        for idx, item in enumerate(briefing_items):
-            bg, border = _briefing_color(item['prioridad'])
-
-            st.markdown(
-                f"""<div style="background:{bg}; border-left:4px solid {border}; padding:10px 14px; border-radius:6px; margin-bottom:2px;">
-                <strong style="color:{border};">{item['icono']} {item['titulo']}</strong><br>
-                <span style="font-size:0.92em; color:#333333;">{item['mensaje']}</span>
-                </div>""",
-                unsafe_allow_html=True
-            )
-
-        # Tablas del briefing dentro del expander
-        if 'tiendas_cobertura' in briefing_tablas:
-            st.markdown("**Top tiendas por cobertura:**")
-            st.dataframe(briefing_tablas['tiendas_cobertura'],
-                         use_container_width=True, hide_index=True)
-
-        if 'sell_through_marca' in briefing_tablas:
-            st.markdown("**Sell-through por marca:**")
-            st.dataframe(
-                briefing_tablas['sell_through_marca'].style.format({
-                    'ST %': '{:.1f}%', 'Vta S/ 4sem': 'S/ {:,.0f}',
-                }, na_rep='—'),
-                use_container_width=True, hide_index=True,
-            )
-
-        if 'pareto_top20' in briefing_tablas:
-            st.markdown("**Top 20 SKUs (80% de venta):**")
-            st.dataframe(
-                briefing_tablas['pareto_top20'].style.format({
-                    'Vta S/ 4sem': 'S/ {:,.0f}', '% Acum': '{:.1f}%',
-                }, na_rep='—'),
-                use_container_width=True, hide_index=True,
-            )
-
-
+        # Excel: una hoja por tienda (para repartir a cada una)
+        _vc_buf = io.BytesIO()
+        with pd.ExcelWriter(_vc_buf, engine='openpyxl') as _vc_w:
+            _vc[_vc_cols].rename(columns={
+                'tienda': 'Tienda', 'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Linea',
+                'stock_total': 'Stock', 'stock_valor_costo': 'Capital S/', 'precio_vigente': 'Precio',
+                'pct_descuento': 'Dscto', 'tipo_evento': 'Tipo evento', 'edad_semanas': 'Edad sem', 'accion': 'Accion',
+            }).to_excel(_vc_w, sheet_name='Venta Cero', index=False)
+        _vc_buf.seek(0)
+        st.download_button("📥 Descargar detalle por tienda (.xlsx)", data=_vc_buf.getvalue(),
+                           file_name="Capi_Productos_Venta_Cero.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           use_container_width=True, key="dl_venta_cero")
 
 
 elif nav_page == "📦 Ventana de Compra":
