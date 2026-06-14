@@ -6142,6 +6142,17 @@ def _build_excel(cob_json, rep_pivot_json, rep_json, trans_json, prec_json, aler
             _df_prec_xl.to_excel(writer, sheet_name="Acciones Precio", index=False)
         pd.read_json(io.StringIO(alertas_json)).to_excel(writer, sheet_name="Alertas IA", index=False)
         pd.read_json(io.StringIO(anomalias_json)).to_excel(writer, sheet_name="Anomalías Tienda", index=False)
+        # Análisis Terceras: top 20 SKUs más complicados por marca (capital × cobertura)
+        _df_terc_rank = agente_terceras.ranking_complicados_terceras(_df_cob_ref, top_n=20)
+        if not _df_terc_rank.empty:
+            _cols_t = [c for c in ['marca', 'sku', 'nombre', 'cobertura', 'stock',
+                                   'vta_sem', 'dscto', 'capital', 'score'] if c in _df_terc_rank.columns]
+            _terc_out = _df_terc_rank[_cols_t].rename(columns={
+                'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto',
+                'cobertura': 'Cobertura (sem)', 'stock': 'Stock (uds)', 'vta_sem': 'Vta/sem (uds)',
+                'dscto': 'Dscto', 'capital': 'Capital S/ (costo)', 'score': 'Score complicación',
+            })
+            _terc_out.to_excel(writer, sheet_name="Análisis Terceras", index=False)
     buf.seek(0)
     return buf.read()
 
