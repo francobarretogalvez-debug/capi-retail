@@ -4146,23 +4146,34 @@ elif nav_page == "📦 Reposición Terceras":
         st.info("No hay reposiciones sugeridas para las marcas terceras con la base actual.")
     else:
         _rt = _rt[_rt['a_reponer'] > 0] if 'a_reponer' in _rt.columns else _rt
+        # Cruzar margen efectivo y antigüedad por SKU (desde df_cob) — para que el
+        # proveedor pueda filtrar qué reponer según rentabilidad y edad del producto.
+        if 'sku' in df_cob.columns:
+            if 'margen_efectivo' in df_cob.columns:
+                _mg = df_cob.drop_duplicates('sku').set_index('sku')['margen_efectivo']
+                _rt['margen_efectivo'] = (_rt['sku'].map(_mg).fillna(0) * 100).round(1)
+            if 'edad_semanas' in df_cob.columns:
+                _ed = df_cob.groupby('sku')['edad_semanas'].max()
+                _rt['edad'] = _rt['sku'].map(_ed)
         st.caption(f"{len(_rt):,} líneas de reposición en {_rt['marca'].nunique()} marcas terceras · "
                    f"{int(_rt['a_reponer'].sum()):,} unidades a reponer")
         _rt_marca = ["Todas"] + sorted(_rt['marca'].unique().tolist())
         _rt_sel = st.selectbox("Marca", _rt_marca, key="rt_marca")
         _rt_v = _rt if _rt_sel == "Todas" else _rt[_rt['marca'] == _rt_sel]
-        _rt_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'tienda', 'stock_actual',
-                                'prom_vta_sem', 'cobertura_actual', 'a_reponer', 'cob_post_rep',
-                                'stock_cd', 'urgencia', 'requiere_proveedor'] if c in _rt_v.columns]
+        _rt_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'tienda', 'edad',
+                                'stock_actual', 'prom_vta_sem', 'cobertura_actual', 'a_reponer',
+                                'cob_post_rep', 'stock_cd', 'pct_descuento', 'margen_efectivo',
+                                'urgencia', 'requiere_proveedor'] if c in _rt_v.columns]
         _rt_disp = _rt_v[_rt_cols].rename(columns={
             'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea',
-            'tienda': 'Tienda', 'stock_actual': 'Stock', 'prom_vta_sem': 'Vta/sem',
+            'edad': 'Edad (sem)', 'tienda': 'Tienda', 'stock_actual': 'Stock', 'prom_vta_sem': 'Vta/sem',
             'cobertura_actual': 'Cob (sem)', 'a_reponer': 'A reponer (uds)',
-            'cob_post_rep': 'Cob post', 'stock_cd': 'Stock CD', 'urgencia': 'Urgencia',
+            'cob_post_rep': 'Cob post', 'stock_cd': 'Stock CD', 'pct_descuento': 'Dscto',
+            'margen_efectivo': 'Margen efect. %', 'urgencia': 'Urgencia',
             'requiere_proveedor': 'Req. proveedor',
         })
         st.dataframe(_rt_disp.style.format({
-            'Vta/sem': '{:.1f}', 'Cob (sem)': '{:.1f}', 'Cob post': '{:.1f}',
+            'Vta/sem': '{:.1f}', 'Cob (sem)': '{:.1f}', 'Cob post': '{:.1f}', 'Dscto': '{:.0%}',
         }, na_rep="—"), use_container_width=True, hide_index=True, height=440)
         _rt_buf = io.BytesIO()
         with pd.ExcelWriter(_rt_buf, engine='openpyxl') as _w:
