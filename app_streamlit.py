@@ -2777,9 +2777,17 @@ elif nav_page == "🩺 Salud del Stock":
                 with _hs_tabs[2]:
                     st.markdown("##### Drill-down: Marca > Linea > Temporada")
 
+                    _dd_marcas_list = sorted(_hs_marca['marca'].unique())
+                    # Arrancar en la marca de PEOR health score (la que más necesita diagnóstico)
+                    _dd_idx = 0
+                    if not _hs_marca.empty:
+                        _dd_peor = _hs_marca.sort_values('health_score').iloc[0]['marca']
+                        if _dd_peor in _dd_marcas_list:
+                            _dd_idx = _dd_marcas_list.index(_dd_peor)
                     _dd_marca_sel = st.selectbox(
-                        "Seleccionar marca",
-                        sorted(_hs_marca['marca'].unique()),
+                        "Seleccionar marca (arranca en la de menor Health Score)",
+                        _dd_marcas_list,
+                        index=_dd_idx,
                         key="hs_dd_marca"
                     )
 
