@@ -877,6 +877,27 @@ with st.sidebar:
                 st.session_state["nav_page"] = _full
                 st.rerun()
 
+        # ── GESTIÓN DE MARCAS TERCERAS ──
+        # Cluster end-to-end de terceras: detectar (Agente) → reponer/transferir
+        # (filtrado a las 10 marcas) → pricing por pirámide de antigüedad.
+        if not _DEMO_MODE:
+            st.markdown('<div class="sidebar-section-label">GESTIÓN DE MARCAS TERCERAS</div>', unsafe_allow_html=True)
+            _NAV_TERCERAS = [
+                ("🤝", "Agente Terceras"),
+                ("📦", "Reposición Terceras"),
+                ("🔄", "Transferencias Terceras"),
+            ]
+            for _icon, _label in _NAV_TERCERAS:
+                _full = f"{_icon} {_label}"
+                _is_active = st.session_state["nav_page"] == _full
+                if st.button(
+                    _full, key=f"nav_{_label}",
+                    use_container_width=True,
+                    type="primary" if _is_active else "secondary",
+                ):
+                    st.session_state["nav_page"] = _full
+                    st.rerun()
+
         # ── GESTIÓN DE STOCK ──
         # (Sobrestock y Acciones de Stock ocultos del menú — su cálculo en el
         #  motor sigue activo, solo se quitó la vista de presentación.)
@@ -909,7 +930,6 @@ with st.sidebar:
             _NAV_COMERCIAL = [
                 ("📊", "Gestión por Antigüedad"),
                 ("💰", "Acciones Precio"),
-                ("🤝", "Agente Terceras"),
             ]
 
             for _icon, _label in _NAV_COMERCIAL:
@@ -4111,6 +4131,91 @@ elif nav_page == "📈 Cobertura" or nav_page == "📊 Cobertura":
                     st.caption("Sin columna Marca en los datos")
 
 
+
+
+# ═══════════════════════════════════════════════════════════════
+#  📦 REPOSICIÓN TERCERAS — plan de reposición filtrado a las 10 marcas
+# ═══════════════════════════════════════════════════════════════
+
+elif nav_page == "📦 Reposición Terceras":
+    st.markdown(f'<div class="section-header"><h3>📦 Reposición Terceras</h3><span class="live-badge">MARCAS TERCERAS</span></div>', unsafe_allow_html=True)
+    _MARCAS_T = agente_terceras.MARCAS_AGENTE
+    _rt = df_rep[df_rep['marca'].str.upper().str.strip().isin(_MARCAS_T)].copy() if not df_rep.empty and 'marca' in df_rep.columns else pd.DataFrame()
+    if _rt.empty:
+        st.info("No hay reposiciones sugeridas para las marcas terceras con la base actual.")
+    else:
+        _rt = _rt[_rt['a_reponer'] > 0] if 'a_reponer' in _rt.columns else _rt
+        st.caption(f"{len(_rt):,} líneas de reposición en {_rt['marca'].nunique()} marcas terceras · "
+                   f"{int(_rt['a_reponer'].sum()):,} unidades a reponer")
+        _rt_marca = ["Todas"] + sorted(_rt['marca'].unique().tolist())
+        _rt_sel = st.selectbox("Marca", _rt_marca, key="rt_marca")
+        _rt_v = _rt if _rt_sel == "Todas" else _rt[_rt['marca'] == _rt_sel]
+        _rt_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'tienda', 'stock_actual',
+                                'prom_vta_sem', 'cobertura_actual', 'a_reponer', 'cob_post_rep',
+                                'stock_cd', 'urgencia', 'requiere_proveedor'] if c in _rt_v.columns]
+        _rt_disp = _rt_v[_rt_cols].rename(columns={
+            'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea',
+            'tienda': 'Tienda', 'stock_actual': 'Stock', 'prom_vta_sem': 'Vta/sem',
+            'cobertura_actual': 'Cob (sem)', 'a_reponer': 'A reponer (uds)',
+            'cob_post_rep': 'Cob post', 'stock_cd': 'Stock CD', 'urgencia': 'Urgencia',
+            'requiere_proveedor': 'Req. proveedor',
+        })
+        st.dataframe(_rt_disp.style.format({
+            'Vta/sem': '{:.1f}', 'Cob (sem)': '{:.1f}', 'Cob post': '{:.1f}',
+        }, na_rep="—"), use_container_width=True, hide_index=True, height=440)
+        _rt_buf = io.BytesIO()
+        with pd.ExcelWriter(_rt_buf, engine='openpyxl') as _w:
+            _rt_v[_rt_cols].to_excel(_w, sheet_name='Reposicion Terceras', index=False)
+        _rt_buf.seek(0)
+        st.download_button("📥 Descargar reposición terceras (.xlsx)", data=_rt_buf.getvalue(),
+                           file_name="Capi_Reposicion_Terceras.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           key="dl_repo_terceras")
+
+
+# ═══════════════════════════════════════════════════════════════
+#  🔄 TRANSFERENCIAS TERCERAS — transferencias filtradas a las 10 marcas
+# ═══════════════════════════════════════════════════════════════
+
+elif nav_page == "🔄 Transferencias Terceras":
+    st.markdown(f'<div class="section-header"><h3>🔄 Transferencias Terceras</h3><span class="live-badge">MARCAS TERCERAS</span></div>', unsafe_allow_html=True)
+    _MARCAS_T = agente_terceras.MARCAS_AGENTE
+    # df_trans no trae 'marca' → cruzar por sku con df_cob
+    if df_trans.empty or 'sku' not in df_trans.columns:
+        st.info("No hay transferencias sugeridas con la base actual.")
+    else:
+        _sku2marca = {}
+        if 'sku' in df_cob.columns and 'marca' in df_cob.columns:
+            _sku2marca = dict(zip(df_cob['sku'], df_cob['marca'].str.upper().str.strip()))
+        _tt = df_trans.copy()
+        _tt['_marca'] = _tt['sku'].map(_sku2marca)
+        _tt = _tt[_tt['_marca'].isin(_MARCAS_T)]
+        if _tt.empty:
+            st.info("No hay transferencias sugeridas para las marcas terceras con la base actual.")
+        else:
+            st.caption(f"{len(_tt):,} movimientos en marcas terceras · {int(_tt['uds_transferir'].sum()):,} unidades")
+            _tt_cols = [c for c in ['_marca', 'sku', 'nombre', 'tienda_origen', 'tienda_destino',
+                                    'uds_transferir', 'cob_origen_pre', 'cob_destino_pre',
+                                    'cob_origen_post', 'cob_destino_post', 'motivo'] if c in _tt.columns]
+            _tt_disp = _tt[_tt_cols].rename(columns={
+                '_marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto',
+                'tienda_origen': 'Tienda Origen', 'tienda_destino': 'Tienda Destino',
+                'uds_transferir': 'Uds a Transferir', 'cob_origen_pre': 'Cob Origen (pre)',
+                'cob_destino_pre': 'Cob Destino (pre)', 'cob_origen_post': 'Cob Origen (post)',
+                'cob_destino_post': 'Cob Destino (post)', 'motivo': 'Motivo',
+            })
+            st.dataframe(_tt_disp.style.format({
+                'Cob Origen (pre)': '{:.1f}', 'Cob Destino (pre)': '{:.1f}',
+                'Cob Origen (post)': '{:.1f}', 'Cob Destino (post)': '{:.1f}',
+            }, na_rep="—"), use_container_width=True, hide_index=True, height=440)
+            _tt_buf = io.BytesIO()
+            with pd.ExcelWriter(_tt_buf, engine='openpyxl') as _w:
+                _tt[_tt_cols].to_excel(_w, sheet_name='Transferencias Terceras', index=False)
+            _tt_buf.seek(0)
+            st.download_button("📥 Descargar transferencias terceras (.xlsx)", data=_tt_buf.getvalue(),
+                               file_name="Capi_Transferencias_Terceras.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               key="dl_trans_terceras")
 
 
 # ═══════════════════════════════════════════════════════════════
