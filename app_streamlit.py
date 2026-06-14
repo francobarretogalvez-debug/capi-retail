@@ -6152,12 +6152,14 @@ def _build_excel(cob_json, rep_pivot_json, rep_json, trans_json, prec_json, aler
         _df_rev = agente_terceras.top5_por_marca_linea(_df_cob_ref, top_n=5)
         if not _df_rev.empty:
             _cols_r = [c for c in ['marca', 'categoria', 'criticidad', 'sku', 'nombre', 'edad',
-                                   'cobertura', 'stock', 'vta_sem', 'dscto', 'capital'] if c in _df_rev.columns]
+                                   'cobertura', 'stock', 'vta_sem', 'dscto', 'capital',
+                                   'sell_through', 'margen_efectivo'] if c in _df_rev.columns]
             _rev_out = _df_rev[_cols_r].rename(columns={
                 'marca': 'Marca', 'categoria': 'Línea', 'criticidad': 'Criticidad',
                 'sku': 'SKU', 'nombre': 'Producto', 'edad': 'Edad (sem)',
                 'cobertura': 'Cobertura (sem)', 'stock': 'Stock (uds)',
                 'vta_sem': 'Vta/sem (uds)', 'dscto': 'Dscto', 'capital': 'Capital S/ (costo)',
+                'sell_through': 'Sell-through %', 'margen_efectivo': 'Margen efect. %',
             })
             _rev_out.to_excel(writer, sheet_name="Revisar Terceras", index=False)
     buf.seek(0)

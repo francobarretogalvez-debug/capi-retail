@@ -162,6 +162,7 @@ def top5_por_marca_linea(df_cob: pd.DataFrame, top_n: int = 5,
     if 'pct_descuento' in terc.columns:     agg['dscto'] = ('pct_descuento', 'max')
     if 'stock_valor_costo' in terc.columns: agg['capital'] = ('stock_valor_costo', 'sum')
     if 'prom_vta_uds' in terc.columns:      agg['vta_sem'] = ('prom_vta_uds', 'sum')
+    if 'margen_efectivo' in terc.columns:   agg['margen'] = ('margen_efectivo', 'first')
     if not agg:
         return pd.DataFrame()
 
@@ -176,6 +177,14 @@ def top5_por_marca_linea(df_cob: pd.DataFrame, top_n: int = 5,
     if g.empty:
         return g
     g['score'] = (g['capital'] * g['cobertura']).round(0)
+    # Métricas comerciales para el proveedor + redondeo limpio
+    if 'vta_sem' in g.columns and 'stock' in g.columns:
+        _den = g['vta_sem'] + g['stock']
+        g['sell_through'] = np.where(_den > 0, (g['vta_sem'] / _den * 100).round(1), 0.0)
+    if 'margen' in g.columns:
+        g['margen_efectivo'] = (g['margen'].fillna(0) * 100).round(1)
+    g['cobertura'] = g['cobertura'].round(1)
+    g['capital'] = g['capital'].round(0)
     g = g.sort_values(['marca', 'categoria', 'score'], ascending=[True, True, False])
     g = g.groupby(['marca', 'categoria'], sort=True).head(top_n).reset_index(drop=True)
 
