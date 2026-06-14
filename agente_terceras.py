@@ -39,6 +39,16 @@ _PROVEEDORES_PATH = os.path.join(_BASE_DIR, "config_proveedores.json")
 _MARCAS_PROPIAS = {'MARQUIS', 'NAVIGATA', 'CACHAREL', 'SPAVALDI',
                    'OSCAR DE LA RENTA', 'US POLO', 'NAUTICA'}
 
+# Universo EXPLÍCITO del agente (definido por Franco 2026-06-12). No es "todo lo
+# que no es propia": es esta lista blanca de marcas con presencia real en Ripley.
+# Incluye Oscar de la Renta, US Polo y Nautica (que son propias en clasificación,
+# pero Franco las gestiona vía este flujo). Excluye marcas sin presencia ya
+# (Psycho Bunny, Dockers2, Arrow, Givenchy, Van Heusen).
+MARCAS_AGENTE = {
+    'JOHN HOLDEN', 'PIERRE CARDIN', 'DOCKERS', 'LACOSTE', 'SELECTED',
+    'SILBON', 'NORTON', 'OSCAR DE LA RENTA', 'US POLO', 'NAUTICA',
+}
+
 SYSTEM_PROMPT_CORREO = """Eres el asistente de un Senior Fashion Buyer de Ripley (retail de moda, Perú).
 Redactas correos comerciales a proveedores y representantes de marca: profesionales,
 directos, cordiales, en español peruano de negocios. Sin relleno ni adjetivos vacíos.
@@ -77,7 +87,7 @@ def detectar_capital_parado(df_cob: pd.DataFrame, min_capital: float = 50000,
     if df_cob.empty or 'marca' not in df_cob.columns:
         return pd.DataFrame()
 
-    terc = df_cob[~df_cob['marca'].str.upper().str.strip().isin(_MARCAS_PROPIAS)].copy()
+    terc = df_cob[df_cob['marca'].str.upper().str.strip().isin(MARCAS_AGENTE)].copy()
     if terc.empty:
         return pd.DataFrame()
 
@@ -136,7 +146,7 @@ def ranking_complicados_terceras(df_cob: pd.DataFrame, top_n: int = 20) -> pd.Da
     único (suma de todas las tiendas)."""
     if df_cob.empty or 'marca' not in df_cob.columns:
         return pd.DataFrame()
-    terc = df_cob[~df_cob['marca'].str.upper().str.strip().isin(_MARCAS_PROPIAS)].copy()
+    terc = df_cob[df_cob['marca'].str.upper().str.strip().isin(MARCAS_AGENTE)].copy()
     if terc.empty:
         return pd.DataFrame()
 
@@ -191,7 +201,7 @@ def top5_por_marca_linea(df_cob: pd.DataFrame, top_n: int = 5,
     Devuelve filas ordenadas por marca, línea y score (capital × cobertura)."""
     if df_cob.empty or 'marca' not in df_cob.columns or 'categoria' not in df_cob.columns:
         return pd.DataFrame()
-    terc = df_cob[~df_cob['marca'].str.upper().str.strip().isin(_MARCAS_PROPIAS)].copy()
+    terc = df_cob[df_cob['marca'].str.upper().str.strip().isin(MARCAS_AGENTE)].copy()
     if terc.empty:
         return pd.DataFrame()
 
@@ -225,7 +235,7 @@ def detectar_quiebre_tercera(df_cob: pd.DataFrame, min_vta: float = 1.0) -> pd.D
     """Marcas terceras con SKUs en quiebre que vendían bien (requiere reorder)."""
     if df_cob.empty or 'marca' not in df_cob.columns or 'estado' not in df_cob.columns:
         return pd.DataFrame()
-    terc = df_cob[~df_cob['marca'].str.upper().str.strip().isin(_MARCAS_PROPIAS)].copy()
+    terc = df_cob[df_cob['marca'].str.upper().str.strip().isin(MARCAS_AGENTE)].copy()
     q = terc[(terc['estado'] == 'QUIEBRE') & (terc['prom_vta_uds'].fillna(0) >= min_vta)].copy()
     if q.empty:
         return pd.DataFrame()
