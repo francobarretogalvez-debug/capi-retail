@@ -1488,16 +1488,10 @@ def _build_excel_terceras(_dfc, _dfr, _dft):
     _M = agente_terceras.MARCAS_AGENTE
     _buf = io.BytesIO()
     with pd.ExcelWriter(_buf, engine="openpyxl") as _w:
-        # 1. Capital parado (resumen por marca)
-        _cap = agente_terceras.detectar_capital_parado(_dfc)
-        (_cap if not _cap.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Capital Parado", index=False)
-        # 2. SKUs críticos por marca×línea (con criticidad)
+        # 1. SKUs críticos por marca×línea (con criticidad)
         _crit = agente_terceras.top5_por_marca_linea(_dfc, top_n=5)
         (_crit if not _crit.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="SKUs Criticos", index=False)
-        # 3. Quiebres de terceras (reorder)
-        _q = agente_terceras.detectar_quiebre_tercera(_dfc)
-        (_q if not _q.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Quiebres", index=False)
-        # 4. Reposición terceras (con margen + edad cruzados)
+        # 2. Reposición terceras (con margen + edad cruzados)
         _rep = _dfr[_dfr['marca'].str.upper().str.strip().isin(_M)].copy() if not _dfr.empty and 'marca' in _dfr.columns else pd.DataFrame()
         if not _rep.empty:
             _rep = _rep[_rep['a_reponer'] > 0] if 'a_reponer' in _rep.columns else _rep
@@ -1507,7 +1501,7 @@ def _build_excel_terceras(_dfc, _dfr, _dft):
             if 'sku' in _dfc.columns and 'edad_semanas' in _dfc.columns:
                 _rep['edad_sem'] = _rep['sku'].map(_dfc.groupby('sku')['edad_semanas'].max())
         (_rep if not _rep.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Reposicion", index=False)
-        # 5. Transferencias terceras (cruce por sku)
+        # 3. Transferencias terceras (cruce por sku)
         if not _dft.empty and 'sku' in _dft.columns and 'marca' in _dfc.columns:
             _s2m = dict(zip(_dfc['sku'], _dfc['marca'].str.upper().str.strip()))
             _tr = _dft.copy()
@@ -1516,7 +1510,7 @@ def _build_excel_terceras(_dfc, _dfr, _dft):
         else:
             _tr = pd.DataFrame()
         (_tr if not _tr.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Transferencias", index=False)
-        # 6. Gestión de precios (pirámide)
+        # 4. Gestión de precios (pirámide)
         _pr = agente_terceras.sugerencias_precio_terceras(_dfc)
         (_pr if not _pr.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Precios", index=False)
     _buf.seek(0)
@@ -4350,7 +4344,7 @@ elif nav_page == "🤝 Agente Terceras":
         file_name="Capi_Analisis_Marcas_Terceras.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True, key="dl_pack_terceras",
-        help="6 pestañas: Capital Parado · SKUs Críticos · Quiebres · Reposición · Transferencias · Precios",
+        help="4 pestañas: SKUs Críticos · Reposición · Transferencias · Precios",
     )
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
