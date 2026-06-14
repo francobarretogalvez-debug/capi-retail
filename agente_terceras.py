@@ -84,7 +84,8 @@ def detectar_capital_parado(df_cob: pd.DataFrame, min_capital: float = 50000,
                             max_sell_through: float = 15.0) -> pd.DataFrame:
     """Marcas terceras con capital inmovilizado alto y sell-through bajo.
     Candidatas a pedir rebate / apoyo de markdown / devolución."""
-    if df_cob.empty or 'marca' not in df_cob.columns:
+    _req = {'marca', 'sku', 'stock_valor_costo', 'stock_total', 'cobertura_sem', 'prom_vta_uds'}
+    if df_cob.empty or not _req.issubset(df_cob.columns):
         return pd.DataFrame()
 
     terc = df_cob[df_cob['marca'].str.upper().str.strip().isin(MARCAS_AGENTE)].copy()
