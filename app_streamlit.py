@@ -2510,6 +2510,7 @@ elif nav_page == "🩺 Salud del Stock":
                     "🏆 Ranking Marcas",
                     "🔍 Drill-down",
                     "📋 Detalle SKU",
+                    "📊 Ranking x Componente",
                 ])
 
                 # ── Tab 1: Diagnostico Rapido ──
@@ -2930,6 +2931,45 @@ elif nav_page == "🩺 Salud del Stock":
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key="hs_dl_detail"
                     )
+
+                # ── Tab 5: Ranking x Componente ──
+                with _hs_tabs[4]:
+                    st.markdown("##### Ranking de marcas por componente del Health Score")
+                    st.caption("Cada componente en escala 0-100 (verde = fortaleza, rojo = a mejorar). "
+                               "Clic en el encabezado de una columna para ordenar por ese componente.")
+                    _hc = _hs_marca.copy()
+                    _hc_num = ['score_cobertura', 'score_quiebre', 'score_sobrestock', 'score_eficiencia', 'score_margen', 'health_score']
+                    _hc_cols = ['marca'] + [c for c in _hc_num if c in _hc.columns]
+                    _hc_disp = _hc[_hc_cols].rename(columns={
+                        'marca': 'Marca', 'score_cobertura': 'Cobertura', 'score_quiebre': 'Quiebre',
+                        'score_sobrestock': 'Sobrestock', 'score_eficiencia': 'Eficiencia',
+                        'score_margen': 'Margen', 'health_score': 'Health Score',
+                    }).sort_values('Health Score', ascending=False)
+                    _hc_color = [c for c in ['Cobertura', 'Quiebre', 'Sobrestock', 'Eficiencia', 'Margen', 'Health Score'] if c in _hc_disp.columns]
+
+                    def _hc_celda(v):
+                        # Verde→rojo por tramos (sin matplotlib): mayor score = más verde
+                        if pd.isna(v):
+                            return ''
+                        if v >= 75:   return 'background-color: #C8E6C9'
+                        if v >= 60:   return 'background-color: #DCEDC8'
+                        if v >= 40:   return 'background-color: #FFF9C4'
+                        if v >= 20:   return 'background-color: #FFE0B2'
+                        return 'background-color: #FFCDD2'
+
+                    _hc_sty = _hc_disp.style.format({c: '{:.0f}' for c in _hc_color}, na_rep="—") \
+                        .map(_hc_celda, subset=_hc_color)
+                    st.dataframe(_hc_sty, use_container_width=True, hide_index=True, height=520)
+                    st.caption("Pesos: Cobertura 25% · Quiebre 20% · Sobrestock 15% · Eficiencia 20% · Margen 20%. "
+                               "El Health Score es la suma ponderada de los 5.")
+                    _hc_buf = io.BytesIO()
+                    with pd.ExcelWriter(_hc_buf, engine='openpyxl') as _hc_w:
+                        _hc_disp.to_excel(_hc_w, sheet_name='Ranking Componentes', index=False)
+                    _hc_buf.seek(0)
+                    st.download_button("📥 Descargar ranking por componente (.xlsx)", data=_hc_buf.getvalue(),
+                                       file_name="Capi_Ranking_Componentes.xlsx",
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                       key="hs_dl_componentes")
 
 
 # ═══════════════════════════════════════════════════════════════
