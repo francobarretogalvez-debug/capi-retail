@@ -6125,9 +6125,14 @@ elif nav_page == "🔮 Simulador Predictivo":
 st.markdown("---")
 st.markdown(f'<div class="section-header"><h3>📥 Descargar resultados</h3></div>', unsafe_allow_html=True)
 
-@st.cache_data
 def _build_excel(cob_json, rep_pivot_json, rep_json, trans_json, prec_json, alertas_json, anomalias_json):
-    """Genera el Excel de resultados en memoria con columnas de precio y nuevo margen."""
+    """Genera el Excel de resultados en memoria con columnas de precio y nuevo margen.
+
+    SIN @st.cache_data a propósito: la función llama a helpers externos
+    (agente_terceras.*) cuyo código puede cambiar entre deploys. El cache de
+    Streamlit solo hashea el código directo + argumentos, NO las funciones
+    llamadas, así que cacheaba Excels viejos tras arreglar un helper. Generarlo
+    fresco toma ~1-2 seg y elimina esa clase de bug."""
     buf = io.BytesIO()
     _df_cob_ref = pd.read_json(io.StringIO(cob_json))
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
