@@ -4161,7 +4161,11 @@ elif nav_page == "🤝 Agente Terceras":
                 with st.spinner("Redactando con IA..."):
                     try:
                         _at_skus = agente_terceras.top_skus_marca(df_cob, _at_sel)
-                        _at_correo = agente_terceras.generar_correo_capital_parado(_at_row, _at_prov_marca, _at_skus)
+                        _at_det = agente_terceras.top5_por_marca_linea(df_cob)
+                        if not _at_det.empty:
+                            _at_det = _at_det[_at_det['marca'].str.upper() == _at_sel.upper()]
+                        _at_correo = agente_terceras.generar_correo_capital_parado(
+                            _at_row, _at_prov_marca, _at_skus, detalle_lineas=_at_det)
                         st.session_state["at_borrador"] = _at_correo
                     except Exception as _at_e:
                         st.error(f"No se pudo generar el texto: {_at_e}")
@@ -6153,6 +6157,17 @@ def _build_excel(cob_json, rep_pivot_json, rep_json, trans_json, prec_json, aler
                 'dscto': 'Dscto', 'capital': 'Capital S/ (costo)',
             })
             _terc_out.to_excel(writer, sheet_name="Análisis Terceras", index=False)
+        # Revisar esta semana: top 5 SKUs por marca×línea (sobrestock real, edad ≥3 sem)
+        _df_rev = agente_terceras.top5_por_marca_linea(_df_cob_ref, top_n=5)
+        if not _df_rev.empty:
+            _cols_r = [c for c in ['marca', 'categoria', 'sku', 'nombre', 'edad',
+                                   'cobertura', 'stock', 'vta_sem', 'dscto', 'capital'] if c in _df_rev.columns]
+            _rev_out = _df_rev[_cols_r].rename(columns={
+                'marca': 'Marca', 'categoria': 'Línea', 'sku': 'SKU', 'nombre': 'Producto',
+                'edad': 'Edad (sem)', 'cobertura': 'Cobertura (sem)', 'stock': 'Stock (uds)',
+                'vta_sem': 'Vta/sem (uds)', 'dscto': 'Dscto', 'capital': 'Capital S/ (costo)',
+            })
+            _rev_out.to_excel(writer, sheet_name="Revisar Semana x Linea", index=False)
     buf.seek(0)
     return buf.read()
 

@@ -181,6 +181,46 @@ def ranking_complicados_terceras(df_cob: pd.DataFrame, top_n: int = 20) -> pd.Da
     return g.reset_index(drop=True)
 
 
+def top5_por_marca_linea(df_cob: pd.DataFrame, top_n: int = 5,
+                         min_cobertura: float = 16.0, min_edad: float = 3.0) -> pd.DataFrame:
+    """Top N SKUs a revisar por cada marca×línea (terceras): capital parado +
+    alta cobertura. Filtros del buyer (Franco):
+      - solo cobertura > min_cobertura (sobrestock real, no ÓPTIMO)
+      - solo edad >= min_edad semanas (los recién ingresados tienen cobertura
+        alta artificial por poca venta acumulada, no por sobrestock)
+    Devuelve filas ordenadas por marca, línea y score (capital × cobertura)."""
+    if df_cob.empty or 'marca' not in df_cob.columns or 'categoria' not in df_cob.columns:
+        return pd.DataFrame()
+    terc = df_cob[~df_cob['marca'].str.upper().str.strip().isin(_MARCAS_PROPIAS)].copy()
+    if terc.empty:
+        return pd.DataFrame()
+
+    agg = {}
+    if 'nombre' in terc.columns:            agg['nombre'] = ('nombre', 'first')
+    if 'edad_semanas' in terc.columns:      agg['edad'] = ('edad_semanas', 'max')
+    if 'stock_total' in terc.columns:       agg['stock'] = ('stock_total', 'sum')
+    if 'cobertura_sem' in terc.columns:     agg['cobertura'] = ('cobertura_sem', 'mean')
+    if 'pct_descuento' in terc.columns:     agg['dscto'] = ('pct_descuento', 'max')
+    if 'stock_valor_costo' in terc.columns: agg['capital'] = ('stock_valor_costo', 'sum')
+    if 'prom_vta_uds' in terc.columns:      agg['vta_sem'] = ('prom_vta_uds', 'sum')
+    if not agg:
+        return pd.DataFrame()
+
+    # Consolidar a SKU primero (cobertura = promedio real de todas las tiendas,
+    # edad = antigüedad del producto), y filtrar DESPUÉS para no sesgar promedios.
+    g = terc.groupby(['marca', 'categoria', 'sku']).agg(**agg).reset_index()
+    g['cobertura'] = g.get('cobertura', pd.Series(0, index=g.index)).fillna(0)
+    g['capital'] = g.get('capital', pd.Series(0, index=g.index)).fillna(0)
+    if 'edad' in g.columns:
+        g = g[g['edad'].fillna(0) >= min_edad]  # excluir ingresos recientes (cobertura artificial)
+    g = g[g['cobertura'] > min_cobertura]  # sobrestock real
+    if g.empty:
+        return g
+    g['score'] = (g['capital'] * g['cobertura']).round(0)
+    g = g.sort_values(['marca', 'categoria', 'score'], ascending=[True, True, False])
+    return g.groupby(['marca', 'categoria'], sort=True).head(top_n).reset_index(drop=True)
+
+
 def detectar_quiebre_tercera(df_cob: pd.DataFrame, min_vta: float = 1.0) -> pd.DataFrame:
     """Marcas terceras con SKUs en quiebre que vendían bien (requiere reorder)."""
     if df_cob.empty or 'marca' not in df_cob.columns or 'estado' not in df_cob.columns:
@@ -239,17 +279,33 @@ def _parse_correo(texto: str) -> dict:
 
 
 def generar_correo_capital_parado(marca_row: pd.Series, proveedor: dict = None,
-                                  top_skus: pd.DataFrame = None, buyer: str = "Franco Barreto") -> dict:
+                                  top_skus: pd.DataFrame = None, buyer: str = "Franco Barreto",
+                                  detalle_lineas: pd.DataFrame = None) -> dict:
     """Borrador pidiendo rebate / apoyo de markdown por capital parado.
-    proveedor es opcional: si no hay contacto, se dirige al representante de la marca."""
+    proveedor es opcional. Si se pasa detalle_lineas (top SKUs por línea de la
+    marca), el correo comunica el desglose por línea, no solo el agregado."""
     proveedor = proveedor or {}
     top_skus = top_skus if top_skus is not None else pd.DataFrame()
-    skus_txt = "\n".join(
-        f"  - {r.get('nombre', r.get('sku'))}: {int(r.get('stock_total', 0))} uds, "
-        f"cobertura {r.get('cobertura_sem', 0):.0f} sem, "
-        f"S/ {r.get('stock_valor_costo', 0):,.0f} a costo"
-        for _, r in top_skus.iterrows()
-    )
+
+    # Desglose por línea (si está disponible) — lo que Franco pidió comunicar
+    if detalle_lineas is not None and not detalle_lineas.empty:
+        bloques = []
+        for _linea, _grp in detalle_lineas.groupby('categoria', sort=False):
+            _cap_lin = _grp['capital'].sum() if 'capital' in _grp else 0
+            _items = "\n".join(
+                f"    · {r.get('nombre', r.get('sku'))}: {int(r.get('stock', 0))} uds, "
+                f"cobertura {r.get('cobertura', 0):.0f} sem, S/ {r.get('capital', 0):,.0f}"
+                for _, r in _grp.head(5).iterrows()
+            )
+            bloques.append(f"  {_linea} (S/ {_cap_lin:,.0f} en total):\n{_items}")
+        skus_txt = "\n".join(bloques)
+    else:
+        skus_txt = "\n".join(
+            f"  - {r.get('nombre', r.get('sku'))}: {int(r.get('stock_total', 0))} uds, "
+            f"cobertura {r.get('cobertura_sem', 0):.0f} sem, "
+            f"S/ {r.get('stock_valor_costo', 0):,.0f} a costo"
+            for _, r in top_skus.iterrows()
+        )
     _dest = (f"{proveedor.get('contacto','')} ({proveedor.get('empresa','')})"
              if proveedor.get('contacto') else f"representante comercial de la marca {marca_row['marca']}")
     prompt = f"""Redacta un correo al representante de la marca {marca_row['marca']} en Ripley.
@@ -264,13 +320,14 @@ SITUACIÓN (datos reales del inventario):
 - Sell-through: {marca_row['sell_through']:.0f}% (bajo)
 - Margen efectivo actual: {marca_row.get('margen_efectivo', 0):.0f}%
 
-SKUs con más capital parado:
+Detalle por línea de producto (SKUs prioritarios a revisar):
 {skus_txt}
 
 PEDIDO: solicitar apoyo comercial para liquidar este stock — rebate (descuento
 post-compra), apoyo de markdown (que la marca cofinancie la rebaja de precio),
-o devolución parcial. Propón una reunión para revisar opciones. Tono colaborativo:
-es una relación de largo plazo, no un reclamo."""
+o devolución parcial. Menciona que el detalle está desglosado POR LÍNEA de
+producto para facilitar la conversación. Propón una reunión para revisar
+opciones línea por línea. Tono colaborativo: es una relación de largo plazo."""
     return {**_parse_correo(_call_claude(prompt)),
             "para": proveedor.get("email", ""), "marca": marca_row['marca'],
             "tipo": "capital_parado"}
