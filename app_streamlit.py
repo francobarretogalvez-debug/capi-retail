@@ -2484,11 +2484,15 @@ elif nav_page == "🩺 Salud del Stock":
         else:
             _hs_sem = _hs_weeks[-1]
             _hs_df = snapshots_engine.api.get_snapshot(_hs_sem)
+            # Filtrar a marcas con presencia real (saca colas residuales: Arrow,
+            # Brooksfield, Penguin, Psycho Bunny, etc. que ensucian el análisis)
+            if _hs_df is not None and not _hs_df.empty and 'marca' in _hs_df.columns:
+                _hs_df = _hs_df[_hs_df['marca'].str.upper().str.strip().isin(agente_terceras.MARCAS_CON_PRESENCIA)].copy()
 
             if _hs_df is None or _hs_df.empty:
                 st.warning(f"Snapshot de semana {_hs_sem} esta vacio.")
             else:
-                st.caption(f"Semana: {_hs_sem} | {len(_hs_df):,} SKUs analizados")
+                st.caption(f"Semana: {_hs_sem} | {len(_hs_df):,} SKUs analizados (marcas con presencia)")
 
                 # Calcular scores
                 _hs_global = motor_v2.build_health_score(_hs_df)

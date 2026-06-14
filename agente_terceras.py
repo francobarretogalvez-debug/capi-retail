@@ -56,6 +56,12 @@ MARCAS_PROPIAS_SET = {
     'OSCAR DE LA RENTA', 'US POLO', 'NAUTICA',
 }
 
+# Marcas CON presencia real en Ripley = propias ∪ terceras del agente (14).
+# Todo lo demás en la base son colas residuales / descontinuadas / errores de
+# catálogo (Arrow, Brooksfield, Penguin, Psycho Bunny, etc.) que ensucian los
+# análisis agregados. Usar para filtrar Salud del Stock y rankings.
+MARCAS_CON_PRESENCIA = MARCAS_PROPIAS_SET | MARCAS_AGENTE
+
 SYSTEM_PROMPT_CORREO = """Eres el asistente de un Senior Fashion Buyer de Ripley (retail de moda, Perú).
 Redactas correos comerciales a proveedores y representantes de marca: profesionales,
 directos, cordiales, en español peruano de negocios. Sin relleno ni adjetivos vacíos.
