@@ -4312,6 +4312,13 @@ elif nav_page == "🚚 Predistribución Propias":
     st.caption("Gaps de distribución (tiendas faltantes) y stock retenido en CD, filtrado a marcas propias.")
     _MARCAS_P = agente_terceras.MARCAS_PROPIAS_SET
     _pp_gaps = df_gaps_dist[df_gaps_dist['marca'].str.upper().str.strip().isin(_MARCAS_P)].copy() if not df_gaps_dist.empty and 'marca' in df_gaps_dist.columns else pd.DataFrame()
+    # Limpieza (Franco): un gap solo es accionable si hay stock en CD para enviar
+    # y el producto es reciente (≤8 sem); lo demás es ruido / ya pasó su momento.
+    if not _pp_gaps.empty:
+        if 'stock_cd' in _pp_gaps.columns:
+            _pp_gaps = _pp_gaps[_pp_gaps['stock_cd'] > 0]
+        if 'edad_semanas' in _pp_gaps.columns:
+            _pp_gaps = _pp_gaps[_pp_gaps['edad_semanas'].fillna(999) <= 8]
     _pp_ret = df_retenidos_cd[df_retenidos_cd['marca'].str.upper().str.strip().isin(_MARCAS_P)].copy() if not df_retenidos_cd.empty and 'marca' in df_retenidos_cd.columns else pd.DataFrame()
     if _pp_gaps.empty and _pp_ret.empty:
         st.info("No hay datos de predistribución para marcas propias con la base actual.")
