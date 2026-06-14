@@ -140,58 +140,6 @@ def top_skus_marca(df_cob: pd.DataFrame, marca: str, n: int = 5) -> pd.DataFrame
     return g.head(n).reset_index(drop=True)
 
 
-def ranking_complicados_terceras(df_cob: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
-    """Top N SKUs más complicados POR CADA marca tercera, apilados.
-    'Complicado' = score capital × cobertura (mucha plata parada que rota lento).
-    Pensado para adjuntar al proveedor el detalle de su marca. Consolida a SKU
-    único (suma de todas las tiendas)."""
-    if df_cob.empty or 'marca' not in df_cob.columns:
-        return pd.DataFrame()
-    terc = df_cob[df_cob['marca'].str.upper().str.strip().isin(MARCAS_AGENTE)].copy()
-    if terc.empty:
-        return pd.DataFrame()
-
-    agg = {}
-    if 'nombre' in terc.columns:            agg['nombre'] = ('nombre', 'first')
-    if 'stock_total' in terc.columns:       agg['stock'] = ('stock_total', 'sum')
-    if 'cobertura_sem' in terc.columns:     agg['cobertura'] = ('cobertura_sem', 'mean')
-    if 'pct_descuento' in terc.columns:     agg['dscto'] = ('pct_descuento', 'max')
-    if 'stock_valor_costo' in terc.columns: agg['capital'] = ('stock_valor_costo', 'sum')
-    if 'prom_vta_uds' in terc.columns:      agg['vta_sem'] = ('prom_vta_uds', 'sum')
-    if not agg:
-        return pd.DataFrame()
-
-    g = terc.groupby(['marca', 'sku']).agg(**agg).reset_index()
-    g['cobertura'] = g.get('cobertura', pd.Series(0, index=g.index)).fillna(0)
-    g['capital'] = g.get('capital', pd.Series(0, index=g.index)).fillna(0)
-    # Score de complicación: plata parada ponderada por lentitud de rotación
-    g['score'] = (g['capital'] * g['cobertura']).round(0)
-    g = g[g['score'] > 0]  # descartar ruido (sin capital o sin cobertura)
-    if g.empty:
-        return g
-    g = g.sort_values(['marca', 'score'], ascending=[True, False])
-    g = g.groupby('marca', sort=True).head(top_n).reset_index(drop=True)
-
-    # Criticidad relativa dentro de cada marca (por tercios del ranking de score):
-    # en la lista de cada proveedor, sus 🔴 son los peores, luego 🟠, luego 🟡.
-    def _crit_marca(grp):
-        n = len(grp)
-        etiquetas = []
-        for i in range(n):
-            if i < n / 3:
-                etiquetas.append("🔴 Crítico")
-            elif i < 2 * n / 3:
-                etiquetas.append("🟠 Alto")
-            else:
-                etiquetas.append("🟡 Medio")
-        grp = grp.copy()
-        grp["criticidad"] = etiquetas
-        return grp
-
-    g = g.groupby('marca', group_keys=False, sort=False).apply(_crit_marca)
-    return g.reset_index(drop=True)
-
-
 def top5_por_marca_linea(df_cob: pd.DataFrame, top_n: int = 5,
                          min_cobertura: float = 16.0, min_edad: float = 3.0) -> pd.DataFrame:
     """Top N SKUs a revisar por cada marca×línea (terceras): capital parado +
@@ -229,7 +177,26 @@ def top5_por_marca_linea(df_cob: pd.DataFrame, top_n: int = 5,
         return g
     g['score'] = (g['capital'] * g['cobertura']).round(0)
     g = g.sort_values(['marca', 'categoria', 'score'], ascending=[True, True, False])
-    return g.groupby(['marca', 'categoria'], sort=True).head(top_n).reset_index(drop=True)
+    g = g.groupby(['marca', 'categoria'], sort=True).head(top_n).reset_index(drop=True)
+
+    # Criticidad relativa dentro de cada marca×línea (tercios del ranking):
+    # de los top 5 de cada línea, los 🔴 son los peores, luego 🟠, luego 🟡.
+    def _crit(grp):
+        n = len(grp)
+        et = []
+        for i in range(n):
+            if i < n / 3:
+                et.append("🔴 Crítico")
+            elif i < 2 * n / 3:
+                et.append("🟠 Alto")
+            else:
+                et.append("🟡 Medio")
+        grp = grp.copy()
+        grp["criticidad"] = et
+        return grp
+
+    g = g.groupby(['marca', 'categoria'], group_keys=False, sort=False).apply(_crit)
+    return g.reset_index(drop=True)
 
 
 def detectar_quiebre_tercera(df_cob: pd.DataFrame, min_vta: float = 1.0) -> pd.DataFrame:
