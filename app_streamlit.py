@@ -879,6 +879,27 @@ with st.sidebar:
                 st.session_state["nav_page"] = _full
                 st.rerun()
 
+        # ── GESTIÓN DE MARCAS PROPIAS ──
+        # Mismo cluster que terceras, filtrado a las 7 marcas propias.
+        if not _DEMO_MODE:
+            st.markdown('<div class="sidebar-section-label">GESTIÓN DE MARCAS PROPIAS</div>', unsafe_allow_html=True)
+            _NAV_PROPIAS = [
+                ("📦", "Reposición Propias"),
+                ("🔄", "Transferencias Propias"),
+                ("💰", "Gestión de Precios Propias"),
+                ("🚚", "Predistribución Propias"),
+            ]
+            for _icon, _label in _NAV_PROPIAS:
+                _full = f"{_icon} {_label}"
+                _is_active = st.session_state["nav_page"] == _full
+                if st.button(
+                    _full, key=f"nav_{_label}",
+                    use_container_width=True,
+                    type="primary" if _is_active else "secondary",
+                ):
+                    st.session_state["nav_page"] = _full
+                    st.rerun()
+
         # ── GESTIÓN DE MARCAS TERCERAS ──
         # Cluster end-to-end de terceras: detectar (Agente) → reponer/transferir
         # (filtrado a las 10 marcas) → pricing por pirámide de antigüedad.
@@ -891,27 +912,6 @@ with st.sidebar:
                 ("💰", "Gestión de Precios Terceras"),
             ]
             for _icon, _label in _NAV_TERCERAS:
-                _full = f"{_icon} {_label}"
-                _is_active = st.session_state["nav_page"] == _full
-                if st.button(
-                    _full, key=f"nav_{_label}",
-                    use_container_width=True,
-                    type="primary" if _is_active else "secondary",
-                ):
-                    st.session_state["nav_page"] = _full
-                    st.rerun()
-
-        # ── GESTIÓN DE MARCAS PROPIAS ──
-        # Mismo cluster que terceras, filtrado a las 7 marcas propias.
-        if not _DEMO_MODE:
-            st.markdown('<div class="sidebar-section-label">GESTIÓN DE MARCAS PROPIAS</div>', unsafe_allow_html=True)
-            _NAV_PROPIAS = [
-                ("📦", "Reposición Propias"),
-                ("🔄", "Transferencias Propias"),
-                ("💰", "Gestión de Precios Propias"),
-                ("🚚", "Predistribución Propias"),
-            ]
-            for _icon, _label in _NAV_PROPIAS:
                 _full = f"{_icon} {_label}"
                 _is_active = st.session_state["nav_page"] == _full
                 if st.button(
