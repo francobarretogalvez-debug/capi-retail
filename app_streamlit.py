@@ -858,6 +858,7 @@ with st.sidebar:
             ("📲", "Briefing Semanal"),
             ("📝", "Diario de Gestión"),
             ("📊", "Gestión por Antigüedad"),
+            ("📈", "Cobertura x Tienda"),
         ]
         if _DEMO_MODE:
             # Demo: solo las vistas protagonistas del guion de 3 minutos
@@ -921,48 +922,11 @@ with st.sidebar:
                     st.session_state["nav_page"] = _full
                     st.rerun()
 
-        # ── GESTIÓN DE STOCK ──
-        # (Reposición, Transferencias y Predistribución se movieron a las
-        #  secciones de marca; aquí queda la cobertura general. Sobrestock y
-        #  Acciones de Stock siguen calculándose en el motor, sin vista.)
-        _NAV_STOCK = [
-            ("📈", "Cobertura"),
-        ]
-        if _DEMO_MODE:
-            _NAV_STOCK = []
-
-        if _NAV_STOCK:
-            st.markdown('<div class="sidebar-section-label">GESTIÓN DE STOCK</div>', unsafe_allow_html=True)
-        for _icon, _label in _NAV_STOCK:
-            _full = f"{_icon} {_label}"
-            _is_active = st.session_state["nav_page"] == _full
-            if st.button(
-                _full, key=f"nav_{_label}",
-                use_container_width=True,
-                type="primary" if _is_active else "secondary",
-            ):
-                st.session_state["nav_page"] = _full
-                st.rerun()
+        # (Gestión de Stock y Gestión Comercial eliminadas del menú: Cobertura
+        #  pasó a Visión General como "Cobertura x Tienda" y Acciones Precio se
+        #  quitó. Sus cálculos siguen en el motor.)
 
         if not _DEMO_MODE:
-            # ── GESTIÓN COMERCIAL ──
-            st.markdown('<div class="sidebar-section-label">GESTIÓN COMERCIAL</div>', unsafe_allow_html=True)
-
-            _NAV_COMERCIAL = [
-                ("💰", "Acciones Precio"),
-            ]
-
-            for _icon, _label in _NAV_COMERCIAL:
-                _full = f"{_icon} {_label}"
-                _is_active = st.session_state["nav_page"] == _full
-                if st.button(
-                    _full, key=f"nav_{_label}",
-                    use_container_width=True,
-                    type="primary" if _is_active else "secondary",
-                ):
-                    st.session_state["nav_page"] = _full
-                    st.rerun()
-
             # ── ANÁLISIS PREDICTIVO ──
             st.markdown('<div class="sidebar-section-label">ANÁLISIS PREDICTIVO</div>', unsafe_allow_html=True)
 
@@ -4016,7 +3980,7 @@ elif nav_page == "🏷️ Marcas Terceras":
 # ─── TAB 1: Cobertura ─────────────────────────────────────────
 #  Resumen por MARCA con desplegable por TIENDA
 
-elif nav_page == "📈 Cobertura" or nav_page == "📊 Cobertura":
+elif nav_page == "📈 Cobertura x Tienda":
     st.markdown("#### 📊 Cobertura por Marca")
     st.caption("Resumen por marca con desglose por tienda. Cobertura = Stock Total / Vta Semanal.")
 
