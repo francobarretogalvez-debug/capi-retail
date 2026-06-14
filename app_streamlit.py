@@ -857,6 +857,7 @@ with st.sidebar:
             ("🩺", "Salud del Stock"),
             ("📲", "Briefing Semanal"),
             ("📝", "Diario de Gestión"),
+            ("📊", "Gestión por Antigüedad"),
         ]
         if _DEMO_MODE:
             # Demo: solo las vistas protagonistas del guion de 3 minutos
@@ -899,14 +900,33 @@ with st.sidebar:
                     st.session_state["nav_page"] = _full
                     st.rerun()
 
+        # ── GESTIÓN DE MARCAS PROPIAS ──
+        # Mismo cluster que terceras, filtrado a las 7 marcas propias.
+        if not _DEMO_MODE:
+            st.markdown('<div class="sidebar-section-label">GESTIÓN DE MARCAS PROPIAS</div>', unsafe_allow_html=True)
+            _NAV_PROPIAS = [
+                ("📦", "Reposición Propias"),
+                ("🔄", "Transferencias Propias"),
+                ("💰", "Gestión de Precios Propias"),
+                ("🚚", "Predistribución Propias"),
+            ]
+            for _icon, _label in _NAV_PROPIAS:
+                _full = f"{_icon} {_label}"
+                _is_active = st.session_state["nav_page"] == _full
+                if st.button(
+                    _full, key=f"nav_{_label}",
+                    use_container_width=True,
+                    type="primary" if _is_active else "secondary",
+                ):
+                    st.session_state["nav_page"] = _full
+                    st.rerun()
+
         # ── GESTIÓN DE STOCK ──
-        # (Sobrestock y Acciones de Stock ocultos del menú — su cálculo en el
-        #  motor sigue activo, solo se quitó la vista de presentación.)
+        # (Reposición, Transferencias y Predistribución se movieron a las
+        #  secciones de marca; aquí queda la cobertura general. Sobrestock y
+        #  Acciones de Stock siguen calculándose en el motor, sin vista.)
         _NAV_STOCK = [
-            ("📦", "Reposición"),
             ("📈", "Cobertura"),
-            ("🔄", "Transferencias"),
-            ("🚚", "Predistribución"),
         ]
         if _DEMO_MODE:
             _NAV_STOCK = []
@@ -929,7 +949,6 @@ with st.sidebar:
             st.markdown('<div class="sidebar-section-label">GESTIÓN COMERCIAL</div>', unsafe_allow_html=True)
 
             _NAV_COMERCIAL = [
-                ("📊", "Gestión por Antigüedad"),
                 ("💰", "Acciones Precio"),
             ]
 
@@ -4169,6 +4188,155 @@ elif nav_page == "📈 Cobertura" or nav_page == "📊 Cobertura":
                     st.caption("Sin columna Marca en los datos")
 
 
+
+
+# ═══════════════════════════════════════════════════════════════
+#  GESTIÓN DE MARCAS PROPIAS — reposición / transferencias / precios /
+#  predistribución filtrados a las 7 marcas propias.
+# ═══════════════════════════════════════════════════════════════
+
+elif nav_page == "📦 Reposición Propias":
+    st.markdown(f'<div class="section-header"><h3>📦 Reposición Propias</h3><span class="live-badge">MARCAS PROPIAS</span></div>', unsafe_allow_html=True)
+    _MARCAS_P = agente_terceras.MARCAS_PROPIAS_SET
+    _rp = df_rep[df_rep['marca'].str.upper().str.strip().isin(_MARCAS_P)].copy() if not df_rep.empty and 'marca' in df_rep.columns else pd.DataFrame()
+    if _rp.empty:
+        st.info("No hay reposiciones sugeridas para las marcas propias con la base actual.")
+    else:
+        _rp = _rp[_rp['a_reponer'] > 0] if 'a_reponer' in _rp.columns else _rp
+        if 'sku' in df_cob.columns:
+            if 'margen_efectivo' in df_cob.columns:
+                _mgp = df_cob.drop_duplicates('sku').set_index('sku')['margen_efectivo']
+                _rp['margen_efectivo'] = (_rp['sku'].map(_mgp).fillna(0) * 100).round(1)
+            if 'edad_semanas' in df_cob.columns:
+                _rp['edad'] = _rp['sku'].map(df_cob.groupby('sku')['edad_semanas'].max())
+        st.caption(f"{len(_rp):,} líneas en {_rp['marca'].nunique()} marcas propias · {int(_rp['a_reponer'].sum()):,} uds a reponer")
+        _rp_sel = st.selectbox("Marca", ["Todas"] + sorted(_rp['marca'].unique().tolist()), key="rp_marca")
+        _rp_v = _rp if _rp_sel == "Todas" else _rp[_rp['marca'] == _rp_sel]
+        _rp_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'tienda', 'edad', 'stock_actual',
+                                'prom_vta_sem', 'cobertura_actual', 'a_reponer', 'cob_post_rep', 'stock_cd',
+                                'pct_descuento', 'margen_efectivo', 'urgencia'] if c in _rp_v.columns]
+        _rp_disp = _rp_v[_rp_cols].rename(columns={
+            'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea', 'edad': 'Edad (sem)',
+            'tienda': 'Tienda', 'stock_actual': 'Stock', 'prom_vta_sem': 'Vta/sem', 'cobertura_actual': 'Cob (sem)',
+            'a_reponer': 'A reponer (uds)', 'cob_post_rep': 'Cob post', 'stock_cd': 'Stock CD',
+            'pct_descuento': 'Dscto', 'margen_efectivo': 'Margen efect. %', 'urgencia': 'Urgencia',
+        })
+        st.dataframe(_rp_disp.style.format({'Vta/sem': '{:.1f}', 'Cob (sem)': '{:.1f}', 'Cob post': '{:.1f}', 'Dscto': '{:.0%}'}, na_rep="—"),
+                     use_container_width=True, hide_index=True, height=440)
+        _rp_buf = io.BytesIO()
+        with pd.ExcelWriter(_rp_buf, engine='openpyxl') as _w:
+            _rp_v[_rp_cols].to_excel(_w, sheet_name='Reposicion Propias', index=False)
+        _rp_buf.seek(0)
+        st.download_button("📥 Descargar reposición propias (.xlsx)", data=_rp_buf.getvalue(),
+                           file_name="Capi_Reposicion_Propias.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_repo_propias")
+
+
+elif nav_page == "🔄 Transferencias Propias":
+    st.markdown(f'<div class="section-header"><h3>🔄 Transferencias Propias</h3><span class="live-badge">MARCAS PROPIAS</span></div>', unsafe_allow_html=True)
+    _MARCAS_P = agente_terceras.MARCAS_PROPIAS_SET
+    if df_trans.empty or 'sku' not in df_trans.columns:
+        st.info("No hay transferencias sugeridas con la base actual.")
+    else:
+        _s2m_p = dict(zip(df_cob['sku'], df_cob['marca'].str.upper().str.strip())) if 'sku' in df_cob.columns and 'marca' in df_cob.columns else {}
+        _tp = df_trans.copy()
+        _tp['_marca'] = _tp['sku'].map(_s2m_p)
+        _tp = _tp[_tp['_marca'].isin(_MARCAS_P)]
+        if _tp.empty:
+            st.info("No hay transferencias sugeridas para las marcas propias con la base actual.")
+        else:
+            st.caption(f"{len(_tp):,} movimientos en marcas propias · {int(_tp['uds_transferir'].sum()):,} unidades")
+            _tp_cols = [c for c in ['_marca', 'sku', 'nombre', 'tienda_origen', 'tienda_destino', 'uds_transferir',
+                                    'cob_origen_pre', 'cob_destino_pre', 'cob_origen_post', 'cob_destino_post', 'motivo'] if c in _tp.columns]
+            _tp_disp = _tp[_tp_cols].rename(columns={
+                '_marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'tienda_origen': 'Tienda Origen',
+                'tienda_destino': 'Tienda Destino', 'uds_transferir': 'Uds a Transferir',
+                'cob_origen_pre': 'Cob Origen (pre)', 'cob_destino_pre': 'Cob Destino (pre)',
+                'cob_origen_post': 'Cob Origen (post)', 'cob_destino_post': 'Cob Destino (post)', 'motivo': 'Motivo',
+            })
+            st.dataframe(_tp_disp.style.format({'Cob Origen (pre)': '{:.1f}', 'Cob Destino (pre)': '{:.1f}', 'Cob Origen (post)': '{:.1f}', 'Cob Destino (post)': '{:.1f}'}, na_rep="—"),
+                         use_container_width=True, hide_index=True, height=440)
+            _tp_buf = io.BytesIO()
+            with pd.ExcelWriter(_tp_buf, engine='openpyxl') as _w:
+                _tp[_tp_cols].to_excel(_w, sheet_name='Transferencias Propias', index=False)
+            _tp_buf.seek(0)
+            st.download_button("📥 Descargar transferencias propias (.xlsx)", data=_tp_buf.getvalue(),
+                               file_name="Capi_Transferencias_Propias.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_trans_propias")
+
+
+elif nav_page == "💰 Gestión de Precios Propias":
+    st.markdown(f'<div class="section-header"><h3>💰 Gestión de Precios Propias</h3><span class="live-badge">MARCAS PROPIAS</span></div>', unsafe_allow_html=True)
+    st.caption("Descuento sugerido por antigüedad (misma pirámide), aplicado a las 7 marcas propias.")
+    _gpp = agente_terceras.sugerencias_precio_terceras(df_cob, marcas=agente_terceras.MARCAS_PROPIAS_SET)
+    if _gpp.empty:
+        st.info("No hay SKUs de marcas propias para analizar con la base actual.")
+    else:
+        _gpp_subir = int((_gpp['gap'] >= 0.05).sum())
+        _gpp_sobre = int((_gpp['gap'] <= -0.05).sum())
+        _gpp_ok = int(len(_gpp) - _gpp_subir - _gpp_sobre)
+        _gppc1, _gppc2, _gppc3 = st.columns(3)
+        _gppc1.markdown(f"""<div style="background:#FEF2F2; border-radius:12px; padding:14px 18px; border-left:4px solid #DC2626;">
+            <div style="font-size:0.75rem; color:var(--capi-text2);">SKUs a subir descuento</div>
+            <div style="font-size:1.5rem; font-weight:700; color:#DC2626;">{_gpp_subir:,}</div></div>""", unsafe_allow_html=True)
+        _gppc2.markdown(f"""<div style="background:#FFFBEB; border-radius:12px; padding:14px 18px; border-left:4px solid #D97706;">
+            <div style="font-size:0.75rem; color:var(--capi-text2);">Sobre-descontados</div>
+            <div style="font-size:1.5rem; font-weight:700; color:#D97706;">{_gpp_sobre:,}</div></div>""", unsafe_allow_html=True)
+        _gppc3.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:14px 18px; border-left:4px solid #059669;">
+            <div style="font-size:0.75rem; color:var(--capi-text2);">Alineados</div>
+            <div style="font-size:1.5rem; font-weight:700; color:#059669;">{_gpp_ok:,}</div></div>""", unsafe_allow_html=True)
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        _gpp_filtro = st.radio("Ver", ["Solo a subir descuento", "Todos"], horizontal=True, key="gpp_filtro")
+        _gpp_v = _gpp[_gpp['gap'] >= 0.05] if _gpp_filtro.startswith("Solo") else _gpp
+        _gpp_sel = st.selectbox("Marca", ["Todas"] + sorted(_gpp_v['marca'].unique().tolist()), key="gpp_marca")
+        if _gpp_sel != "Todas":
+            _gpp_v = _gpp_v[_gpp_v['marca'] == _gpp_sel]
+        _gpp_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'edad', 'dscto_actual', 'dscto_sugerido', 'tipo', 'accion', 'capital'] if c in _gpp_v.columns]
+        _gpp_disp = _gpp_v[_gpp_cols].rename(columns={
+            'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea', 'edad': 'Edad (sem)',
+            'dscto_actual': 'Dscto actual', 'dscto_sugerido': 'Dscto sugerido', 'tipo': 'Tipo', 'accion': 'Acción', 'capital': 'Capital S/',
+        })
+        st.dataframe(_gpp_disp.head(300).style.format({'Dscto actual': '{:.0%}', 'Dscto sugerido': '{:.0%}', 'Capital S/': 'S/ {:,.0f}'}, na_rep="—"),
+                     use_container_width=True, hide_index=True, height=440)
+        _gpp_buf = io.BytesIO()
+        with pd.ExcelWriter(_gpp_buf, engine='openpyxl') as _w:
+            _gpp_v[_gpp_cols].to_excel(_w, sheet_name='Precios Propias', index=False)
+        _gpp_buf.seek(0)
+        st.download_button("📥 Descargar sugerencias de precio propias (.xlsx)", data=_gpp_buf.getvalue(),
+                           file_name="Capi_Precios_Propias.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_precios_propias")
+
+
+elif nav_page == "🚚 Predistribución Propias":
+    st.markdown(f'<div class="section-header"><h3>🚚 Predistribución Propias</h3><span class="live-badge">MARCAS PROPIAS</span></div>', unsafe_allow_html=True)
+    st.caption("Gaps de distribución (tiendas faltantes) y stock retenido en CD, filtrado a marcas propias.")
+    _MARCAS_P = agente_terceras.MARCAS_PROPIAS_SET
+    _pp_gaps = df_gaps_dist[df_gaps_dist['marca'].str.upper().str.strip().isin(_MARCAS_P)].copy() if not df_gaps_dist.empty and 'marca' in df_gaps_dist.columns else pd.DataFrame()
+    _pp_ret = df_retenidos_cd[df_retenidos_cd['marca'].str.upper().str.strip().isin(_MARCAS_P)].copy() if not df_retenidos_cd.empty and 'marca' in df_retenidos_cd.columns else pd.DataFrame()
+    if _pp_gaps.empty and _pp_ret.empty:
+        st.info("No hay datos de predistribución para marcas propias con la base actual.")
+    else:
+        if not _pp_gaps.empty:
+            st.markdown("##### Gaps de distribución — SKUs que faltan en tiendas")
+            _ppg_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'edad_semanas', 'stock_cd',
+                                     'n_tiendas_esperadas', 'n_tiendas_presentes', 'n_tiendas_faltantes', 'pct_cobertura_dist'] if c in _pp_gaps.columns]
+            st.dataframe(_pp_gaps[_ppg_cols].rename(columns={
+                'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea', 'edad_semanas': 'Edad (sem)',
+                'stock_cd': 'Stock CD', 'n_tiendas_esperadas': 'Tiendas esperadas', 'n_tiendas_presentes': 'Tiendas presentes',
+                'n_tiendas_faltantes': 'Tiendas faltantes', 'pct_cobertura_dist': '% cobertura dist',
+            }).style.format({'% cobertura dist': '{:.0%}'}, na_rep="—"), use_container_width=True, hide_index=True, height=400)
+        if not _pp_ret.empty:
+            st.markdown("##### Stock retenido en CD")
+            st.dataframe(_pp_ret.rename(columns={'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto'}),
+                         use_container_width=True, hide_index=True, height=300)
+        _pp_buf = io.BytesIO()
+        with pd.ExcelWriter(_pp_buf, engine='openpyxl') as _w:
+            if not _pp_gaps.empty: _pp_gaps.to_excel(_w, sheet_name='Gaps Distribucion', index=False)
+            if not _pp_ret.empty: _pp_ret.to_excel(_w, sheet_name='Retenidos CD', index=False)
+        _pp_buf.seek(0)
+        st.download_button("📥 Descargar predistribución propias (.xlsx)", data=_pp_buf.getvalue(),
+                           file_name="Capi_Predistribucion_Propias.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_predist_propias")
 
 
 # ═══════════════════════════════════════════════════════════════

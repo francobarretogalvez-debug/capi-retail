@@ -49,6 +49,13 @@ MARCAS_AGENTE = {
     'SILBON', 'NORTON', 'OSCAR DE LA RENTA', 'US POLO', 'NAUTICA',
 }
 
+# Universo de marcas PROPIAS (las 7). Oscar de la Renta, US Polo y Nautica
+# están también en MARCAS_AGENTE (Franco las gestiona en ambos contextos).
+MARCAS_PROPIAS_SET = {
+    'MARQUIS', 'NAVIGATA', 'CACHAREL', 'SPAVALDI',
+    'OSCAR DE LA RENTA', 'US POLO', 'NAUTICA',
+}
+
 SYSTEM_PROMPT_CORREO = """Eres el asistente de un Senior Fashion Buyer de Ripley (retail de moda, Perú).
 Redactas correos comerciales a proveedores y representantes de marca: profesionales,
 directos, cordiales, en español peruano de negocios. Sin relleno ni adjetivos vacíos.
@@ -216,14 +223,15 @@ def descuento_sugerido(edad_sem: float) -> tuple:
     return 0.80, "Fijo"
 
 
-def sugerencias_precio_terceras(df_cob: pd.DataFrame) -> pd.DataFrame:
-    """Para cada SKU de marca tercera: descuento sugerido por su antigüedad
-    (pirámide) vs descuento actual → acción de precio. Nivel SKU (pricing
-    omnicanal: el descuento es parejo en todas las tiendas)."""
+def sugerencias_precio_terceras(df_cob: pd.DataFrame, marcas: set = None) -> pd.DataFrame:
+    """Para cada SKU del universo `marcas`: descuento sugerido por su antigüedad
+    (misma pirámide) vs descuento actual → acción de precio. Nivel SKU (pricing
+    omnicanal). `marcas` por defecto = terceras; pasar MARCAS_PROPIAS_SET para propias."""
+    marcas = marcas if marcas is not None else MARCAS_AGENTE
     _req = {'marca', 'sku', 'edad_semanas', 'pct_descuento'}
     if df_cob.empty or not _req.issubset(df_cob.columns):
         return pd.DataFrame()
-    terc = df_cob[df_cob['marca'].str.upper().str.strip().isin(MARCAS_AGENTE)].copy()
+    terc = df_cob[df_cob['marca'].str.upper().str.strip().isin(marcas)].copy()
     if terc.empty:
         return pd.DataFrame()
 
