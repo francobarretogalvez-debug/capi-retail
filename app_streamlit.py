@@ -1480,6 +1480,49 @@ _estado_color_map = {
     "MUERTO":       STATUS_MUERTO,
 }
 
+
+def _build_excel_terceras(_dfc, _dfr, _dft):
+    """Excel-paquete de Marcas Terceras: una pestaña por componente de la
+    sección (Capital Parado, SKUs Críticos, Quiebres, Reposición,
+    Transferencias, Precios). Sin cache: se genera fresco al descargar."""
+    _M = agente_terceras.MARCAS_AGENTE
+    _buf = io.BytesIO()
+    with pd.ExcelWriter(_buf, engine="openpyxl") as _w:
+        # 1. Capital parado (resumen por marca)
+        _cap = agente_terceras.detectar_capital_parado(_dfc)
+        (_cap if not _cap.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Capital Parado", index=False)
+        # 2. SKUs críticos por marca×línea (con criticidad)
+        _crit = agente_terceras.top5_por_marca_linea(_dfc, top_n=5)
+        (_crit if not _crit.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="SKUs Criticos", index=False)
+        # 3. Quiebres de terceras (reorder)
+        _q = agente_terceras.detectar_quiebre_tercera(_dfc)
+        (_q if not _q.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Quiebres", index=False)
+        # 4. Reposición terceras (con margen + edad cruzados)
+        _rep = _dfr[_dfr['marca'].str.upper().str.strip().isin(_M)].copy() if not _dfr.empty and 'marca' in _dfr.columns else pd.DataFrame()
+        if not _rep.empty:
+            _rep = _rep[_rep['a_reponer'] > 0] if 'a_reponer' in _rep.columns else _rep
+            if 'sku' in _dfc.columns and 'margen_efectivo' in _dfc.columns:
+                _mg = _dfc.drop_duplicates('sku').set_index('sku')['margen_efectivo']
+                _rep['margen_efectivo_pct'] = (_rep['sku'].map(_mg).fillna(0) * 100).round(1)
+            if 'sku' in _dfc.columns and 'edad_semanas' in _dfc.columns:
+                _rep['edad_sem'] = _rep['sku'].map(_dfc.groupby('sku')['edad_semanas'].max())
+        (_rep if not _rep.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Reposicion", index=False)
+        # 5. Transferencias terceras (cruce por sku)
+        if not _dft.empty and 'sku' in _dft.columns and 'marca' in _dfc.columns:
+            _s2m = dict(zip(_dfc['sku'], _dfc['marca'].str.upper().str.strip()))
+            _tr = _dft.copy()
+            _tr['marca'] = _tr['sku'].map(_s2m)
+            _tr = _tr[_tr['marca'].isin(_M)]
+        else:
+            _tr = pd.DataFrame()
+        (_tr if not _tr.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Transferencias", index=False)
+        # 6. Gestión de precios (pirámide)
+        _pr = agente_terceras.sugerencias_precio_terceras(_dfc)
+        (_pr if not _pr.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Precios", index=False)
+    _buf.seek(0)
+    return _buf.read()
+
+
 if nav_page == "🏠 Dashboard":
     st.markdown(f'<div class="section-header"><h3>Dashboard</h3><span class="live-badge">LIVE</span></div>', unsafe_allow_html=True)
 
@@ -4299,6 +4342,17 @@ elif nav_page == "🤝 Agente Terceras":
     st.markdown(f'<div class="section-header"><h3>🤝 Agente Terceras</h3><span class="live-badge">AGENTE</span></div>', unsafe_allow_html=True)
     st.caption("Detecta oportunidades con marcas terceras y redacta el correo al proveedor. "
                "El agente genera un BORRADOR — tú lo revisas y lo envías. Nunca manda nada solo.")
+
+    # Paquete de trabajo: todo el análisis de terceras en un Excel
+    st.download_button(
+        "📦 Descargar TODO el análisis de Marcas Terceras (.xlsx)",
+        data=_build_excel_terceras(df_cob, df_rep, df_trans),
+        file_name="Capi_Analisis_Marcas_Terceras.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True, key="dl_pack_terceras",
+        help="6 pestañas: Capital Parado · SKUs Críticos · Quiebres · Reposición · Transferencias · Precios",
+    )
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
     _at_prov = agente_terceras.cargar_proveedores()
 
