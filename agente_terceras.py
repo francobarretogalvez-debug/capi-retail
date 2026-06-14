@@ -159,7 +159,26 @@ def ranking_complicados_terceras(df_cob: pd.DataFrame, top_n: int = 20) -> pd.Da
     if g.empty:
         return g
     g = g.sort_values(['marca', 'score'], ascending=[True, False])
-    return g.groupby('marca', sort=True).head(top_n).reset_index(drop=True)
+    g = g.groupby('marca', sort=True).head(top_n).reset_index(drop=True)
+
+    # Criticidad relativa dentro de cada marca (por tercios del ranking de score):
+    # en la lista de cada proveedor, sus 🔴 son los peores, luego 🟠, luego 🟡.
+    def _crit_marca(grp):
+        n = len(grp)
+        etiquetas = []
+        for i in range(n):
+            if i < n / 3:
+                etiquetas.append("🔴 Crítico")
+            elif i < 2 * n / 3:
+                etiquetas.append("🟠 Alto")
+            else:
+                etiquetas.append("🟡 Medio")
+        grp = grp.copy()
+        grp["criticidad"] = etiquetas
+        return grp
+
+    g = g.groupby('marca', group_keys=False, sort=False).apply(_crit_marca)
+    return g.reset_index(drop=True)
 
 
 def detectar_quiebre_tercera(df_cob: pd.DataFrame, min_vta: float = 1.0) -> pd.DataFrame:
