@@ -4006,217 +4006,53 @@ elif nav_page == "🏷️ Marcas Terceras":
 #  Resumen por MARCA con desplegable por TIENDA
 
 elif nav_page == "📈 Cobertura x Tienda":
-    st.markdown("#### 📊 Cobertura por Marca")
-    st.caption("Resumen por marca con desglose por tienda. Cobertura = Stock Total / Vta Semanal.")
+    st.markdown(f'<div class="section-header"><h3>📈 Cobertura x Tienda</h3><span class="live-badge">POR TIENDA</span></div>', unsafe_allow_html=True)
+    st.caption("Cobertura por tienda (Stock Total / Venta Semanal). Filtra por marca para revisar marca por marca, "
+               "y ordena de mayor a menor o viceversa.")
 
-    has_marca_cob = "marca" in df_cob.columns
+    _cbt_c1, _cbt_c2 = st.columns([2, 1])
+    with _cbt_c1:
+        _cbt_marcas = ["Todas las marcas"] + (sorted(df_cob["marca"].dropna().unique().tolist()) if "marca" in df_cob.columns else [])
+        _cbt_marca = st.selectbox("Marca", _cbt_marcas, key="cbt_marca")
+    with _cbt_c2:
+        _cbt_orden = st.radio("Orden", ["Mayor cobertura", "Menor cobertura"], key="cbt_orden")
 
-    # Filtros rápidos
-    _cob_fcol1, _cob_fcol2 = st.columns(2)
-    with _cob_fcol1:
-        _cob_estados = ["Todos"] + list(motor_v2.ESTADO_ORDEN.keys())
-        _f_cob_est = st.selectbox("Filtrar por Estado", _cob_estados, key="cob_resumen_est")
-    with _cob_fcol2:
-        _cob_cats = ["Todas"] + sorted(df_cob["categoria"].dropna().unique().tolist())
-        _f_cob_cat = st.selectbox("Filtrar por Categoría", _cob_cats, key="cob_resumen_cat")
+    _cbt = df_cob.copy()
+    if _cbt_marca != "Todas las marcas" and "marca" in _cbt.columns:
+        _cbt = _cbt[_cbt["marca"] == _cbt_marca]
 
-    df_cob_filt = df_cob.copy()
-    if _f_cob_est != "Todos":
-        df_cob_filt = df_cob_filt[df_cob_filt["estado"] == _f_cob_est]
-    if _f_cob_cat != "Todas":
-        df_cob_filt = df_cob_filt[df_cob_filt["categoria"] == _f_cob_cat]
-
-    if has_marca_cob:
-        # Resumen por marca
-        _cob_marca = df_cob_filt.groupby("marca").agg(
-            stock_total=("stock_total", "sum"),
-            vta_semanal=("prom_vta_uds", "sum"),
-            capital=("stock_valor_costo", "sum"),
-            n_combos=("sku", "count"),
-            n_skus=("sku", "nunique"),
-            n_tiendas=("tienda", "nunique"),
-        ).reset_index()
-        _cob_marca["cobertura"] = _cob_marca.apply(
-            lambda r: round(r["stock_total"] / r["vta_semanal"], 1) if r["vta_semanal"] > 0 else None, axis=1
-        )
-        _cob_marca = _cob_marca.sort_values("capital", ascending=False)
-
-        # Tabla resumen
-        _cob_marca_disp = _cob_marca.rename(columns={
-            "marca": "Marca", "stock_total": "Stock Uds", "capital": "Capital S/",
-            "cobertura": "Cob (sem)", "n_skus": "SKUs", "n_tiendas": "Tiendas",
-        })
-        st.dataframe(
-            _cob_marca_disp[["Marca", "Stock Uds", "Capital S/", "Cob (sem)", "SKUs", "Tiendas"]].style.format({
-                "Stock Uds": "{:,.0f}", "Capital S/": "S/ {:,.0f}", "Cob (sem)": "{:.1f}",
-            }, na_rep="—"),
-            use_container_width=True, hide_index=True,
-        )
-
-        st.markdown("---")
-        st.caption("Expande cada marca para ver el desglose por tienda:")
-
-        for _, cm in _cob_marca.iterrows():
-            _cob_label = f"{cm['cobertura']:.1f} sem" if pd.notna(cm['cobertura']) else "—"
-            with st.expander(f"📊 {cm['marca']} — Cob: {_cob_label} · Capital: S/ {cm['capital']:,.0f} · {int(cm['n_skus'])} SKUs"):
-                _t_grp = df_cob_filt[df_cob_filt["marca"] == cm["marca"]].groupby("tienda").agg(
-                    stock_uds=("stock_total", "sum"),
-                    vta_sem=("prom_vta_uds", "sum"),
-                    capital=("stock_valor_costo", "sum"),
-                    n_skus=("sku", "nunique"),
-                ).reset_index()
-                _t_grp["cobertura"] = _t_grp.apply(
-                    lambda r: round(r["stock_uds"] / r["vta_sem"], 1) if r["vta_sem"] > 0 else None, axis=1
-                )
-                _t_grp = _t_grp.sort_values("capital", ascending=False)
-                _t_grp_disp = _t_grp.rename(columns={
-                    "tienda": "Tienda", "stock_uds": "Stock Uds", "vta_sem": "Vta Sem (uds)",
-                    "capital": "Capital S/", "cobertura": "Cob (sem)", "n_skus": "SKUs",
-                })
-                st.dataframe(
-                    _t_grp_disp[["Tienda", "Stock Uds", "Vta Sem (uds)", "Capital S/", "Cob (sem)", "SKUs"]].style.format({
-                        "Stock Uds": "{:,.0f}", "Vta Sem (uds)": "{:.0f}",
-                        "Capital S/": "S/ {:,.0f}", "Cob (sem)": "{:.1f}",
-                    }, na_rep="—"),
-                    use_container_width=True, hide_index=True,
-                )
+    if _cbt.empty or "tienda" not in _cbt.columns:
+        st.info("No hay datos de cobertura para la selección actual.")
     else:
-        # Sin marca: solo por tienda
-        _cob_tienda = df_cob_filt.groupby("tienda").agg(
-            stock_total=("stock_total", "sum"),
-            vta_semanal=("prom_vta_uds", "sum"),
+        _cbt_t = _cbt.groupby("tienda").agg(
+            stock_uds=("stock_total", "sum"),
+            vta_sem=("prom_vta_uds", "sum"),
             capital=("stock_valor_costo", "sum"),
             n_skus=("sku", "nunique"),
         ).reset_index()
-        _cob_tienda["cobertura"] = _cob_tienda.apply(
-            lambda r: round(r["stock_total"] / r["vta_semanal"], 1) if r["vta_semanal"] > 0 else None, axis=1
+        _cbt_t["cobertura"] = _cbt_t.apply(
+            lambda r: round(r["stock_uds"] / r["vta_sem"], 1) if r["vta_sem"] > 0 else None, axis=1
         )
-        _cob_tienda = _cob_tienda.sort_values("capital", ascending=False)
-        _cob_tienda.columns = ["Tienda", "Stock Uds", "Vta Sem (uds)", "Capital S/", "SKUs", "Cob (sem)"]
-        st.dataframe(_cob_tienda.style.format({
-            "Stock Uds": "{:,.0f}", "Vta Sem (uds)": "{:.0f}",
-            "Capital S/": "S/ {:,.0f}", "Cob (sem)": "{:.1f}",
-        }, na_rep="—"), use_container_width=True, hide_index=True)
+        _cbt_t = _cbt_t.sort_values("cobertura", ascending=(_cbt_orden == "Menor cobertura"), na_position="last")
 
-    st.caption(f"{len(df_cob_filt):,} combinaciones SKU×Tienda después de filtros")
-    st.markdown("---")
+        _ctx = _cbt_marca if _cbt_marca != "Todas las marcas" else "todas las marcas"
+        st.caption(f"{len(_cbt_t)} tiendas · {_ctx} · capital S/ {_cbt_t['capital'].sum():,.0f}")
 
-    st.markdown("---")
+        _cbt_disp = _cbt_t[["tienda", "cobertura", "capital", "stock_uds", "vta_sem", "n_skus"]].rename(columns={
+            "tienda": "Tienda", "cobertura": "Cobertura (sem)", "capital": "Capital S/",
+            "stock_uds": "Stock (uds)", "vta_sem": "Vta/sem (uds)", "n_skus": "SKUs",
+        })
+        st.dataframe(_cbt_disp.style.format({
+            "Cobertura (sem)": "{:.1f}", "Capital S/": "S/ {:,.0f}", "Stock (uds)": "{:,.0f}", "Vta/sem (uds)": "{:,.0f}",
+        }, na_rep="—"), use_container_width=True, hide_index=True, height=560)
 
-    _tienda_agg = df_cob_filt.groupby("tienda").agg(
-        stock_total=("stock_total", "sum"),
-        vta_semanal=("prom_vta_uds", "sum"),
-        stock_valor_costo=("stock_valor_costo", "sum"),
-    ).reset_index()
-    _tienda_agg["cobertura_tienda"] = _tienda_agg.apply(
-        lambda r: round(r["stock_total"] / r["vta_semanal"], 1) if r["vta_semanal"] > 0 else None, axis=1
-    )
-    _tienda_agg = _tienda_agg.dropna(subset=["cobertura_tienda"])
-
-    top5_menor = _tienda_agg.nsmallest(5, "cobertura_tienda")
-    top5_mayor = _tienda_agg.nlargest(5, "cobertura_tienda")
-
-    dash_t1, dash_t2 = st.columns(2)
-
-    with dash_t1:
-        st.markdown(f"""<div style="background:#FEF2F2; border-left:4px solid {STATUS_CRITICO}; padding:10px 14px; border-radius:10px; margin-bottom:10px;">
-        <strong style="color:{STATUS_CRITICO};">Top 5 Tiendas — Menor Cobertura</strong>
-        <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; Oportunidad de reposición</span>
-        </div>""", unsafe_allow_html=True)
-
-        for _, row_t in top5_menor.iterrows():
-            tienda_name = row_t["tienda"]
-            cob_val = row_t["cobertura_tienda"]
-            capital_val = row_t["stock_valor_costo"]
-
-            st.markdown(f"""<div style="background:var(--capi-bg-card); border:1px solid var(--capi-border); border-radius:10px; padding:10px 14px; margin-bottom:4px;">
-            <span style="font-weight:600; color:var(--capi-text);">{tienda_name}</span>
-            &nbsp;·&nbsp; <span style="color:{STATUS_CRITICO}; font-weight:700;">{cob_val:.1f} sem</span>
-            &nbsp;·&nbsp; <span style="color:var(--capi-text2); font-size:0.85em;">Capital: S/ {capital_val:,.0f}</span>
-            </div>""", unsafe_allow_html=True)
-
-            with st.expander(f"Ver detalle por marca — {tienda_name}", expanded=False):
-                marca_det = df_cob_filt[df_cob_filt["tienda"] == tienda_name].copy()
-                if "marca" in marca_det.columns:
-                    grp = marca_det.groupby("marca").agg(
-                        stock_costo=("stock_valor_costo", "sum"),
-                        vta_sem_uds=("prom_vta_uds", "sum"),
-                        stock_uds=("stock_total", "sum"),
-                    ).reset_index()
-                    grp["vta_sem_costo"] = 0.0
-                    marca_vta_costo = marca_det.groupby("marca").apply(
-                        lambda g: (g["prom_vta_uds"] * g["costo"]).sum()
-                    ).reset_index(name="vta_sem_costo")
-                    grp = grp.merge(marca_vta_costo, on="marca", how="left", suffixes=("_x", ""))
-                    grp = grp.drop(columns=["vta_sem_costo_x"], errors="ignore")
-                    grp["cobertura"] = grp.apply(
-                        lambda r: round(r["stock_uds"] / r["vta_sem_uds"], 1) if r["vta_sem_uds"] > 0 else None, axis=1
-                    )
-                    grp = grp.sort_values("stock_costo", ascending=False)
-                    grp_disp = grp.rename(columns={
-                        "marca": "Marca", "stock_costo": "Stock (S/ costo)",
-                        "vta_sem_costo": "Vta Sem (S/ costo)", "cobertura": "Cobertura (sem)",
-                    })
-                    st.dataframe(
-                        grp_disp[["Marca", "Stock (S/ costo)", "Vta Sem (S/ costo)", "Cobertura (sem)"]].style.format({
-                            "Stock (S/ costo)": "S/ {:,.0f}",
-                            "Vta Sem (S/ costo)": "S/ {:,.0f}",
-                            "Cobertura (sem)": "{:.1f}",
-                        }, na_rep="—"),
-                        use_container_width=True, hide_index=True,
-                    )
-                else:
-                    st.caption("Sin columna Marca en los datos")
-
-    with dash_t2:
-        st.markdown(f"""<div style="background:#FFF7ED; border-left:4px solid {STATUS_SOBRESTOCK}; padding:10px 14px; border-radius:10px; margin-bottom:10px;">
-        <strong style="color:{STATUS_SOBRESTOCK};">Top 5 Tiendas — Mayor Cobertura</strong>
-        <span style="color:var(--capi-text2); font-size:0.82em;"> &nbsp;·&nbsp; Requieren acción</span>
-        </div>""", unsafe_allow_html=True)
-
-        for _, row_t in top5_mayor.iterrows():
-            tienda_name = row_t["tienda"]
-            cob_val = row_t["cobertura_tienda"]
-            capital_val = row_t["stock_valor_costo"]
-
-            st.markdown(f"""<div style="background:var(--capi-bg-card); border:1px solid var(--capi-border); border-radius:10px; padding:10px 14px; margin-bottom:4px;">
-            <span style="font-weight:600; color:var(--capi-text);">{tienda_name}</span>
-            &nbsp;·&nbsp; <span style="color:{STATUS_SOBRESTOCK}; font-weight:700;">{cob_val:.1f} sem</span>
-            &nbsp;·&nbsp; <span style="color:var(--capi-text2); font-size:0.85em;">Capital: S/ {capital_val:,.0f}</span>
-            </div>""", unsafe_allow_html=True)
-
-            with st.expander(f"Ver detalle por marca — {tienda_name}", expanded=False):
-                marca_det = df_cob_filt[df_cob_filt["tienda"] == tienda_name].copy()
-                if "marca" in marca_det.columns:
-                    grp = marca_det.groupby("marca").agg(
-                        stock_costo=("stock_valor_costo", "sum"),
-                        vta_sem_uds=("prom_vta_uds", "sum"),
-                        stock_uds=("stock_total", "sum"),
-                    ).reset_index()
-                    marca_vta_costo = marca_det.groupby("marca").apply(
-                        lambda g: (g["prom_vta_uds"] * g["costo"]).sum()
-                    ).reset_index(name="vta_sem_costo")
-                    grp = grp.merge(marca_vta_costo, on="marca", how="left")
-                    grp["cobertura"] = grp.apply(
-                        lambda r: round(r["stock_uds"] / r["vta_sem_uds"], 1) if r["vta_sem_uds"] > 0 else None, axis=1
-                    )
-                    grp = grp.sort_values("stock_costo", ascending=False)
-                    grp_disp = grp.rename(columns={
-                        "marca": "Marca", "stock_costo": "Stock (S/ costo)",
-                        "vta_sem_costo": "Vta Sem (S/ costo)", "cobertura": "Cobertura (sem)",
-                    })
-                    st.dataframe(
-                        grp_disp[["Marca", "Stock (S/ costo)", "Vta Sem (S/ costo)", "Cobertura (sem)"]].style.format({
-                            "Stock (S/ costo)": "S/ {:,.0f}",
-                            "Vta Sem (S/ costo)": "S/ {:,.0f}",
-                            "Cobertura (sem)": "{:.1f}",
-                        }, na_rep="—"),
-                        use_container_width=True, hide_index=True,
-                    )
-                else:
-                    st.caption("Sin columna Marca en los datos")
-
-
+        _cbt_buf = io.BytesIO()
+        with pd.ExcelWriter(_cbt_buf, engine="openpyxl") as _w:
+            _cbt_disp.to_excel(_w, sheet_name="Cobertura x Tienda", index=False)
+        _cbt_buf.seek(0)
+        st.download_button("📥 Descargar cobertura x tienda (.xlsx)", data=_cbt_buf.getvalue(),
+                           file_name="Capi_Cobertura_x_Tienda.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_cob_tienda")
 
 
 # ═══════════════════════════════════════════════════════════════
