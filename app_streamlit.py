@@ -878,19 +878,19 @@ with st.sidebar:
                 st.rerun()
 
         # ── GESTIÓN DE STOCK ──
-        st.markdown('<div class="sidebar-section-label">GESTIÓN DE STOCK</div>', unsafe_allow_html=True)
-
+        # (Sobrestock y Acciones de Stock ocultos del menú — su cálculo en el
+        #  motor sigue activo, solo se quitó la vista de presentación.)
         _NAV_STOCK = [
             ("📦", "Reposición"),
             ("📈", "Cobertura"),
             ("🔄", "Transferencias"),
             ("🚚", "Predistribución"),
-            ("📊", "Sobrestock"),
-            ("🎯", "Acciones de Stock"),
         ]
         if _DEMO_MODE:
-            _NAV_STOCK = [("🎯", "Acciones de Stock")]
+            _NAV_STOCK = []
 
+        if _NAV_STOCK:
+            st.markdown('<div class="sidebar-section-label">GESTIÓN DE STOCK</div>', unsafe_allow_html=True)
         for _icon, _label in _NAV_STOCK:
             _full = f"{_icon} {_label}"
             _is_active = st.session_state["nav_page"] == _full
@@ -909,7 +909,6 @@ with st.sidebar:
             _NAV_COMERCIAL = [
                 ("📊", "Gestión por Antigüedad"),
                 ("💰", "Acciones Precio"),
-                ("🏷️", "Marcas Terceras"),
                 ("🤝", "Agente Terceras"),
             ]
 
@@ -928,12 +927,8 @@ with st.sidebar:
             st.markdown('<div class="sidebar-section-label">ANÁLISIS PREDICTIVO</div>', unsafe_allow_html=True)
 
             _NAV_PREDICTIVO = [
-                ("📦", "Ventana de Compra"),
-                ("📈", "Evolución Semanal"),
-                ("🌡️", "Fenómeno del Niño"),
                 ("🏪", "Afinidad Producto×Plaza"),
                 ("🤖", "Alertas IA"),
-                ("🔮", "Simulador Predictivo"),
             ]
 
             for _icon, _label in _NAV_PREDICTIVO:
