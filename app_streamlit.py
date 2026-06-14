@@ -1536,6 +1536,46 @@ def _build_excel_terceras(_dfc, _dfr, _dft):
     return _buf.read()
 
 
+def _build_excel_propias(_dfc, _dfr, _dft, _gaps, _ret):
+    """Excel-paquete de Marcas Propias: Reposición · Transferencias · Precios ·
+    Predistribución (gaps limpios + retenidos CD). Filtrado a las 7 propias."""
+    _P = agente_terceras.MARCAS_PROPIAS_SET
+    _buf = io.BytesIO()
+    with pd.ExcelWriter(_buf, engine="openpyxl") as _w:
+        # 1. Reposición propias (con margen + edad)
+        _rep = _dfr[_dfr['marca'].str.upper().str.strip().isin(_P)].copy() if not _dfr.empty and 'marca' in _dfr.columns else pd.DataFrame()
+        if not _rep.empty:
+            _rep = _rep[_rep['a_reponer'] > 0] if 'a_reponer' in _rep.columns else _rep
+            if 'sku' in _dfc.columns and 'margen_efectivo' in _dfc.columns:
+                _mg = _dfc.drop_duplicates('sku').set_index('sku')['margen_efectivo']
+                _rep['margen_efectivo_pct'] = (_rep['sku'].map(_mg).fillna(0) * 100).round(1)
+            if 'sku' in _dfc.columns and 'edad_semanas' in _dfc.columns:
+                _rep['edad_sem'] = _rep['sku'].map(_dfc.groupby('sku')['edad_semanas'].max())
+        (_rep if not _rep.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Reposicion", index=False)
+        # 2. Transferencias propias (cruce por sku)
+        if not _dft.empty and 'sku' in _dft.columns and 'marca' in _dfc.columns:
+            _s2m = dict(zip(_dfc['sku'], _dfc['marca'].str.upper().str.strip()))
+            _tr = _dft.copy(); _tr['marca'] = _tr['sku'].map(_s2m); _tr = _tr[_tr['marca'].isin(_P)]
+        else:
+            _tr = pd.DataFrame()
+        (_tr if not _tr.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Transferencias", index=False)
+        # 3. Precios propias (pirámide)
+        _pr = agente_terceras.sugerencias_precio_terceras(_dfc, marcas=_P)
+        (_pr if not _pr.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Precios", index=False)
+        # 4. Predistribución — gaps limpios (stock CD>0, edad<=8) + retenidos CD
+        _g = _gaps[_gaps['marca'].str.upper().str.strip().isin(_P)].copy() if not _gaps.empty and 'marca' in _gaps.columns else pd.DataFrame()
+        if not _g.empty:
+            if 'stock_cd' in _g.columns:
+                _g = _g[_g['stock_cd'] > 0]
+            if 'edad_semanas' in _g.columns:
+                _g = _g[_g['edad_semanas'].fillna(999) <= 8]
+        (_g if not _g.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Predist Gaps", index=False)
+        _r = _ret[_ret['marca'].str.upper().str.strip().isin(_P)].copy() if not _ret.empty and 'marca' in _ret.columns else pd.DataFrame()
+        (_r if not _r.empty else pd.DataFrame({"sin datos": []})).to_excel(_w, sheet_name="Retenidos CD", index=False)
+    _buf.seek(0)
+    return _buf.read()
+
+
 if nav_page == "🏠 Dashboard":
     st.markdown(f'<div class="section-header"><h3>Dashboard</h3><span class="live-badge">LIVE</span></div>', unsafe_allow_html=True)
 
@@ -4197,6 +4237,18 @@ elif nav_page == "📈 Cobertura" or nav_page == "📊 Cobertura":
 
 elif nav_page == "📦 Reposición Propias":
     st.markdown(f'<div class="section-header"><h3>📦 Reposición Propias</h3><span class="live-badge">MARCAS PROPIAS</span></div>', unsafe_allow_html=True)
+
+    # Paquete de trabajo: todo el análisis de propias en un Excel
+    st.download_button(
+        "📦 Descargar TODO el análisis de Marcas Propias (.xlsx)",
+        data=_build_excel_propias(df_cob, df_rep, df_trans, df_gaps_dist, df_retenidos_cd),
+        file_name="Capi_Analisis_Marcas_Propias.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True, key="dl_pack_propias",
+        help="5 pestañas: Reposición · Transferencias · Precios · Predist Gaps · Retenidos CD",
+    )
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
     _MARCAS_P = agente_terceras.MARCAS_PROPIAS_SET
     _rp = df_rep[df_rep['marca'].str.upper().str.strip().isin(_MARCAS_P)].copy() if not df_rep.empty and 'marca' in df_rep.columns else pd.DataFrame()
     if _rp.empty:
