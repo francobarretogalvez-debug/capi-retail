@@ -188,23 +188,15 @@ def top5_por_marca_linea(df_cob: pd.DataFrame, top_n: int = 5,
     g = g.sort_values(['marca', 'categoria', 'score'], ascending=[True, True, False])
     g = g.groupby(['marca', 'categoria'], sort=True).head(top_n).reset_index(drop=True)
 
-    # Criticidad relativa dentro de cada marca×línea (tercios del ranking):
-    # de los top 5 de cada línea, los 🔴 son los peores, luego 🟠, luego 🟡.
-    def _crit(grp):
-        n = len(grp)
-        et = []
-        for i in range(n):
-            if i < n / 3:
-                et.append("🔴 Crítico")
-            elif i < 2 * n / 3:
-                et.append("🟠 Alto")
-            else:
-                et.append("🟡 Medio")
-        grp = grp.copy()
-        grp["criticidad"] = et
-        return grp
-
-    g = g.groupby(['marca', 'categoria'], group_keys=False, sort=False).apply(_crit)
+    # Criticidad relativa dentro de cada marca×línea (tercios del ranking).
+    # NO usar groupby.apply: en pandas 3.0 elimina las columnas de agrupación
+    # (marca/categoria) del resultado. cumcount + transform preservan todo.
+    _pos = g.groupby(['marca', 'categoria']).cumcount()
+    _n = g.groupby(['marca', 'categoria'])['sku'].transform('size')
+    g['criticidad'] = np.where(
+        _pos < _n / 3, "🔴 Crítico",
+        np.where(_pos < 2 * _n / 3, "🟠 Alto", "🟡 Medio"),
+    )
     return g.reset_index(drop=True)
 
 
