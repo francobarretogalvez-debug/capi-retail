@@ -4046,13 +4046,33 @@ elif nav_page == "📈 Cobertura x Tienda":
             "Cobertura (sem)": "{:.1f}", "Capital S/": "S/ {:,.0f}", "Stock (uds)": "{:,.0f}", "Vta/sem (uds)": "{:,.0f}",
         }, na_rep="—"), use_container_width=True, hide_index=True, height=560)
 
+        # Detalle SKU×tienda: qué SKUs generan la cobertura extrema (para atacar)
+        _cbt_asc = (_cbt_orden == "Menor cobertura")
+        _ot = {t: i for i, t in enumerate(_cbt_t["tienda"])}
+        _det = _cbt.copy()
+        _det["_ot"] = _det["tienda"].map(_ot)
+        _det = _det.sort_values(["_ot", "cobertura_sem"], ascending=[True, _cbt_asc], na_position="last")
+        _det_cols = [c for c in ["tienda", "marca", "sku", "nombre", "categoria", "cobertura_sem",
+                                 "estado", "stock_total", "stock_valor_costo", "prom_vta_uds",
+                                 "pct_descuento", "edad_semanas"] if c in _det.columns]
+        _det_out = _det[_det_cols].rename(columns={
+            "tienda": "Tienda", "marca": "Marca", "sku": "SKU", "nombre": "Producto", "categoria": "Línea",
+            "cobertura_sem": "Cobertura (sem)", "estado": "Estado", "stock_total": "Stock (uds)",
+            "stock_valor_costo": "Capital S/", "prom_vta_uds": "Vta/sem", "pct_descuento": "Dscto",
+            "edad_semanas": "Edad (sem)",
+        })
+
         _cbt_buf = io.BytesIO()
         with pd.ExcelWriter(_cbt_buf, engine="openpyxl") as _w:
-            _cbt_disp.to_excel(_w, sheet_name="Cobertura x Tienda", index=False)
+            _cbt_disp.to_excel(_w, sheet_name="Resumen x Tienda", index=False)
+            _det_out.to_excel(_w, sheet_name="Detalle SKU x Tienda", index=False)
         _cbt_buf.seek(0)
-        st.download_button("📥 Descargar cobertura x tienda (.xlsx)", data=_cbt_buf.getvalue(),
+        _cbt_extremo = "menor a mayor" if _cbt_asc else "mayor a menor"
+        st.download_button("📥 Descargar cobertura x tienda + detalle SKU (.xlsx)", data=_cbt_buf.getvalue(),
                            file_name="Capi_Cobertura_x_Tienda.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_cob_tienda")
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           use_container_width=True, key="dl_cob_tienda",
+                           help=f"2 hojas: resumen por tienda + detalle de SKUs por tienda ordenados por cobertura ({_cbt_extremo}) para identificar qué atacar")
 
 
 # ═══════════════════════════════════════════════════════════════
