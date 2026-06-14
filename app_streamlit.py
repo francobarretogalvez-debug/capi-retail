@@ -856,7 +856,6 @@ with st.sidebar:
             ("🏠", "Dashboard"),
             ("🩺", "Salud del Stock"),
             ("📲", "Productos Venta Cero"),
-            ("📝", "Diario de Gestión"),
             ("📊", "Gestión por Antigüedad"),
             ("📈", "Cobertura x Tienda"),
         ]
