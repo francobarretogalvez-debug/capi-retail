@@ -23,7 +23,7 @@
     "metrica": "rotacion"
   },
   "umbrales": {
-    "rotacion_alta": 0.04,
+    "rotacion_alta": 0.06,
     "rotacion_baja": 0.015,
     "cobertura_baja_sem": 4,
     "stock_alto_unidades": 10,

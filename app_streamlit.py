@@ -1412,6 +1412,8 @@ s["n_dormido"]         = int((df_cob["estado"] == "DORMIDO").sum()) if not df_co
 s["n_muerto"]          = int((df_cob["estado"] == "MUERTO").sum()) if not df_cob.empty else 0
 s["n_estancado"]       = int((df_cob["estado"] == "ESTANCADO").sum()) if not df_cob.empty else 0
 s["uds_reponer"]       = int(df_rep["a_reponer"].sum()) if not df_rep.empty else 0
+s["uds_desde_cd"]      = int(df_rep["desde_cd"].sum()) if (not df_rep.empty and "desde_cd" in df_rep.columns) else 0
+s["uds_pendiente_cd"]  = int(df_rep["pendiente"].sum()) if (not df_rep.empty and "pendiente" in df_rep.columns) else 0
 s["uds_transferir"]    = int(df_trans["uds_transferir"].sum()) if not df_trans.empty else 0
 s["n_acciones_precio"] = len(df_prec)
 
@@ -3208,8 +3210,13 @@ elif nav_page == "📦 Reposición":
     if df_rep.empty:
         st.success("✅ No hay SKUs bajo cobertura objetivo. Sin reposiciones necesarias.")
     elif not df_rep_pivot.empty:
-        st.markdown(f"##### SKUs que requieren reposición — {len(df_rep)} ítems · **{s['uds_reponer']} uds**")
-        st.caption("Filas = SKUs · Columnas = Tiendas · Celdas en rojo = unidades a reponer")
+        st.markdown(f"##### SKUs que requieren reposición — {len(df_rep)} ítems · **{s['uds_reponer']:,} uds** de necesidad")
+        if s.get('uds_desde_cd', 0) or s.get('uds_pendiente_cd', 0):
+            _c_nec, _c_cd, _c_pend = st.columns(3)
+            _c_nec.metric("📋 Necesidad total", f"{s['uds_reponer']:,} uds", help="Unidades para llevar todas las tiendas a la cobertura objetivo.")
+            _c_cd.metric("🚚 Despachable YA desde CD", f"{s['uds_desde_cd']:,} uds", help="Lo que el CD puede mandar ahora, repartido por urgencia (quiebre primero) sin sobre-prometer. La suma por SKU nunca excede el stock del CD.")
+            _c_pend.metric("⏳ Pendiente (reabastecer CD / proveedor)", f"{s['uds_pendiente_cd']:,} uds", help="Necesidad que el CD no cubre hoy: hay que reabastecer el CD o pedir al proveedor.")
+        st.caption("Filas = SKUs · Columnas = Tiendas · Celdas en rojo = unidades a reponer. El detalle por línea (abajo) separa **Despachable CD** vs **Pendiente**.")
 
         _df_pv_r = df_rep_pivot.copy()
         if "temporada" not in _df_pv_r.columns and "temporada" in df_cob.columns:
@@ -3274,15 +3281,18 @@ elif nav_page == "📦 Reposición":
             if _f_temp_rpv != "Todas" and 'temporada' in _df_rep_v1.columns:
                 _df_rep_v1 = _df_rep_v1[_df_rep_v1['temporada'] == _f_temp_rpv]
             _rep_show_cols = [c for c in ['marca', 'sku', 'nombre', 'tienda', 'stock_actual', 'cobertura_actual',
-                                           'prom_vta_sem', 'a_reponer', 'stock_cd', 'pct_descuento', 'urgencia'] if c in _df_rep_v1.columns]
+                                           'prom_vta_sem', 'a_reponer', 'desde_cd', 'pendiente', 'stock_cd', 'pct_descuento', 'urgencia'] if c in _df_rep_v1.columns]
             _df_rep_disp = _df_rep_v1[_rep_show_cols].rename(columns={
                 'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'tienda': 'Tienda',
                 'stock_actual': 'Stock', 'cobertura_actual': 'Cob (sem)', 'prom_vta_sem': 'Vta Sem',
-                'a_reponer': 'A Reponer', 'stock_cd': 'Stock CD', 'pct_descuento': 'Dscto',
+                'a_reponer': 'Necesidad', 'desde_cd': 'Despachable CD', 'pendiente': 'Pendiente',
+                'stock_cd': 'Stock CD', 'pct_descuento': 'Dscto',
                 'urgencia': 'Urgencia',
             })
-            if 'A Reponer' in _df_rep_disp.columns:
-                _df_rep_disp = _df_rep_disp.sort_values('A Reponer', ascending=False)
+            if 'Despachable CD' in _df_rep_disp.columns:
+                _df_rep_disp = _df_rep_disp.sort_values('Despachable CD', ascending=False)
+            elif 'Necesidad' in _df_rep_disp.columns:
+                _df_rep_disp = _df_rep_disp.sort_values('Necesidad', ascending=False)
             _rep_fmt = {}
             if 'Cob (sem)' in _df_rep_disp.columns: _rep_fmt['Cob (sem)'] = '{:.1f}'
             if 'Dscto' in _df_rep_disp.columns: _rep_fmt['Dscto'] = '{:.0%}'
@@ -3292,13 +3302,14 @@ elif nav_page == "📦 Reposición":
         # Fallback: si no hay pivot disponible, mostrar tabla flat
         st.markdown(f"##### SKUs que requieren reposición — {len(df_rep)} ítems · **{s['uds_reponer']} uds**")
         _rep_show_cols = [c for c in ['marca', 'sku', 'nombre', 'tienda', 'stock_actual', 'cobertura_actual',
-                                       'prom_vta_sem', 'a_reponer', 'stock_cd', 'pct_descuento', 'urgencia'] if c in df_rep.columns]
+                                       'prom_vta_sem', 'a_reponer', 'desde_cd', 'pendiente', 'stock_cd', 'pct_descuento', 'urgencia'] if c in df_rep.columns]
         _df_rep_disp = df_rep[_rep_show_cols].rename(columns={
             'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'tienda': 'Tienda',
             'stock_actual': 'Stock', 'cobertura_actual': 'Cob (sem)', 'prom_vta_sem': 'Vta Sem',
-            'a_reponer': 'A Reponer', 'stock_cd': 'Stock CD', 'pct_descuento': 'Dscto',
+            'a_reponer': 'Necesidad', 'desde_cd': 'Despachable CD', 'pendiente': 'Pendiente',
+            'stock_cd': 'Stock CD', 'pct_descuento': 'Dscto',
             'urgencia': 'Urgencia',
-        }).sort_values('A Reponer', ascending=False)
+        }).sort_values('Despachable CD' if 'desde_cd' in df_rep.columns else 'Necesidad', ascending=False)
         st.dataframe(_df_rep_disp, use_container_width=True, hide_index=True, height=500)
 
     # ── Pareto de tiendas con más SKUs críticos ──

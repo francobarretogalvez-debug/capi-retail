@@ -616,6 +616,17 @@ def build_empujes_cd(df_long, rotation_matrix, clusters_df, config=None):
     ).round(4)
     candidates['rotacion_linea_tienda'] = candidates['rotacion_linea_tienda'].round(4)
 
+    # ── Pool de CD: el stock del CD es ÚNICO por SKU; repartirlo entre sus
+    #    tiendas por prioridad (rotación × propia) sin sobre-prometer. Sin esto,
+    #    cada tienda se capeaba al CD por separado y la suma excedía el stock real.
+    candidates = candidates.sort_values(['sku', 'prioridad'], ascending=[True, False])
+    _ya_asignado = candidates.groupby('sku')['unidades_sugeridas'].cumsum() - candidates['unidades_sugeridas']
+    _disponible_cd = (candidates['stock_cd'] - _ya_asignado).clip(lower=0)
+    candidates['unidades_sugeridas'] = np.minimum(
+        candidates['unidades_sugeridas'], _disponible_cd
+    ).astype(int)
+    candidates = candidates[candidates['unidades_sugeridas'] > 0]
+
     empujes_df = candidates[[
         'sku', 'descripcion', 'marca', 'linea', 'tienda',
         'stk', 'ume', 'stock_cd', 'rotacion_linea_tienda',

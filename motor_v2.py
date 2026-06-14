@@ -752,6 +752,25 @@ def build_reposiciones(df_cobertura, params):
         if n_inm > 0:
             print(f"[MOTOR] Reposición: {n_inm} líneas con quiebre inminente (cob < lead time)")
 
+        # ── Pool de CD: el stock del CD es ÚNICO por SKU. Sin esto, cada tienda
+        #    pedía contra el CD completo por separado y la suma sobre-prometía
+        #    stock inexistente. Reparto lo despachable YA por prioridad
+        #    (urgencia → menor cobertura) sin sobre-prometer:
+        #      a_reponer  = necesidad total para llegar a cobertura (intacta)
+        #      desde_cd   = servible ahora desde el CD (suma por SKU ≤ stock_cd)
+        #      pendiente  = lo que falta = reabastecer CD / orden a proveedor
+        _urg_rank = {'🔴 QUIEBRE': 3, '🟠 URGENTE': 2, '🟡 BAJO': 1}
+        df_rep['_urg'] = df_rep['urgencia'].map(_urg_rank).fillna(0)
+        df_rep = df_rep.sort_values(
+            ['sku', '_urg', 'cobertura_actual'],
+            ascending=[True, False, True],
+        )
+        _ya_asignado = df_rep.groupby('sku')['a_reponer'].cumsum() - df_rep['a_reponer']
+        _disponible_cd = (df_rep['stock_cd'] - _ya_asignado).clip(lower=0)
+        df_rep['desde_cd'] = np.minimum(df_rep['a_reponer'], _disponible_cd).astype(int)
+        df_rep['pendiente'] = (df_rep['a_reponer'] - df_rep['desde_cd']).astype(int)
+        df_rep = df_rep.drop(columns=['_urg'])
+
         df_rep = df_rep.sort_values('cobertura_actual').reset_index(drop=True)
     return df_rep
 
