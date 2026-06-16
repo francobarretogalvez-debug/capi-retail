@@ -854,20 +854,35 @@ with st.sidebar:
 
         _NAV_VISION = [
             ("🏠", "Dashboard"),
+        ]
+        for _icon, _label in _NAV_VISION:
+            _full = f"{_icon} {_label}"
+            _is_active = st.session_state["nav_page"] == _full
+            if st.button(
+                _full, key=f"nav_{_label}",
+                use_container_width=True,
+                type="primary" if _is_active else "secondary",
+            ):
+                st.session_state["nav_page"] = _full
+                st.rerun()
+
+        # ── ESTADO DEL STOCK ──
+        # Vistas de diagnóstico transversal (todas las marcas): salud, cobertura,
+        # venta cero y antigüedad. Separadas de Visión General (solo Dashboard).
+        _NAV_ESTADO = [
             ("🩺", "Salud del Stock"),
+            ("📈", "Cobertura x Tienda"),
             ("📲", "Productos Venta Cero"),
             ("📊", "Gestión por Antigüedad"),
-            ("📈", "Cobertura x Tienda"),
         ]
         if _DEMO_MODE:
             # Demo: solo las vistas protagonistas del guion de 3 minutos
-            _NAV_VISION = [
-                ("🏠", "Dashboard"),
+            _NAV_ESTADO = [
                 ("🩺", "Salud del Stock"),
                 ("📲", "Productos Venta Cero"),
             ]
-
-        for _icon, _label in _NAV_VISION:
+        st.markdown('<div class="sidebar-section-label">ESTADO DEL STOCK</div>', unsafe_allow_html=True)
+        for _icon, _label in _NAV_ESTADO:
             _full = f"{_icon} {_label}"
             _is_active = st.session_state["nav_page"] == _full
             if st.button(
