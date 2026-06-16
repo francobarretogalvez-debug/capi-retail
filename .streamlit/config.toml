@@ -3,10 +3,14 @@ headless = true
 maxUploadSize = 200
 
 [theme]
-primaryColor = "#0F9D9F"
-backgroundColor = "#0E1117"
-secondaryBackgroundColor = "#1A1D23"
-textColor = "#E0E0E0"
+# Tema CLARO — alineado al CSS custom de la app (corporate light).
+# Antes estaba en oscuro y chocaba: widgets nativos oscuros + texto gris claro
+# sobre tarjetas claras = ilegible. Ahora los nativos heredan el mismo claro.
+base = "light"
+primaryColor = "#1B4F72"
+backgroundColor = "#F9FAFB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1F2937"
 font = "sans serif"
 
 [browser]
