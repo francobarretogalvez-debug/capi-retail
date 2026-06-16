@@ -1597,16 +1597,43 @@ if nav_page == "🏠 Dashboard":
                         _arr = "–"
                     return f'<span style="color:{_c}; font-weight:600;">{_arr} {abs(pct):.1f}%</span>'
 
+                # ── Venta del PERÍODO (no acumulado) ──
+                # venta_soles/unidades de la base son ACUMULADAS (temporada): crecen
+                # monótono cada snapshot. Mostrar el acumulado como "venta de la semana"
+                # engaña (infla ~27x y el % siempre da verde). Mostramos la venta del
+                # período = acumulado_b − acumulado_a (= el delta), con el promedio
+                # semanal como contexto (estable, sin comparar contra un período previo
+                # de distinto largo que volvería el % volátil/engañoso).
+                def _weeks_between(_wa, _wb):
+                    try:
+                        _ya, _wwa = _wa.split("-")
+                        _yb, _wwb = _wb.split("-")
+                        if _ya == _yb:
+                            return int(_wwb) - int(_wwa)
+                    except Exception:
+                        pass
+                    return 0
+
+                _per_weeks = _weeks_between(_snap_sem_a, _snap_sem_b)
+                _per_soles = _sd['venta_soles_delta']
+                _per_uds   = _sd['venta_unidades_delta']
+
+                def _per_week_note(_total):
+                    if _per_weeks > 0:
+                        return f'<span style="color:var(--capi-text2); font-weight:600;">≈ {_total/_per_weeks:,.0f}/sem</span>'
+                    return ""
+
+                _per_lbl = f"({_per_weeks} sem)" if _per_weeks > 0 else "(período)"
                 _delta_cards = [
-                    ("Venta S/", f"S/ {_sb['venta_soles']:,.0f}", _delta_arrow(_sd['venta_soles_delta'], _sd['venta_soles_pct'])),
-                    ("Venta Uds", f"{_sb['venta_unidades']:,}", _delta_arrow(_sd['venta_unidades_delta'], _sd['venta_unidades_pct'])),
+                    (f"Venta S/ {_per_lbl}", f"S/ {_per_soles:,.0f}", _per_week_note(_per_soles)),
+                    (f"Venta Uds {_per_lbl}", f"{_per_uds:,.0f}", _per_week_note(_per_uds)),
                     ("Stock Uds", f"{_sb['stock_total']:,}", _delta_arrow(_sd['stock_total_delta'], _sd['stock_total_pct'], invert=True)),
                     ("Cob Prom", f"{_sb['cob_promedio']:.1f} sem", _delta_arrow(_sd['cob_promedio_delta'], _sd['cob_promedio_pct'])),
                 ]
 
                 _delta_html = f"""<div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:12px; padding:14px 18px; margin-bottom:16px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <span style="font-weight:600; color:var(--capi-text); font-size:0.82rem;">📊 Semana {_snap_sem_b} vs {_snap_sem_a}</span>
+                        <span style="font-weight:600; color:var(--capi-text); font-size:0.82rem;">📊 Período {_snap_sem_a} → {_snap_sem_b}</span>
                         <span style="font-size:0.68rem; color:var(--capi-text2);">{len(_snap_weeks)} semanas históricas</span>
                     </div>
                     <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px;">"""
@@ -1620,6 +1647,10 @@ if nav_page == "🏠 Dashboard":
 
                 _delta_html += "</div></div>"
                 st.markdown(_delta_html, unsafe_allow_html=True)
+                st.caption(
+                    f"Venta = lo vendido en el período {_snap_sem_a}→{_snap_sem_b} ({_per_lbl.strip('()')}), no acumulado, "
+                    f"con su promedio semanal. Stock y Cobertura son foto al cierre de {_snap_sem_b} (Δ vs {_snap_sem_a})."
+                )
 
     # ── Filtros del dashboard ──
     st.markdown(f"""<div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:12px; padding:12px 16px; margin-bottom:16px;">
