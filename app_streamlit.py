@@ -836,19 +836,6 @@ with st.sidebar:
         st.session_state["nav_page"] = "🏠 Dashboard"
 
     if _has_results:
-        # Chat IA toggle — primer elemento del menú
-        st.markdown('<div class="sidebar-section-label">ASISTENTE</div>', unsafe_allow_html=True)
-        if "chat_open" not in st.session_state:
-            st.session_state["chat_open"] = False
-        _chat_toggle_label = "✕ Cerrar Chat" if st.session_state["chat_open"] else "💬 Chat IA"
-        if st.button(
-            _chat_toggle_label, key="nav_chat_toggle_top",
-            use_container_width=True,
-            type="primary" if st.session_state["chat_open"] else "secondary",
-        ):
-            st.session_state["chat_open"] = not st.session_state["chat_open"]
-            st.rerun()
-
         # ── VISIÓN GENERAL ──
         st.markdown('<div class="sidebar-section-label">VISIÓN GENERAL</div>', unsafe_allow_html=True)
 
