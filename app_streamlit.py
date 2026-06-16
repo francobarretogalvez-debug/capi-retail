@@ -5819,14 +5819,23 @@ elif nav_page == "🏪 Afinidad Producto×Plaza":
                     _has_cob = 'vta_semanal_est' in _emp_show.columns and 'target_stock' in _emp_show.columns
                     if _has_cob:
                         _emp_cols += ['vta_semanal_est', 'target_stock']
-                    _emp_cols += ['unidades_sugeridas', 'es_marca_propia']
-                    _emp_display = _emp_show[_emp_cols].head(100)
+                    _has_fill = 'es_llenado_inicial' in _emp_show.columns
+                    _emp_cols += ['unidades_sugeridas']
+                    if _has_fill:
+                        _emp_cols += ['es_llenado_inicial']
+                    _emp_cols += ['es_marca_propia']
+                    _emp_display = _emp_show[_emp_cols].head(100).copy()
                     _emp_headers = ['Marca', 'Descripción', 'Tienda', 'Stk Tienda', 'Stk CD', 'Rot. %']
                     if _has_cob:
                         _emp_headers += ['Vta/Sem Est', 'Target 12s']
-                    _emp_headers += ['Empujar', 'Propia']
+                    _emp_headers += ['Empujar']
+                    if _has_fill:
+                        _emp_headers += ['Llenado inicial']
+                    _emp_headers += ['Propia']
                     _emp_display.columns = _emp_headers
                     _emp_display['Rot. %'] = (_emp_display['Rot. %'] * 100).round(1)
+                    if _has_fill:
+                        _emp_display['Llenado inicial'] = _emp_display['Llenado inicial'].map(lambda x: '🆕 sí' if x else '')
 
                     _cob_sem = 12  # default
                     try:
@@ -5836,8 +5845,13 @@ elif nav_page == "🏪 Afinidad Producto×Plaza":
                             _cob_sem = _json_emp.load(_f_emp).get('empujes', {}).get('semanas_cobertura_target', 12)
                     except Exception:
                         pass
+                    _n_fill = int(_emp_show['es_llenado_inicial'].sum()) if _has_fill else 0
                     st.markdown(f"**{len(_emp_show):,}** empujes — **{_emp_show['unidades_sugeridas'].sum():,}** unidades"
                                 f" — Cobertura target: **{_cob_sem} semanas**")
+                    if _has_fill:
+                        st.caption(f"🆕 {_n_fill:,} son **llenado inicial** (producto nuevo en la tienda, sin stock): "
+                                   f"se manda mínimo 3 curvas en tallas completas para exhibir bien. Si el CD no alcanza, "
+                                   f"baja a 2 o 1 curva entera; si no llega ni a 1, no se manda.")
                     st.dataframe(_emp_display, use_container_width=True, hide_index=True)
 
                     # Descarga Excel

@@ -596,17 +596,31 @@ def build_empujes_cd(df_long, rotation_matrix, clusters_df, config=None):
         candidates['ume'].clip(lower=3)
     )
 
+    # ── Llenado inicial por curvas (regla merchandising) ──
+    # Una tienda SIN stock del producto (producto nuevo en esa plaza) necesita un
+    # fill mínimo de 3 curvas (3 runs de tallas) para exhibir bien. Arriba del piso
+    # la demanda manda (puede ir suelto). Tiendas con stock existente: sin cambio.
+    from motor_v2 import CURVAS_POR_LINEA
+    candidates['curva'] = (
+        candidates['linea'].astype(str).str.strip().str.upper()
+        .map(CURVAS_POR_LINEA).fillna(0).astype(int)
+    )
+    _es_nuevo = candidates['stk'] == 0
+    candidates['target_stock'] = np.where(
+        _es_nuevo & (candidates['curva'] > 0),
+        np.maximum(candidates['target_stock'], candidates['curva'] * 3),
+        candidates['target_stock'],
+    ).astype(int)
+
     # Filtrar: solo donde stock actual < target
     candidates = candidates[candidates['stk'] < candidates['target_stock']]
 
-    # Calcular unidades a empujar
-    candidates['unidades_sugeridas'] = (
+    # Necesidad bruta (antes de repartir el pool del CD)
+    candidates['_need'] = (
         (candidates['target_stock'] - candidates['stk'])
-        .clip(upper=candidates['stock_cd'])
-        .clip(upper=max_empuje)
-        .astype(int)
+        .clip(lower=0).clip(upper=max_empuje).astype(int)
     )
-    candidates = candidates[candidates['unidades_sugeridas'] > 0]
+    candidates = candidates[candidates['_need'] > 0]
 
     # Prioridad
     candidates['es_marca_propia'] = candidates['marca'].isin(marcas_propias)
@@ -616,22 +630,44 @@ def build_empujes_cd(df_long, rotation_matrix, clusters_df, config=None):
     ).round(4)
     candidates['rotacion_linea_tienda'] = candidates['rotacion_linea_tienda'].round(4)
 
-    # ── Pool de CD: el stock del CD es ÚNICO por SKU; repartirlo entre sus
-    #    tiendas por prioridad (rotación × propia) sin sobre-prometer. Sin esto,
-    #    cada tienda se capeaba al CD por separado y la suma excedía el stock real.
-    candidates = candidates.sort_values(['sku', 'prioridad'], ascending=[True, False])
-    _ya_asignado = candidates.groupby('sku')['unidades_sugeridas'].cumsum() - candidates['unidades_sugeridas']
-    _disponible_cd = (candidates['stock_cd'] - _ya_asignado).clip(lower=0)
-    candidates['unidades_sugeridas'] = np.minimum(
-        candidates['unidades_sugeridas'], _disponible_cd
-    ).astype(int)
+    # ── Pool de CD + llenado por curvas ──
+    # El stock del CD es ÚNICO por SKU; se reparte entre tiendas por prioridad
+    # (rotación × propia) sin sobre-prometer. Para una tienda SIN stock se sirve en
+    # curvas COMPLETAS: si el CD no alcanza el fill deseado, baja a 3/2/1 curvas
+    # enteras; si no llega ni a 1 curva, NO se manda (media curva no exhibe).
+    # Tiendas con stock existente se sirven sueltas (como antes).
+    candidates = candidates.sort_values(
+        ['sku', 'prioridad'], ascending=[True, False]
+    ).reset_index(drop=True)
+    _alloc = {}
+    for _sku, _idx in candidates.groupby('sku').groups.items():
+        _remaining = int(candidates.loc[_idx[0], 'stock_cd'])
+        for _i in _idx:
+            _need = int(candidates.loc[_i, '_need'])
+            if _need <= 0 or _remaining <= 0:
+                _alloc[_i] = 0
+                continue
+            _curva = int(candidates.loc[_i, 'curva'])
+            if (candidates.loc[_i, 'stk'] == 0) and _curva > 0:
+                if _remaining >= _need:
+                    _give = _need                          # demanda completa (puede ir suelto)
+                else:
+                    _give = (_remaining // _curva) * _curva  # curvas enteras que alcancen
+                if _give < _curva:                          # no llega ni a 1 curva → saltar
+                    _give = 0
+            else:
+                _give = min(_need, _remaining)              # tienda con stock: suelto
+            _alloc[_i] = _give
+            _remaining -= _give
+    candidates['unidades_sugeridas'] = candidates.index.map(_alloc).fillna(0).astype(int)
+    candidates['es_llenado_inicial'] = (candidates['stk'] == 0)
     candidates = candidates[candidates['unidades_sugeridas'] > 0]
 
     empujes_df = candidates[[
         'sku', 'descripcion', 'marca', 'linea', 'tienda',
         'stk', 'ume', 'stock_cd', 'rotacion_linea_tienda',
         'vta_semanal_est', 'target_stock',
-        'unidades_sugeridas', 'es_marca_propia', 'prioridad'
+        'unidades_sugeridas', 'es_llenado_inicial', 'es_marca_propia', 'prioridad'
     ]].rename(columns={'stk': 'stk_actual_tienda'})
 
     empujes_df = empujes_df.sort_values('prioridad', ascending=False).reset_index(drop=True)
