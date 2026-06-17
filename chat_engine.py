@@ -56,7 +56,7 @@ except ImportError:
 #  CONFIG
 # ══════════════════════════════════════════════════════════════
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 2048
 TEMPERATURE = 0.0
 
