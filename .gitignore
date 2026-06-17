@@ -1,0 +1,13 @@
+# Cachés de Python
+__pycache__/
+*.pyc
+
+# Dependencias y artefactos del deck (generados localmente, no son la app)
+node_modules/
+package.json
+package-lock.json
+build_deck.js
+*.pptx
+
+# Config local de tooling
+.claude/
