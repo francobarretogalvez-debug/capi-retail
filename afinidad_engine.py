@@ -227,21 +227,32 @@ def load_tienda_data(excel_path, config=None):
 #  OUTPUT 1: HEATMAP ROTACIÓN LÍNEA × TIENDA
 # ─────────────────────────────────────────────────────────────
 
-def build_rotation_matrix(df_long):
+def build_rotation_matrix(df_long, config=None):
     """
     Calcula rotación (vta / stk) por línea × tienda.
+
+    Guardas contra ruido de denominador chico:
+      - Si el stock de la línea en la tienda es muy bajo (< min_stock_rotacion),
+        la rotación NO es señal confiable: con 1-2 uds, vta/stk infla ratios
+        absurdos (p.ej. 500%) que no representan demanda real. Esas celdas → 0.
+      - Cap a 1.0 (100%): vender el stock completo en 4 sem ya es "rota máximo";
+        rankear por encima de eso no aporta y rompe la escala del heatmap.
 
     Retorna:
       - matrix: DataFrame pivot (filas=líneas, cols=tiendas, valores=rotación)
       - stats: DataFrame con stk, vta, rotación por celda
     """
+    if config is None:
+        config = _load_config()
+    min_stk = config.get('umbrales', {}).get('min_stock_rotacion', 5)
+
     agg = df_long.groupby(['linea', 'tienda']).agg(
         stk=('stk', 'sum'),
         vta=('vta', 'sum'),
     ).reset_index()
 
-    agg['rotacion'] = np.where(agg['stk'] > 0, agg['vta'] / agg['stk'], 0.0)
-    agg['rotacion'] = agg['rotacion'].round(4)
+    agg['rotacion'] = np.where(agg['stk'] >= min_stk, agg['vta'] / agg['stk'], 0.0)
+    agg['rotacion'] = agg['rotacion'].clip(upper=1.0).round(4)
 
     matrix = agg.pivot_table(
         index='linea', columns='tienda', values='rotacion', fill_value=0

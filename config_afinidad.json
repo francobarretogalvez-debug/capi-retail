@@ -25,6 +25,7 @@
   "umbrales": {
     "rotacion_alta": 0.06,
     "rotacion_baja": 0.015,
+    "min_stock_rotacion": 5,
     "cobertura_baja_sem": 4,
     "stock_alto_unidades": 10,
     "min_tiendas_senal_produccion": 3,
