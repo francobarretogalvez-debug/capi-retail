@@ -93,10 +93,23 @@ def cargar_proveedores(path: str = None) -> dict:
 #  DETECCIÓN DE OPORTUNIDADES
 # ══════════════════════════════════════════════════════════════
 
+# Estados de inventario que SÍ son capital parado (no rota): sobrestock,
+# estancado/liquidar y stock sin venta (dormido/muerto). Excluye Óptimo,
+# Quiebre, Pre-quiebre (rotan) y Nuevo sin venta (recién ingresado).
+_ESTADOS_PARADO = {'SOBRESTOCK', 'ESTANCADO', 'LIQUIDAR', 'DORMIDO', 'MUERTO'}
+
+
 def detectar_capital_parado(df_cob: pd.DataFrame, min_capital: float = 50000,
                             max_sell_through: float = 15.0) -> pd.DataFrame:
-    """Marcas terceras con capital inmovilizado alto y sell-through bajo.
-    Candidatas a pedir rebate / apoyo de markdown / devolución."""
+    """Marcas terceras con capital REALMENTE parado (stock que no rota) alto.
+    Candidatas a pedir rebate / apoyo de markdown / devolución.
+
+    'capital' = stock a costo SOLO de los SKUs parados (sobrestock + estancado +
+    sin venta), NO el inventario total de la marca. Sumar todo el stock e
+    etiquetarlo "parado" sobreestimaba el número (una marca puede rotar bien en
+    promedio y aun así cargar una cola muerta). stock_uds, n_skus y cob_prom
+    también son del subconjunto parado, para que el correo a proveedor sea
+    coherente. sell_through y margen son indicadores a nivel marca (contexto)."""
     _req = {'marca', 'sku', 'stock_valor_costo', 'stock_total', 'cobertura_sem', 'prom_vta_uds'}
     if df_cob.empty or not _req.issubset(df_cob.columns):
         return pd.DataFrame()
@@ -105,22 +118,36 @@ def detectar_capital_parado(df_cob: pd.DataFrame, min_capital: float = 50000,
     if terc.empty:
         return pd.DataFrame()
 
-    g = terc.groupby('marca').agg(
+    # Sell-through a nivel marca (rotación global, indicador de contexto)
+    brand = terc.groupby('marca').agg(
+        _stk_total=('stock_total', 'sum'),
+        vta_sem_uds=('prom_vta_uds', 'sum'),
+    ).reset_index()
+    brand['sell_through'] = np.where(
+        (brand['vta_sem_uds'] + brand['_stk_total']) > 0,
+        (brand['vta_sem_uds'] / (brand['vta_sem_uds'] + brand['_stk_total']) * 100).round(1),
+        0.0,
+    )
+
+    # Identificar stock parado: por estado si existe, si no por cobertura/venta
+    if 'estado' in terc.columns:
+        _parado = terc['estado'].astype(str).str.upper().str.strip().isin(_ESTADOS_PARADO)
+    else:
+        _parado = (terc['cobertura_sem'].fillna(0) >= 26) | (terc['prom_vta_uds'].fillna(0) <= 0)
+    par = terc[_parado]
+    if par.empty:
+        return pd.DataFrame()
+
+    # Métricas SOLO del stock parado, por marca
+    g = par.groupby('marca').agg(
         capital=('stock_valor_costo', 'sum'),
         stock_uds=('stock_total', 'sum'),
         cob_prom=('cobertura_sem', 'mean'),
         n_skus=('sku', 'nunique'),
-        vta_sem_uds=('prom_vta_uds', 'sum'),
     ).reset_index()
+    g = g.merge(brand[['marca', 'vta_sem_uds', 'sell_through']], on='marca', how='left')
 
-    # Sell-through aprox (1 semana de venta vs stock)
-    g['sell_through'] = np.where(
-        (g['vta_sem_uds'] + g['stock_uds']) > 0,
-        (g['vta_sem_uds'] / (g['vta_sem_uds'] + g['stock_uds']) * 100).round(1),
-        0.0,
-    )
-
-    # Margen efectivo por marca (dedup SKU)
+    # Margen efectivo por marca (dedup SKU, a nivel marca)
     if {'vta_soles_4sem', 'contrib_soles_4sem'}.issubset(terc.columns):
         sku = terc.drop_duplicates('sku')[['marca', 'vta_soles_4sem', 'contrib_soles_4sem']]
         m = sku.groupby('marca').agg(vta=('vta_soles_4sem', 'sum'),
@@ -362,10 +389,10 @@ DESTINATARIO: {_dest}
 REMITENTE: {buyer}, Senior Fashion Buyer - Moda Masculina, Ripley.
 
 SITUACIÓN (datos reales del inventario):
-- Capital inmovilizado en la marca: S/ {marca_row['capital']:,.0f} (a costo)
-- {int(marca_row['n_skus'])} SKUs, {int(marca_row['stock_uds']):,} unidades en stock
-- Cobertura promedio: {marca_row['cob_prom']:.0f} semanas (muy por encima del objetivo de 12)
-- Sell-through: {marca_row['sell_through']:.0f}% (bajo)
+- Capital inmovilizado en stock sin rotación (sobrestock + sin venta): S/ {marca_row['capital']:,.0f} (a costo)
+- {int(marca_row['n_skus'])} SKUs / {int(marca_row['stock_uds']):,} unidades en esa condición
+- Cobertura de ese stock: {marca_row['cob_prom']:.0f} semanas (muy por encima del objetivo de 12)
+- Sell-through de la marca: {marca_row['sell_through']:.0f}% (bajo)
 - Margen efectivo actual: {marca_row.get('margen_efectivo', 0):.0f}%
 
 Detalle por línea de producto (SKUs prioritarios a revisar):
