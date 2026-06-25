@@ -1835,7 +1835,7 @@ if nav_page == "🏠 Dashboard":
             )
 
         # Detalle de SKUs expandible
-        with st.expander(f"Ver {min(50, len(_df_est)):,} SKUs en estado {_est_sel}", expanded=False):
+        with st.expander(f"Ver {min(50, len(_df_est)):,} combos en estado {_est_sel}", expanded=False):
             _det_cols = ["sku", "nombre", "marca", "tienda", "stock_total", "prom_vta_uds",
                          "cobertura_sem", "stock_valor_costo", "edad_semanas"]
             if "pct_descuento" in _df_est.columns:
@@ -1871,7 +1871,7 @@ if nav_page == "🏠 Dashboard":
             )
         _dl_buf.seek(0)
         st.download_button(
-            f"📥 Descargar {len(_df_donut):,} SKUs — Todos los estados (.xlsx)",
+            f"📥 Descargar {len(_df_donut):,} combos SKU×Tienda — Todos los estados (.xlsx)",
             data=_dl_buf.getvalue(),
             file_name="Capi_todos_estados.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
