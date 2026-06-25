@@ -99,18 +99,19 @@ def classify(
                       para subdividir sin venta y para diferenciar
                       ESTANCADO vs LIQUIDAR.
         rango_antiguedad: string del rango (RANGO 0_3, RANGO 3_6, ...)
-                          del maestro. Si está disponible, tiene prioridad
-                          sobre edad_semanas para clasificar sin venta.
+                          del maestro. Solo es FALLBACK para clasificar sin
+                          venta cuando no hay edad_semanas; la edad manda.
         umbrales: dict opcional para sobrescribir UMBRALES_DEFAULT.
 
     Returns:
         str: uno de los estados de la clase Estado.
 
     Reglas:
-        - Sin venta (cobertura_sem None o NaN):
-            * <8 sem (o RANGO 0/0_3)   → LANZAMIENTO
-            * 8–26 sem (o RANGO 3_6)   → DORMIDO
-            * >26 sem (o RANGO 6+)     → MUERTO
+        - Sin venta (cobertura_sem None o NaN) — edad manda, rango es fallback:
+            * <8 sem                   → LANZAMIENTO (NUEVO SIN VENTA)
+            * 8–26 sem                 → DORMIDO
+            * >26 sem                  → MUERTO
+            * sin edad → rango (RANGO 0/0_3→NUEVO, 3_6→DORMIDO, 6+→MUERTO)
         - Con venta:
             * cob <4                   → QUIEBRE
             * 4–8                      → BAJA
@@ -150,24 +151,29 @@ def _classify_sin_venta(
     rango_antiguedad: Optional[str],
     umbrales: dict,
 ) -> str:
-    """Asigna LANZAMIENTO / DORMIDO / MUERTO según edad."""
-    # Prioridad 1: rango_antiguedad del maestro
-    rango = str(rango_antiguedad or '').strip()
-    sub = RANGO_SIN_VENTA_MAP.get(rango, None)
+    """Asigna LANZAMIENTO / DORMIDO / MUERTO.
+
+    La EDAD EN SEMANAS manda y revalida cuando se conoce; el rango_antiguedad
+    del maestro solo es fallback cuando no hay edad. (Antes el rango tenía
+    prioridad y metía en NUEVO productos de hasta ~13 sem, porque "RANGO 0_3"
+    cubre 0-3 meses; ahora el límite de NUEVO es estrictamente < edad_lanzamiento.)"""
+    # Prioridad 1: edad en semanas (fuente de verdad)
+    _edad_ok = edad_semanas is not None and not (
+        isinstance(edad_semanas, float) and pd.isna(edad_semanas))
+    if _edad_ok:
+        if edad_semanas < umbrales['edad_lanzamiento']:    # <8
+            return Estado.LANZAMIENTO
+        if edad_semanas < umbrales['edad_dormido']:        # 8–26
+            return Estado.DORMIDO
+        return Estado.MUERTO
+
+    # Prioridad 2 (fallback, sin edad): rango_antiguedad del maestro
+    sub = RANGO_SIN_VENTA_MAP.get(str(rango_antiguedad or '').strip(), None)
     if sub is not None:
         return sub
 
-    # Prioridad 2: edad en semanas
-    if edad_semanas is None:
-        # Fallback conservador: si no sabemos edad ni rango, marcar DORMIDO
-        # (no LANZAMIENTO porque sin info no asumimos que sea reciente)
-        return Estado.DORMIDO
-
-    if edad_semanas < umbrales['edad_lanzamiento']:    # <8
-        return Estado.LANZAMIENTO
-    if edad_semanas < umbrales['edad_dormido']:        # 8–26
-        return Estado.DORMIDO
-    return Estado.MUERTO
+    # Sin edad ni rango: conservador (no asumimos que sea reciente)
+    return Estado.DORMIDO
 
 
 # ─────────────────────────────────────────────────────────────
@@ -218,52 +224,33 @@ def classify_series(
     # Flag: edad es realmente conocida (no NaN ni None)
     edad_conocida = ed < 9999
 
-    # ── Sin venta: determinar por rango (prioridad) o edad ──
-    sin_venta_estado = np.full(n, Estado.DORMIDO, dtype=object)  # fallback
+    # ── Sin venta: la EDAD EN SEMANAS manda (revalida) cuando se conoce;
+    #    el rango_antiguedad solo es fallback para filas SIN edad.
+    #    (Antes el rango tenía prioridad y metía en NUEVO productos de hasta
+    #    ~13 sem, porque "RANGO 0_3" cubre 0-3 meses.) ──
+    sin_venta_estado = np.full(n, Estado.DORMIDO, dtype=object)  # fallback sin info
 
+    # Prioridad 2 (fallback): rango del maestro, SOLO donde no hay edad conocida
     if rango is not None:
         rng = rango.fillna('').astype(str).str.strip().values
         for rango_key, estado_val in RANGO_SIN_VENTA_MAP.items():
-            sin_venta_estado = np.where(rng == rango_key, estado_val, sin_venta_estado)
-        # Solo aplicar edad cuando rango no matcheó
-        rango_matched = np.isin(rng, list(RANGO_SIN_VENTA_MAP.keys()))
-        # Con edad conocida: cascada lanzamiento/dormido/muerto
-        sin_venta_estado = np.where(
-            ~rango_matched & edad_conocida & (ed < u['edad_lanzamiento']),
-            Estado.LANZAMIENTO, sin_venta_estado
-        )
-        sin_venta_estado = np.where(
-            ~rango_matched & edad_conocida & (ed >= u['edad_lanzamiento']) & (ed < u['edad_dormido']),
-            Estado.DORMIDO, sin_venta_estado
-        )
-        sin_venta_estado = np.where(
-            ~rango_matched & edad_conocida & (ed >= u['edad_dormido']),
-            Estado.MUERTO, sin_venta_estado
-        )
-        # Sin rango ni edad conocida: NaN edad → MUERTO (replica classify() fallthrough)
-        sin_venta_estado = np.where(
-            ~rango_matched & ~edad_conocida,
-            Estado.MUERTO, sin_venta_estado
-        )
-    else:
-        # Solo edad
-        sin_venta_estado = np.where(
-            edad_conocida & (ed < u['edad_lanzamiento']),
-            Estado.LANZAMIENTO, sin_venta_estado
-        )
-        sin_venta_estado = np.where(
-            edad_conocida & (ed >= u['edad_lanzamiento']) & (ed < u['edad_dormido']),
-            Estado.DORMIDO, sin_venta_estado
-        )
-        sin_venta_estado = np.where(
-            edad_conocida & (ed >= u['edad_dormido']),
-            Estado.MUERTO, sin_venta_estado
-        )
-        # Sin edad: NaN → MUERTO (replica classify() fallthrough)
-        sin_venta_estado = np.where(
-            ~edad_conocida,
-            Estado.MUERTO, sin_venta_estado
-        )
+            sin_venta_estado = np.where(
+                ~edad_conocida & (rng == rango_key), estado_val, sin_venta_estado
+            )
+
+    # Prioridad 1: edad en semanas (fuente de verdad; cubre todo el rango de edad)
+    sin_venta_estado = np.where(
+        edad_conocida & (ed < u['edad_lanzamiento']),
+        Estado.LANZAMIENTO, sin_venta_estado
+    )
+    sin_venta_estado = np.where(
+        edad_conocida & (ed >= u['edad_lanzamiento']) & (ed < u['edad_dormido']),
+        Estado.DORMIDO, sin_venta_estado
+    )
+    sin_venta_estado = np.where(
+        edad_conocida & (ed >= u['edad_dormido']),
+        Estado.MUERTO, sin_venta_estado
+    )
 
     # ── Con venta: cascada de cobertura ──
     # Para LIQUIDAR: requiere edad real conocida (no NaN→9999) y > edad_maduro

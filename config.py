@@ -43,12 +43,14 @@ UMBRALES_DEFAULT = {
 # ─────────────────────────────────────────────────────────────
 #  MAPEO DE rango_antiguedad (del maestro) → ESTADO SIN VENTA
 # ─────────────────────────────────────────────────────────────
-# Si rango_antiguedad viene poblado en el maestro, tiene prioridad sobre
-# edad_semanas como criterio para asignar sub-estado SIN VENTA.
+# Fallback para asignar sub-estado SIN VENTA cuando NO hay edad_semanas.
+# La edad en semanas manda y revalida cuando se conoce (ver taxonomia.py);
+# este mapa solo aplica a filas sin edad. OJO: "RANGO 0_3" = 0-3 meses
+# (hasta ~13 sem), por eso ya no se usa como criterio de NUEVO si hay edad.
 
 RANGO_SIN_VENTA_MAP = {
-    "RANGO 0":     "NUEVO SIN VENTA",  # recién llegado, <2 meses aprox
-    "RANGO 0_3":   "NUEVO SIN VENTA",  # 0-3 meses → mayoritariamente <8 sem
+    "RANGO 0":     "NUEVO SIN VENTA",  # recién llegado (solo si no hay edad)
+    "RANGO 0_3":   "NUEVO SIN VENTA",  # 0-3 meses (solo si no hay edad)
     "RANGO 3_6":   "DORMIDO",          # 3-6 meses, ya debería vender
     "RANGO 6_9":   "MUERTO",           # 6-9 meses obsoleto
     "RANGO 9_12":  "MUERTO",           # 9-12 meses
