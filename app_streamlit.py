@@ -2544,9 +2544,12 @@ if nav_page == "🏠 Dashboard":
                         'Dscto': '{:.0%}', 'Margen efect.': '{:.0%}',
                         'Venta en riesgo S//sem': 'S/ {:,.0f}', 'Contrib. en riesgo S//sem': 'S/ {:,.0f}',
                     }, na_rep="—"), use_container_width=True, hide_index=True)
+                    st.markdown(f"""
+                    <div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:10px; padding:12px 16px; margin-top:8px; font-size:0.74rem; color:var(--capi-text2); line-height:1.5;">
+                        🚚 <strong style="color:var(--capi-text);">ATP = Available To Promise</strong> (stock del CD disponible para prometer). Como el reporte del CD <strong>no es en tiempo real</strong>, solo se compromete el <strong>{cd_prometible_pct}%</strong> del stock reportado (configurable en ⚙️); el resto es colchón de seguridad. Ese stock es un <strong>pool único compartido</strong> entre las tiendas que piden el SKU: se reparte por prioridad y lo que no alcanza va a <strong>cola</strong> (transferencia u orden a proveedor). Los SKUs con CD volátil entre cortes van flagueados ⚠️.
+                    </div>""", unsafe_allow_html=True)
                     st.caption("La tabla y la asignación del ATP se priorizan por CONTRIBUCIÓN en riesgo (venta × margen efectivo), no por venta: un SKU con descuento alto vende más unidades pero puede aportar menos al P&L. Dscto y Margen efect. dan el contexto para decidir si la velocidad es demanda real o evento de precio.")
-                    st.caption(f"La acción sale del plan del motor: despacho si hay stock en CD (cantidades del plan de reposición), transferencia si otra tienda tiene exceso, orden de compra si no hay stock en la cadena. "
-                               f"ATP: el reporte de CD no es tiempo real, por eso solo el {cd_prometible_pct}% del CD reportado se considera prometible (configurable en ⚙️) y los SKUs con CD volátil entre cortes van flagueados ⚠️.")
+                    st.caption("La acción sale del plan del motor: despacho si hay stock en CD (cantidades del plan de reposición), transferencia si otra tienda tiene exceso, orden de compra si no hay stock en la cadena.")
 
                 _vp_xl_buf = io.BytesIO()
                 with pd.ExcelWriter(_vp_xl_buf, engine='openpyxl') as _vp_w:
