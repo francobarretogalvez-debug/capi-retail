@@ -853,33 +853,6 @@ with st.sidebar:
                 st.session_state["nav_page"] = _full
                 st.rerun()
 
-        # ── ESTADO DEL STOCK ──
-        # Vistas de diagnóstico transversal (todas las marcas): salud, cobertura,
-        # venta cero y antigüedad. Separadas de Visión General (solo Dashboard).
-        _NAV_ESTADO = [
-            ("🩺", "Salud del Stock"),
-            ("📈", "Cobertura x Tienda"),
-            ("📲", "Productos Venta Cero"),
-            ("📊", "Gestión por Antigüedad"),
-        ]
-        if _DEMO_MODE:
-            # Demo: solo las vistas protagonistas del guion de 3 minutos
-            _NAV_ESTADO = [
-                ("🩺", "Salud del Stock"),
-                ("📲", "Productos Venta Cero"),
-            ]
-        st.markdown('<div class="sidebar-section-label">ESTADO DEL STOCK</div>', unsafe_allow_html=True)
-        for _icon, _label in _NAV_ESTADO:
-            _full = f"{_icon} {_label}"
-            _is_active = st.session_state["nav_page"] == _full
-            if st.button(
-                _full, key=f"nav_{_label}",
-                use_container_width=True,
-                type="primary" if _is_active else "secondary",
-            ):
-                st.session_state["nav_page"] = _full
-                st.rerun()
-
         # ── GESTIÓN DE MARCAS PROPIAS ──
         # Mismo cluster que terceras, filtrado a las 7 marcas propias.
         if not _DEMO_MODE:
@@ -946,6 +919,33 @@ with st.sidebar:
                 ):
                     st.session_state["nav_page"] = _full
                     st.rerun()
+
+        # ── ESTADO DEL STOCK ──
+        # Vistas de diagnóstico transversal (todas las marcas): salud, cobertura,
+        # venta cero y antigüedad. Separadas de Visión General (solo Dashboard).
+        _NAV_ESTADO = [
+            ("🩺", "Salud del Stock"),
+            ("📈", "Cobertura x Tienda"),
+            ("📲", "Productos Venta Cero"),
+            ("📊", "Gestión por Antigüedad"),
+        ]
+        if _DEMO_MODE:
+            # Demo: solo las vistas protagonistas del guion de 3 minutos
+            _NAV_ESTADO = [
+                ("🩺", "Salud del Stock"),
+                ("📲", "Productos Venta Cero"),
+            ]
+        st.markdown('<div class="sidebar-section-label">ESTADO DEL STOCK</div>', unsafe_allow_html=True)
+        for _icon, _label in _NAV_ESTADO:
+            _full = f"{_icon} {_label}"
+            _is_active = st.session_state["nav_page"] == _full
+            if st.button(
+                _full, key=f"nav_{_label}",
+                use_container_width=True,
+                type="primary" if _is_active else "secondary",
+            ):
+                st.session_state["nav_page"] = _full
+                st.rerun()
 
         st.markdown(f'<div style="border-bottom:1px solid {SLATE_200}; margin:4px 0 12px 0;"></div>', unsafe_allow_html=True)
 
@@ -1577,86 +1577,6 @@ def _tipo_evento_map(_path):
 if nav_page == "🏠 Dashboard":
     st.markdown(f'<div class="section-header"><h3>Dashboard</h3><span class="live-badge">LIVE</span></div>', unsafe_allow_html=True)
 
-    # ── Delta KPIs semanales (Snapshots) ──
-    if _HAS_SNAPSHOTS:
-        _snap_weeks = snapshots_engine.list_available_weeks()
-        if len(_snap_weeks) >= 2:
-            _snap_sem_b = _snap_weeks[-1]
-            _snap_sem_a = _snap_weeks[-2]
-            _snap_cmp = snapshots_engine.compare_weeks(_snap_sem_a, _snap_sem_b)
-            if _snap_cmp:
-                _sd = _snap_cmp['deltas']
-                _sa = _snap_cmp['semana_a']
-                _sb = _snap_cmp['semana_b']
-
-                def _delta_arrow(val, pct, invert=False):
-                    """Genera flecha + color para un delta."""
-                    if pct > 0:
-                        _c = "#10b981" if not invert else "#ef4444"
-                        _arr = "▲"
-                    elif pct < 0:
-                        _c = "#ef4444" if not invert else "#10b981"
-                        _arr = "▼"
-                    else:
-                        _c = "var(--capi-text2)"
-                        _arr = "–"
-                    return f'<span style="color:{_c}; font-weight:600;">{_arr} {abs(pct):.1f}%</span>'
-
-                # ── Venta del PERÍODO (no acumulado) ──
-                # venta_soles/unidades de la base son ACUMULADAS (temporada): crecen
-                # monótono cada snapshot. Mostrar el acumulado como "venta de la semana"
-                # engaña (infla ~27x y el % siempre da verde). Mostramos la venta del
-                # período = acumulado_b − acumulado_a (= el delta), con el promedio
-                # semanal como contexto (estable, sin comparar contra un período previo
-                # de distinto largo que volvería el % volátil/engañoso).
-                def _weeks_between(_wa, _wb):
-                    try:
-                        _ya, _wwa = _wa.split("-")
-                        _yb, _wwb = _wb.split("-")
-                        if _ya == _yb:
-                            return int(_wwb) - int(_wwa)
-                    except Exception:
-                        pass
-                    return 0
-
-                _per_weeks = _weeks_between(_snap_sem_a, _snap_sem_b)
-                _per_soles = _sd['venta_soles_delta']
-                _per_uds   = _sd['venta_unidades_delta']
-
-                def _per_week_note(_total):
-                    if _per_weeks > 0:
-                        return f'<span style="color:var(--capi-text2); font-weight:600;">≈ {_total/_per_weeks:,.0f}/sem</span>'
-                    return ""
-
-                _per_lbl = f"({_per_weeks} sem)" if _per_weeks > 0 else "(período)"
-                _delta_cards = [
-                    (f"Venta S/ {_per_lbl}", f"S/ {_per_soles:,.0f}", _per_week_note(_per_soles)),
-                    (f"Venta Uds {_per_lbl}", f"{_per_uds:,.0f}", _per_week_note(_per_uds)),
-                    ("Stock Uds", f"{_sb['stock_total']:,}", _delta_arrow(_sd['stock_total_delta'], _sd['stock_total_pct'], invert=True)),
-                    ("Cob Prom", f"{_sb['cob_promedio']:.1f} sem", _delta_arrow(_sd['cob_promedio_delta'], _sd['cob_promedio_pct'])),
-                ]
-
-                _delta_html = f"""<div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:12px; padding:14px 18px; margin-bottom:16px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <span style="font-weight:600; color:var(--capi-text); font-size:0.82rem;">📊 Período {_snap_sem_a} → {_snap_sem_b}</span>
-                        <span style="font-size:0.68rem; color:var(--capi-text2);">{len(_snap_weeks)} semanas históricas</span>
-                    </div>
-                    <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px;">"""
-
-                for _lbl, _val, _arr in _delta_cards:
-                    _delta_html += f"""<div style="text-align:center;">
-                        <div style="font-size:0.68rem; color:var(--capi-text2); margin-bottom:2px;">{_lbl}</div>
-                        <div style="font-size:1.1rem; font-weight:700; color:var(--capi-text);">{_val}</div>
-                        <div style="font-size:0.75rem;">{_arr}</div>
-                    </div>"""
-
-                _delta_html += "</div></div>"
-                st.markdown(_delta_html, unsafe_allow_html=True)
-                st.caption(
-                    f"Venta = lo vendido en el período {_snap_sem_a}→{_snap_sem_b} ({_per_lbl.strip('()')}), no acumulado, "
-                    f"con su promedio semanal. Stock y Cobertura son foto al cierre de {_snap_sem_b} (Δ vs {_snap_sem_a})."
-                )
-
     # ── Filtros del dashboard ──
     st.markdown(f"""<div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:12px; padding:12px 16px; margin-bottom:16px;">
     <span style="font-weight:600; color:var(--capi-text); font-size:0.9rem;">Filtros del Dashboard</span>
@@ -1877,444 +1797,6 @@ if nav_page == "🏠 Dashboard":
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="download_all_estados",
         )
-
-    # ── Capital + Venta a Costo + Cobertura por marca (stacked bar) ──
-    st.markdown("---")
-
-    group_col = "marca" if "marca" in df_dash.columns else "categoria"
-    group_label = "Marca" if group_col == "marca" else "Categoría"
-
-    # Calcular capital, venta a costo y cobertura por marca
-    _has_vta = "vta_soles_4sem" in df_dash.columns and "contrib_soles_4sem" in df_dash.columns
-
-    # Capital: sumar a nivel SKU×Tienda (cada fila es un combo, correcto)
-    capital_grp = (
-        df_dash.groupby(group_col)["stock_valor_costo"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(10)
-        .reset_index()
-    )
-    capital_grp.columns = [group_label, "stock_valor_costo"]
-
-    # Venta a costo: vta_soles_4sem y contrib_soles_4sem son a nivel SKU (no SKU×Tienda)
-    # → deduplicar por SKU antes de sumar para no inflar por número de tiendas
-    if _has_vta:
-        _df_sku_vta = df_dash.drop_duplicates("sku")[[group_col, "vta_soles_4sem", "contrib_soles_4sem"]].copy()
-        _vta_marca = _df_sku_vta.groupby(group_col).agg(
-            vta_soles=("vta_soles_4sem", "sum"),
-            contrib_soles=("contrib_soles_4sem", "sum"),
-        ).reset_index()
-        _vta_marca.columns = [group_label, "_vta_soles", "_contrib_soles"]
-        _vta_marca["vta_costo"] = (_vta_marca["_vta_soles"] - _vta_marca["_contrib_soles"]).clip(lower=0)
-        capital_grp = capital_grp.merge(_vta_marca[[group_label, "vta_costo"]], on=group_label, how="left")
-        capital_grp["vta_costo"] = capital_grp["vta_costo"].fillna(0)
-        capital_grp["cobertura_meses"] = capital_grp.apply(
-            lambda r: round(r["stock_valor_costo"] / r["vta_costo"], 1) if r["vta_costo"] > 0 else None, axis=1
-        )
-    else:
-        capital_grp["vta_costo"] = 0
-        capital_grp["cobertura_meses"] = None
-
-    capital_grp = capital_grp.sort_values("stock_valor_costo", ascending=True)
-
-    _max_total = (capital_grp["stock_valor_costo"] + capital_grp["vta_costo"]).max()
-
-    # ── Renderizar stacked bar con HTML (capital + venta a costo + badge cobertura) ──
-    st.markdown(f"""<div style="margin-bottom:12px;">
-    <div style="font-size:14px; font-weight:600; color:var(--capi-text); margin-bottom:4px;">Inventario a Costo por {group_label} (Top 10)</div>
-    <div style="display:flex; gap:16px; font-size:12px; color:var(--capi-text2); margin-bottom:12px;">
-        <span style="display:flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; border-radius:2px; background:{TEAL_700}; display:inline-block;"></span>Capital a costo</span>
-        <span style="display:flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; border-radius:2px; background:#5DCAA5; display:inline-block;"></span>Venta a costo (4 sem)</span>
-        <span style="display:flex; align-items:center; gap:4px;"><span style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:4px; padding:0 5px; font-size:10px; color:var(--capi-text);">5.2</span>Cobertura (meses)</span>
-    </div>
-    </div>""", unsafe_allow_html=True)
-
-    _bars_html = ""
-    for _, _row in capital_grp.iloc[::-1].iterrows():
-        _cap = _row["stock_valor_costo"]
-        _vta = _row["vta_costo"]
-        _cob = _row.get("cobertura_meses", None)
-        _marca_name = _row[group_label]
-
-        _total = _cap + _vta
-        _bar_w_pct = max(5, _total / _max_total * 100) if _max_total > 0 else 5
-        _cap_pct = (_cap / _total * 100) if _total > 0 else 100
-        _vta_pct = 100 - _cap_pct
-
-        # Texto dentro de barras
-        _cap_txt = f"S/ {_cap/1e6:.1f}M" if _cap >= 1e6 else f"S/ {_cap:,.0f}"
-        _vta_txt = f"S/ {_vta/1e6:.1f}M" if _vta >= 1e6 else f"S/ {_vta:,.0f}"
-
-        # Semáforo cobertura: verde <3m, neutro 3-5m, rojo >5m
-        if _cob is not None:
-            if _cob <= 3:
-                _cob_bg, _cob_color, _cob_border = "#ECFDF5", "#059669", "#A7F3D0"
-            elif _cob <= 5:
-                _cob_bg, _cob_color, _cob_border = SLATE_100, SLATE_700, SLATE_200
-            else:
-                _cob_bg, _cob_color, _cob_border = "#FEF2F2", "#DC2626", "#FECACA"
-            _cob_html = f'<span style="background:{_cob_bg}; color:{_cob_color}; border:1px solid {_cob_border}; border-radius:6px; padding:2px 8px; font-size:11px; font-weight:600; min-width:50px; text-align:center; white-space:nowrap;">{_cob:.1f}</span>'
-        else:
-            _cob_html = f'<span style="background:var(--capi-bg-surface); color:var(--capi-text2); border:1px solid var(--capi-border); border-radius:6px; padding:2px 8px; font-size:11px; min-width:50px; text-align:center;">—</span>'
-
-        _bars_html += f"""<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
-            <span style="width:130px; font-size:12px; font-weight:500; color:{SLATE_800}; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex-shrink:0;">{_marca_name}</span>
-            <div style="flex:1; display:flex; align-items:center; gap:6px;">
-                <div style="width:{_bar_w_pct:.1f}%; display:flex; height:22px; border-radius:4px; overflow:hidden;">
-                    <div style="width:{_cap_pct:.0f}%; background:{TEAL_700}; display:flex; align-items:center; justify-content:flex-end; padding-right:5px; min-width:40px;">
-                        <span style="font-size:10px; color:white; font-weight:500; white-space:nowrap;">{_cap_txt}</span>
-                    </div>
-                    <div style="width:{_vta_pct:.0f}%; background:#5DCAA5; display:flex; align-items:center; padding-left:4px; min-width:{'40px' if _vta > 0 else '0'};">
-                        <span style="font-size:10px; color:white; font-weight:500; white-space:nowrap;">{_vta_txt if _vta > 0 else ''}</span>
-                    </div>
-                </div>
-                {_cob_html}
-            </div>
-        </div>"""
-
-    st.markdown(_bars_html, unsafe_allow_html=True)
-
-    # ── KPIs ───────────────────────────────────────────────────────
-
-    st.markdown(f'<div class="section-header"><h3>KPIs de Inventario</h3><span class="live-badge">10 ESTADOS</span></div>', unsafe_allow_html=True)
-
-    # Fila 1: estados con stock en movimiento
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        st.markdown(_kpi_html(s["n_critico"], "🔴 QUIEBRE", "red"), unsafe_allow_html=True)
-    with c2:
-        st.markdown(_kpi_html(s["n_precritico"], "🟠 PRE-QUIEBRE", "orange"), unsafe_allow_html=True)
-    with c3:
-        st.markdown(_kpi_html(s["n_optimo"], "🟢 ÓPTIMO", "green"), unsafe_allow_html=True)
-    with c4:
-        st.markdown(_kpi_html(s["n_alto"], "🟡 ALTO", "yellow"), unsafe_allow_html=True)
-    with c5:
-        st.markdown(_kpi_html(s["n_sobrestock"], "🟠 SOBRESTOCK", "darkred"), unsafe_allow_html=True)
-
-    # Fila 2: estados sin venta + liquidar
-    c6, c7, c8, c9, c10 = st.columns(5)
-    with c6:
-        st.markdown(_kpi_html(s["n_liquidar"], "💀 LIQUIDAR", "darkred"), unsafe_allow_html=True)
-    with c7:
-        st.markdown(_kpi_html(s["n_nuevo_sv"], "🆕 SIN VENTA"), unsafe_allow_html=True)
-    with c8:
-        st.markdown(_kpi_html(s["n_dormido"], "😴 DORMIDO"), unsafe_allow_html=True)
-    with c9:
-        st.markdown(_kpi_html(s["n_muerto"], "💀 MUERTO"), unsafe_allow_html=True)
-    with c10:
-        st.markdown(_kpi_html(s["n_estancado"], "📦 ESTANCADO", "gray"), unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    c11, c12, c13 = st.columns(3)
-    with c11:
-        st.markdown(_kpi_html(f"{s['uds_reponer']} uds", "📦 A Reponer"), unsafe_allow_html=True)
-    with c12:
-        st.markdown(_kpi_html(f"{s['uds_transferir']} uds", "🔄 A Transferir"), unsafe_allow_html=True)
-    with c13:
-        st.markdown(_kpi_html(s["n_acciones_precio"], "💰 Acciones Precio"), unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    # ── Tabs ───────────────────────────────────────────────────────
-
-    st.markdown("---")
-
-    # Contar combos obsoletos (rangos 6_9, 9_12, 12_99)
-    _RANGOS_OBSOLETOS_TAB = {"RANGO 6_9", "RANGO 9_12", "RANGO 12_99"}
-    _n_obs = 0
-    if "rango_antiguedad" in df_cob.columns:
-        _n_obs = len(df_cob[df_cob["rango_antiguedad"].isin(_RANGOS_OBSOLETOS_TAB)])
-
-# Navegación controlada por sidebar radio (nav_page)
-# Si nav_page es None (antes del análisis), no se renderiza nada aquí
-
-
-# ─── TAB 0: Acciones del Día ─────────────────────────────────
-#  Resumen por MARCA con desplegable por TIENDA
-#  Filtros de temporada y rango de antigüedad (obsoletos excluidos por defecto)
-
-if nav_page == "🏠 Dashboard":
-
-    # ══════════════════════════════════════════════════════════
-    #  MARGEN EFECTIVO — Contribución / VtasMF (4 semanas)
-    # ══════════════════════════════════════════════════════════
-    if _margen_global is not None and _vta_soles_total > 0:
-        st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
-        st.markdown(f'<div class="section-header"><h3>💰 Margen Efectivo</h3><span class="live-badge">RENTABILIDAD</span></div>', unsafe_allow_html=True)
-        st.caption("Contribución / Venta MF — últimas 4 semanas, ponderado por volumen de venta")
-
-        # ── KPIs de margen ──
-        _mk1, _mk2, _mk3 = st.columns(3)
-        _mg_pct = _margen_global * 100
-        _mg_color = "#10b981" if _mg_pct >= 35 else ("#f59e0b" if _mg_pct >= 25 else "#ef4444")
-        _mg_bg = "#F0FDF4" if _mg_pct >= 35 else ("#FFFBEB" if _mg_pct >= 25 else "#FEF2F2")
-        with _mk1:
-            st.markdown(f"""<div style="background:{_mg_bg}; border-radius:12px; padding:16px 20px; border-left:4px solid {_mg_color};">
-                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Margen efectivo global</div>
-                <div style="font-size:1.8rem; font-weight:700; color:{_mg_color};">{_mg_pct:.1f}%</div>
-                <div style="font-size:0.7rem; color:var(--capi-text2);">Contribución / Venta (4 sem)</div>
-            </div>""", unsafe_allow_html=True)
-        with _mk2:
-            st.markdown(f"""<div style="background:#EFF6FF; border-radius:12px; padding:16px 20px; border-left:4px solid #3b82f6;">
-                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Venta total (4 sem)</div>
-                <div style="font-size:1.8rem; font-weight:700; color:#3b82f6;">S/ {_vta_soles_total:,.0f}</div>
-                <div style="font-size:0.7rem; color:var(--capi-text2);">Sin IGV</div>
-            </div>""", unsafe_allow_html=True)
-        with _mk3:
-            st.markdown(f"""<div style="background:#F0FDF4; border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
-                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Contribución total (4 sem)</div>
-                <div style="font-size:1.8rem; font-weight:700; color:{TEAL_700};">S/ {_contrib_soles_total:,.0f}</div>
-                <div style="font-size:0.7rem; color:var(--capi-text2);">Venta - Costo</div>
-            </div>""", unsafe_allow_html=True)
-
-        # ── Tabla de margen por marca ──
-        if _margen_por_marca:
-            st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-            st.markdown(f"<h4 style='color:{SLATE_800}; margin:0 0 8px 0;'>Margen por marca</h4>", unsafe_allow_html=True)
-
-            _max_vta_marca = max(r['vta_soles'] for r in _margen_por_marca) if _margen_por_marca else 1
-            _rows_html = ""
-            for _mr in _margen_por_marca:
-                _m_pct = _mr['margen_efectivo'] * 100
-                _bar_w = max(2, int(_mr['vta_soles'] / _max_vta_marca * 100))
-                _m_clr = "#10b981" if _m_pct >= 35 else ("#f59e0b" if _m_pct >= 25 else "#ef4444")
-                _rows_html += f"""<tr>
-                    <td style="padding:8px 12px; font-weight:500; white-space:nowrap;">{_mr['marca']}</td>
-                    <td style="padding:8px 12px; text-align:right;">S/ {_mr['vta_soles']:,.0f}</td>
-                    <td style="padding:8px 12px; text-align:right;">S/ {_mr['contrib_soles']:,.0f}</td>
-                    <td style="padding:8px 12px; text-align:right; font-weight:600; color:{_m_clr};">{_m_pct:.1f}%</td>
-                    <td style="padding:8px 12px; width:120px;">
-                        <div style="background:#E2E8F0; border-radius:4px; height:14px; width:100%;">
-                            <div style="background:{_m_clr}; border-radius:4px; height:14px; width:{_bar_w}%;"></div>
-                        </div>
-                    </td>
-                </tr>"""
-
-            st.markdown(f"""<div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
-                <thead>
-                    <tr style="background:var(--capi-bg-surface); border-bottom:2px solid var(--capi-border);">
-                        <th style="padding:8px 12px; text-align:left;">Marca</th>
-                        <th style="padding:8px 12px; text-align:right;">Venta S/</th>
-                        <th style="padding:8px 12px; text-align:right;">Contribución S/</th>
-                        <th style="padding:8px 12px; text-align:right;">Margen %</th>
-                        <th style="padding:8px 12px; text-align:left;">Vol. relativo</th>
-                    </tr>
-                </thead>
-                <tbody>{_rows_html}</tbody>
-            </table></div>""", unsafe_allow_html=True)
-
-    # ══════════════════════════════════════════════════════════
-    #  TICKET PROMEDIO + COMPARATIVO VS AÑO PASADO (LY)
-    # ══════════════════════════════════════════════════════════
-    # En modo demo se oculta la sección YoY para aligerar el Dashboard (guion 3 min)
-    if (not _DEMO_MODE) and ly_comparison and ly_comparison.get('ticket_actual_global', 0) > 0:
-        st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
-        st.markdown(f'<div class="section-header"><h3>🎫 Ticket Promedio & vs Año Pasado</h3><span class="live-badge">YoY</span></div>', unsafe_allow_html=True)
-
-        _ly_g = ly_comparison.get('ly_global')
-        _sem_act = ly_comparison.get('semana_actual', '?')
-        _ticket_act = ly_comparison.get('ticket_actual_global', 0)
-
-        _tk1, _tk2, _tk3, _tk4 = st.columns(4)
-        with _tk1:
-            st.markdown(f"""<div style="background:#EFF6FF; border-radius:12px; padding:16px 20px; border-left:4px solid #3b82f6;">
-                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Ticket promedio actual</div>
-                <div style="font-size:1.8rem; font-weight:700; color:#3b82f6;">S/ {_ticket_act:,.0f}</div>
-                <div style="font-size:0.7rem; color:var(--capi-text2);">Venta S/ / Unidades (4 sem)</div>
-            </div>""", unsafe_allow_html=True)
-
-        if _ly_g:
-            _ticket_ly = _ly_g.get('ticket_ly', 0)
-            _d_ticket = _ly_g.get('delta_ticket_pct', 0)
-            _d_vta = _ly_g.get('delta_vta_soles_pct', 0)
-            _d_uds = _ly_g.get('delta_vta_uds_pct', 0)
-            _year_ly = _ly_g.get('año_ly', '?')
-
-            _clr_ticket = "#10b981" if _d_ticket >= 0 else "#ef4444"
-            _clr_vta = "#10b981" if _d_vta >= 0 else "#ef4444"
-            _clr_uds = "#10b981" if _d_uds >= 0 else "#ef4444"
-            _arrow_ticket = "▲" if _d_ticket >= 0 else "▼"
-            _arrow_vta = "▲" if _d_vta >= 0 else "▼"
-            _arrow_uds = "▲" if _d_uds >= 0 else "▼"
-
-            with _tk2:
-                st.markdown(f"""<div style="background:{'#F0FDF4' if _d_ticket >= 0 else '#FEF2F2'}; border-radius:12px; padding:16px 20px; border-left:4px solid {_clr_ticket};">
-                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Δ Ticket vs LY (sem {_sem_act})</div>
-                    <div style="font-size:1.8rem; font-weight:700; color:{_clr_ticket};">{_arrow_ticket} {abs(_d_ticket):.1f}%</div>
-                    <div style="font-size:0.7rem; color:var(--capi-text2);">LY: S/ {_ticket_ly:,.0f} ({_year_ly})</div>
-                </div>""", unsafe_allow_html=True)
-            with _tk3:
-                st.markdown(f"""<div style="background:{'#F0FDF4' if _d_vta >= 0 else '#FEF2F2'}; border-radius:12px; padding:16px 20px; border-left:4px solid {_clr_vta};">
-                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Δ Venta S/ vs LY</div>
-                    <div style="font-size:1.8rem; font-weight:700; color:{_clr_vta};">{_arrow_vta} {abs(_d_vta):.1f}%</div>
-                    <div style="font-size:0.7rem; color:var(--capi-text2);">Sem actual vs misma sem {_year_ly}</div>
-                </div>""", unsafe_allow_html=True)
-            with _tk4:
-                st.markdown(f"""<div style="background:{'#F0FDF4' if _d_uds >= 0 else '#FEF2F2'}; border-radius:12px; padding:16px 20px; border-left:4px solid {_clr_uds};">
-                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Δ Unidades vs LY</div>
-                    <div style="font-size:1.8rem; font-weight:700; color:{_clr_uds};">{_arrow_uds} {abs(_d_uds):.1f}%</div>
-                    <div style="font-size:0.7rem; color:var(--capi-text2);">Sem actual vs misma sem {_year_ly}</div>
-                </div>""", unsafe_allow_html=True)
-
-            # ── Tabla comparativa por marca ──
-            _ly_marca_data = ly_comparison.get('ly_marca', [])
-            if _ly_marca_data:
-                st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-                st.markdown(f"<h4 style='color:{SLATE_800}; margin:0 0 8px 0;'>Comparativo por Marca — Semana {_sem_act} actual vs {_year_ly}</h4>", unsafe_allow_html=True)
-
-                _ly_rows_html = ""
-                for _lm in _ly_marca_data:
-                    _m_name = _lm.get('marca', '')
-                    _m_ticket = _lm.get('ticket', 0)
-                    _m_ticket_ly = _lm.get('ticket_ly', 0)
-                    _m_dvta = _lm.get('delta_vta_pct', 0)
-                    _m_dticket = _lm.get('delta_ticket_pct', 0)
-                    _clr_mv = "#10b981" if _m_dvta >= 0 else "#ef4444"
-                    _clr_mt = "#10b981" if _m_dticket >= 0 else "#ef4444"
-                    _arr_mv = "▲" if _m_dvta >= 0 else "▼"
-                    _arr_mt = "▲" if _m_dticket >= 0 else "▼"
-                    _ly_rows_html += f"""<tr>
-                        <td style="padding:6px 10px; font-weight:500;">{_m_name}</td>
-                        <td style="padding:6px 10px; text-align:right;">S/ {_m_ticket:,.0f}</td>
-                        <td style="padding:6px 10px; text-align:right; color:var(--capi-text2);">S/ {_m_ticket_ly:,.0f}</td>
-                        <td style="padding:6px 10px; text-align:right; font-weight:600; color:{_clr_mt};">{_arr_mt} {abs(_m_dticket):.1f}%</td>
-                        <td style="padding:6px 10px; text-align:right; font-weight:600; color:{_clr_mv};">{_arr_mv} {abs(_m_dvta):.1f}%</td>
-                    </tr>"""
-
-                st.markdown(f"""<div style="overflow-x:auto; max-height:400px; overflow-y:auto;">
-                <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
-                    <thead>
-                        <tr style="background:var(--capi-bg-surface); border-bottom:2px solid var(--capi-border); position:sticky; top:0;">
-                            <th style="padding:8px 10px; text-align:left;">Marca</th>
-                            <th style="padding:8px 10px; text-align:right;">Ticket Actual</th>
-                            <th style="padding:8px 10px; text-align:right;">Ticket LY</th>
-                            <th style="padding:8px 10px; text-align:right;">Δ Ticket</th>
-                            <th style="padding:8px 10px; text-align:right;">Δ Venta S/</th>
-                        </tr>
-                    </thead>
-                    <tbody>{_ly_rows_html}</tbody>
-                </table></div>""", unsafe_allow_html=True)
-        else:
-            with _tk2:
-                st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {SLATE_400};">
-                    <div style="font-size:0.75rem; color:var(--capi-text2);">Comparativo LY</div>
-                    <div style="font-size:1rem; color:var(--capi-text2);">Sin data para sem {_sem_act}</div>
-                </div>""", unsafe_allow_html=True)
-
-    # (Sección "Acciones del Día" eliminada — info disponible en vistas del sidebar)
-
-    # ── Evolución Semanal (Prompt B — Snapshots Engine) ──
-    if _HAS_SNAPSHOTS:
-        _snap_weeks = snapshots_engine.list_available_weeks()
-        if len(_snap_weeks) >= 2:
-            st.markdown("---")
-            st.markdown(f'<div class="section-header"><h3>📊 Evolución Semanal</h3><span class="live-badge">{len(_snap_weeks)} SEM</span></div>', unsafe_allow_html=True)
-
-            # Snapshots a nivel SKU (cacheado) → permite filtrar por marca/temporada/rango
-            @st.cache_data(show_spinner=False)
-            def _evol_snaps_full():
-                _frames = []
-                for _sw in snapshots_engine.list_available_weeks():
-                    _d = snapshots_engine.load_snapshot(_sw)
-                    if _d is not None and not _d.empty:
-                        _frames.append(_d)
-                return pd.concat(_frames, ignore_index=True) if _frames else pd.DataFrame()
-
-            _evol_all = _evol_snaps_full()
-
-            if not _evol_all.empty:
-                # ── Filtros: marca / temporada / rango de edad ──
-                _evf1, _evf2, _evf3 = st.columns(3)
-                with _evf1:
-                    _ev_marcas = ["Todas"] + sorted(
-                        [m for m in _evol_all['marca'].dropna().astype(str).str.strip().unique() if m])
-                    _ev_marca = st.selectbox("Marca", _ev_marcas, key="evol_marca")
-                with _evf2:
-                    _ev_temps = ["Todas"] + sorted(
-                        [t for t in _evol_all['temporada'].dropna().astype(str).str.strip().unique() if t])
-                    _ev_temp = st.selectbox("Temporada", _ev_temps, key="evol_temp")
-                with _evf3:
-                    _ev_rangos = ["Todos"] + sorted(
-                        [r for r in _evol_all['rango_antiguedad'].dropna().astype(str).str.strip().unique() if r])
-                    _ev_rango = st.selectbox("Rango de Edad", _ev_rangos, key="evol_rango")
-
-                _ev_df = _evol_all.copy()
-                if _ev_marca != "Todas":
-                    _ev_df = _ev_df[_ev_df['marca'].astype(str).str.strip() == _ev_marca]
-                if _ev_temp != "Todas":
-                    _ev_df = _ev_df[_ev_df['temporada'].astype(str).str.strip() == _ev_temp]
-                if _ev_rango != "Todos":
-                    _ev_df = _ev_df[_ev_df['rango_antiguedad'].astype(str).str.strip() == _ev_rango]
-
-                # Total por semana (preservando orden cronológico de los snapshots).
-                # Venta = vta_u_sem_1ant (venta REAL de esa semana). 'unidades_vendidas'
-                # es un acumulado de temporada (crece monótono) → no sirve como
-                # "venta por semana". Stock sí es foto puntual (stock_total).
-                _ev_orden = snapshots_engine.list_available_weeks()
-                _ev_venta_col = 'vta_u_sem_1ant' if 'vta_u_sem_1ant' in _ev_df.columns else 'unidades_vendidas'
-                _snap_df = (_ev_df.groupby('semana_iso')
-                            .agg(venta_total_unidades=(_ev_venta_col, 'sum'),
-                                 stock_total_unidades=('stock_total', 'sum'),
-                                 n_skus=('sku', 'nunique'))
-                            .reindex(_ev_orden).fillna(0).reset_index())
-                for _c in ['venta_total_unidades', 'stock_total_unidades', 'n_skus']:
-                    _snap_df[_c] = _snap_df[_c].astype(int)
-                _snap_resumenes = _snap_df.to_dict('records')
-
-                _evol_c1, _evol_c2 = st.columns(2)
-
-                with _evol_c1:
-                    _fig_vta = go.Figure()
-                    _fig_vta.add_trace(go.Bar(
-                        x=_snap_df['semana_iso'], y=_snap_df['venta_total_unidades'],
-                        marker_color=TEAL_600, name='Vta Unidades',
-                        text=_snap_df['venta_total_unidades'].apply(lambda x: f"{x/1000:.0f}K"),
-                        textposition='outside',
-                    ))
-                    _fig_vta.update_layout(
-                        title="Venta Total Unidades por Semana",
-                        height=300, margin=dict(t=40, b=30, l=40, r=20),
-                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                        font=dict(size=11),
-                        yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.05)'),
-                    )
-                    st.plotly_chart(_fig_vta, use_container_width=True)
-
-                with _evol_c2:
-                    _fig_stk = go.Figure()
-                    _fig_stk.add_trace(go.Bar(
-                        x=_snap_df['semana_iso'], y=_snap_df['stock_total_unidades'],
-                        marker_color=SLATE_500, name='Stock Total',
-                        text=_snap_df['stock_total_unidades'].apply(lambda x: f"{x/1000:.0f}K"),
-                        textposition='outside',
-                    ))
-                    _fig_stk.update_layout(
-                        title="Stock Total Unidades por Semana",
-                        height=300, margin=dict(t=40, b=30, l=40, r=20),
-                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                        font=dict(size=11),
-                        yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.05)'),
-                    )
-                    st.plotly_chart(_fig_stk, use_container_width=True)
-
-                # KPI deltas: última semana vs penúltima
-                if len(_snap_resumenes) >= 2:
-                    _curr = _snap_resumenes[-1]
-                    _prev = _snap_resumenes[-2]
-                    _d_vta = _curr['venta_total_unidades'] - _prev['venta_total_unidades']
-                    _d_stk = _curr['stock_total_unidades'] - _prev['stock_total_unidades']
-                    _d_skus = _curr['n_skus'] - _prev['n_skus']
-                    _pct_vta = (_d_vta / _prev['venta_total_unidades'] * 100) if _prev['venta_total_unidades'] else 0
-
-                    _dc1, _dc2, _dc3, _dc4 = st.columns(4)
-                    _delta_color = lambda v: "#059669" if v >= 0 else "#DC2626"
-                    _dc1.markdown(f'<div style="text-align:center; padding:8px;"><div style="font-size:0.7rem; color:var(--capi-text2);">Δ Venta U</div><div style="font-size:1.2rem; font-weight:700; color:{_delta_color(_d_vta)};">{"+" if _d_vta>=0 else ""}{_d_vta:,.0f}</div></div>', unsafe_allow_html=True)
-                    _dc2.markdown(f'<div style="text-align:center; padding:8px;"><div style="font-size:0.7rem; color:var(--capi-text2);">Δ Venta %</div><div style="font-size:1.2rem; font-weight:700; color:{_delta_color(_pct_vta)};">{"+" if _pct_vta>=0 else ""}{_pct_vta:.1f}%</div></div>', unsafe_allow_html=True)
-                    _dc3.markdown(f'<div style="text-align:center; padding:8px;"><div style="font-size:0.7rem; color:var(--capi-text2);">Δ Stock U</div><div style="font-size:1.2rem; font-weight:700; color:{_delta_color(-_d_stk)};">{"+" if _d_stk>=0 else ""}{_d_stk:,.0f}</div></div>', unsafe_allow_html=True)
-                    _dc4.markdown(f'<div style="text-align:center; padding:8px;"><div style="font-size:0.7rem; color:var(--capi-text2);">Δ SKUs</div><div style="font-size:1.2rem; font-weight:700; color:var(--capi-text);">{"+" if _d_skus>=0 else ""}{_d_skus}</div></div>', unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════
     #  💸 VENTAS PERDIDAS POR QUIEBRE (lost sales)
@@ -2566,6 +2048,291 @@ if nav_page == "🏠 Dashboard":
                     key="dl_ventas_perdidas",
                 )
 
+    # ── Capital + Venta a Costo + Cobertura por marca (stacked bar) ──
+    st.markdown("---")
+
+    group_col = "marca" if "marca" in df_dash.columns else "categoria"
+    group_label = "Marca" if group_col == "marca" else "Categoría"
+
+    # Calcular capital, venta a costo y cobertura por marca
+    _has_vta = "vta_soles_4sem" in df_dash.columns and "contrib_soles_4sem" in df_dash.columns
+
+    # Capital: sumar a nivel SKU×Tienda (cada fila es un combo, correcto)
+    capital_grp = (
+        df_dash.groupby(group_col)["stock_valor_costo"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(10)
+        .reset_index()
+    )
+    capital_grp.columns = [group_label, "stock_valor_costo"]
+
+    # Venta a costo: vta_soles_4sem y contrib_soles_4sem son a nivel SKU (no SKU×Tienda)
+    # → deduplicar por SKU antes de sumar para no inflar por número de tiendas
+    if _has_vta:
+        _df_sku_vta = df_dash.drop_duplicates("sku")[[group_col, "vta_soles_4sem", "contrib_soles_4sem"]].copy()
+        _vta_marca = _df_sku_vta.groupby(group_col).agg(
+            vta_soles=("vta_soles_4sem", "sum"),
+            contrib_soles=("contrib_soles_4sem", "sum"),
+        ).reset_index()
+        _vta_marca.columns = [group_label, "_vta_soles", "_contrib_soles"]
+        _vta_marca["vta_costo"] = (_vta_marca["_vta_soles"] - _vta_marca["_contrib_soles"]).clip(lower=0)
+        capital_grp = capital_grp.merge(_vta_marca[[group_label, "vta_costo"]], on=group_label, how="left")
+        capital_grp["vta_costo"] = capital_grp["vta_costo"].fillna(0)
+        capital_grp["cobertura_meses"] = capital_grp.apply(
+            lambda r: round(r["stock_valor_costo"] / r["vta_costo"], 1) if r["vta_costo"] > 0 else None, axis=1
+        )
+    else:
+        capital_grp["vta_costo"] = 0
+        capital_grp["cobertura_meses"] = None
+
+    capital_grp = capital_grp.sort_values("stock_valor_costo", ascending=True)
+
+    _max_total = (capital_grp["stock_valor_costo"] + capital_grp["vta_costo"]).max()
+
+    # ── Renderizar stacked bar con HTML (capital + venta a costo + badge cobertura) ──
+    st.markdown(f"""<div style="margin-bottom:12px;">
+    <div style="font-size:14px; font-weight:600; color:var(--capi-text); margin-bottom:4px;">Inventario a Costo por {group_label} (Top 10)</div>
+    <div style="display:flex; gap:16px; font-size:12px; color:var(--capi-text2); margin-bottom:12px;">
+        <span style="display:flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; border-radius:2px; background:{TEAL_700}; display:inline-block;"></span>Capital a costo</span>
+        <span style="display:flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; border-radius:2px; background:#5DCAA5; display:inline-block;"></span>Venta a costo (4 sem)</span>
+        <span style="display:flex; align-items:center; gap:4px;"><span style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:4px; padding:0 5px; font-size:10px; color:var(--capi-text);">5.2</span>Cobertura (meses)</span>
+    </div>
+    </div>""", unsafe_allow_html=True)
+
+    _bars_html = ""
+    for _, _row in capital_grp.iloc[::-1].iterrows():
+        _cap = _row["stock_valor_costo"]
+        _vta = _row["vta_costo"]
+        _cob = _row.get("cobertura_meses", None)
+        _marca_name = _row[group_label]
+
+        _total = _cap + _vta
+        _bar_w_pct = max(5, _total / _max_total * 100) if _max_total > 0 else 5
+        _cap_pct = (_cap / _total * 100) if _total > 0 else 100
+        _vta_pct = 100 - _cap_pct
+
+        # Texto dentro de barras
+        _cap_txt = f"S/ {_cap/1e6:.1f}M" if _cap >= 1e6 else f"S/ {_cap:,.0f}"
+        _vta_txt = f"S/ {_vta/1e6:.1f}M" if _vta >= 1e6 else f"S/ {_vta:,.0f}"
+
+        # Semáforo cobertura: verde <3m, neutro 3-5m, rojo >5m
+        if _cob is not None:
+            if _cob <= 3:
+                _cob_bg, _cob_color, _cob_border = "#ECFDF5", "#059669", "#A7F3D0"
+            elif _cob <= 5:
+                _cob_bg, _cob_color, _cob_border = SLATE_100, SLATE_700, SLATE_200
+            else:
+                _cob_bg, _cob_color, _cob_border = "#FEF2F2", "#DC2626", "#FECACA"
+            _cob_html = f'<span style="background:{_cob_bg}; color:{_cob_color}; border:1px solid {_cob_border}; border-radius:6px; padding:2px 8px; font-size:11px; font-weight:600; min-width:50px; text-align:center; white-space:nowrap;">{_cob:.1f}</span>'
+        else:
+            _cob_html = f'<span style="background:var(--capi-bg-surface); color:var(--capi-text2); border:1px solid var(--capi-border); border-radius:6px; padding:2px 8px; font-size:11px; min-width:50px; text-align:center;">—</span>'
+
+        _bars_html += f"""<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
+            <span style="width:130px; font-size:12px; font-weight:500; color:{SLATE_800}; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex-shrink:0;">{_marca_name}</span>
+            <div style="flex:1; display:flex; align-items:center; gap:6px;">
+                <div style="width:{_bar_w_pct:.1f}%; display:flex; height:22px; border-radius:4px; overflow:hidden;">
+                    <div style="width:{_cap_pct:.0f}%; background:{TEAL_700}; display:flex; align-items:center; justify-content:flex-end; padding-right:5px; min-width:40px;">
+                        <span style="font-size:10px; color:white; font-weight:500; white-space:nowrap;">{_cap_txt}</span>
+                    </div>
+                    <div style="width:{_vta_pct:.0f}%; background:#5DCAA5; display:flex; align-items:center; padding-left:4px; min-width:{'40px' if _vta > 0 else '0'};">
+                        <span style="font-size:10px; color:white; font-weight:500; white-space:nowrap;">{_vta_txt if _vta > 0 else ''}</span>
+                    </div>
+                </div>
+                {_cob_html}
+            </div>
+        </div>"""
+
+    st.markdown(_bars_html, unsafe_allow_html=True)
+
+    # ── Tabs ───────────────────────────────────────────────────────
+
+    st.markdown("---")
+
+    # Contar combos obsoletos (rangos 6_9, 9_12, 12_99)
+    _RANGOS_OBSOLETOS_TAB = {"RANGO 6_9", "RANGO 9_12", "RANGO 12_99"}
+    _n_obs = 0
+    if "rango_antiguedad" in df_cob.columns:
+        _n_obs = len(df_cob[df_cob["rango_antiguedad"].isin(_RANGOS_OBSOLETOS_TAB)])
+
+# Navegación controlada por sidebar radio (nav_page)
+# Si nav_page es None (antes del análisis), no se renderiza nada aquí
+
+
+# ─── TAB 0: Acciones del Día ─────────────────────────────────
+#  Resumen por MARCA con desplegable por TIENDA
+#  Filtros de temporada y rango de antigüedad (obsoletos excluidos por defecto)
+
+if nav_page == "🏠 Dashboard":
+
+    # ══════════════════════════════════════════════════════════
+    #  MARGEN EFECTIVO — Contribución / VtasMF (4 semanas)
+    # ══════════════════════════════════════════════════════════
+    if _margen_global is not None and _vta_soles_total > 0:
+        st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
+        st.markdown(f'<div class="section-header"><h3>💰 Margen Efectivo</h3><span class="live-badge">RENTABILIDAD</span></div>', unsafe_allow_html=True)
+        st.caption("Contribución / Venta MF — últimas 4 semanas, ponderado por volumen de venta")
+
+        # ── KPIs de margen ──
+        _mk1, _mk2, _mk3 = st.columns(3)
+        _mg_pct = _margen_global * 100
+        _mg_color = "#10b981" if _mg_pct >= 35 else ("#f59e0b" if _mg_pct >= 25 else "#ef4444")
+        _mg_bg = "#F0FDF4" if _mg_pct >= 35 else ("#FFFBEB" if _mg_pct >= 25 else "#FEF2F2")
+        with _mk1:
+            st.markdown(f"""<div style="background:{_mg_bg}; border-radius:12px; padding:16px 20px; border-left:4px solid {_mg_color};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Margen efectivo global</div>
+                <div style="font-size:1.8rem; font-weight:700; color:{_mg_color};">{_mg_pct:.1f}%</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Contribución / Venta (4 sem)</div>
+            </div>""", unsafe_allow_html=True)
+        with _mk2:
+            st.markdown(f"""<div style="background:#EFF6FF; border-radius:12px; padding:16px 20px; border-left:4px solid #3b82f6;">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Venta total (4 sem)</div>
+                <div style="font-size:1.8rem; font-weight:700; color:#3b82f6;">S/ {_vta_soles_total:,.0f}</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Sin IGV</div>
+            </div>""", unsafe_allow_html=True)
+        with _mk3:
+            st.markdown(f"""<div style="background:#F0FDF4; border-radius:12px; padding:16px 20px; border-left:4px solid {TEAL_600};">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Contribución total (4 sem)</div>
+                <div style="font-size:1.8rem; font-weight:700; color:{TEAL_700};">S/ {_contrib_soles_total:,.0f}</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Venta - Costo</div>
+            </div>""", unsafe_allow_html=True)
+
+        # ── Tabla de margen por marca ──
+        if _margen_por_marca:
+            st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+            st.markdown(f"<h4 style='color:{SLATE_800}; margin:0 0 8px 0;'>Margen por marca</h4>", unsafe_allow_html=True)
+
+            _max_vta_marca = max(r['vta_soles'] for r in _margen_por_marca) if _margen_por_marca else 1
+            _rows_html = ""
+            for _mr in _margen_por_marca:
+                _m_pct = _mr['margen_efectivo'] * 100
+                _bar_w = max(2, int(_mr['vta_soles'] / _max_vta_marca * 100))
+                _m_clr = "#10b981" if _m_pct >= 35 else ("#f59e0b" if _m_pct >= 25 else "#ef4444")
+                _rows_html += f"""<tr>
+                    <td style="padding:8px 12px; font-weight:500; white-space:nowrap;">{_mr['marca']}</td>
+                    <td style="padding:8px 12px; text-align:right;">S/ {_mr['vta_soles']:,.0f}</td>
+                    <td style="padding:8px 12px; text-align:right;">S/ {_mr['contrib_soles']:,.0f}</td>
+                    <td style="padding:8px 12px; text-align:right; font-weight:600; color:{_m_clr};">{_m_pct:.1f}%</td>
+                    <td style="padding:8px 12px; width:120px;">
+                        <div style="background:#E2E8F0; border-radius:4px; height:14px; width:100%;">
+                            <div style="background:{_m_clr}; border-radius:4px; height:14px; width:{_bar_w}%;"></div>
+                        </div>
+                    </td>
+                </tr>"""
+
+            st.markdown(f"""<div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+                <thead>
+                    <tr style="background:var(--capi-bg-surface); border-bottom:2px solid var(--capi-border);">
+                        <th style="padding:8px 12px; text-align:left;">Marca</th>
+                        <th style="padding:8px 12px; text-align:right;">Venta S/</th>
+                        <th style="padding:8px 12px; text-align:right;">Contribución S/</th>
+                        <th style="padding:8px 12px; text-align:right;">Margen %</th>
+                        <th style="padding:8px 12px; text-align:left;">Vol. relativo</th>
+                    </tr>
+                </thead>
+                <tbody>{_rows_html}</tbody>
+            </table></div>""", unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════
+    #  TICKET PROMEDIO + COMPARATIVO VS AÑO PASADO (LY)
+    # ══════════════════════════════════════════════════════════
+    # En modo demo se oculta la sección YoY para aligerar el Dashboard (guion 3 min)
+    if (not _DEMO_MODE) and ly_comparison and ly_comparison.get('ticket_actual_global', 0) > 0:
+        st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
+        st.markdown(f'<div class="section-header"><h3>🎫 Ticket Promedio & vs Año Pasado</h3><span class="live-badge">YoY</span></div>', unsafe_allow_html=True)
+
+        _ly_g = ly_comparison.get('ly_global')
+        _sem_act = ly_comparison.get('semana_actual', '?')
+        _ticket_act = ly_comparison.get('ticket_actual_global', 0)
+
+        _tk1, _tk2, _tk3, _tk4 = st.columns(4)
+        with _tk1:
+            st.markdown(f"""<div style="background:#EFF6FF; border-radius:12px; padding:16px 20px; border-left:4px solid #3b82f6;">
+                <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Ticket promedio actual</div>
+                <div style="font-size:1.8rem; font-weight:700; color:#3b82f6;">S/ {_ticket_act:,.0f}</div>
+                <div style="font-size:0.7rem; color:var(--capi-text2);">Venta S/ / Unidades (4 sem)</div>
+            </div>""", unsafe_allow_html=True)
+
+        if _ly_g:
+            _ticket_ly = _ly_g.get('ticket_ly', 0)
+            _d_ticket = _ly_g.get('delta_ticket_pct', 0)
+            _d_vta = _ly_g.get('delta_vta_soles_pct', 0)
+            _d_uds = _ly_g.get('delta_vta_uds_pct', 0)
+            _year_ly = _ly_g.get('año_ly', '?')
+
+            _clr_ticket = "#10b981" if _d_ticket >= 0 else "#ef4444"
+            _clr_vta = "#10b981" if _d_vta >= 0 else "#ef4444"
+            _clr_uds = "#10b981" if _d_uds >= 0 else "#ef4444"
+            _arrow_ticket = "▲" if _d_ticket >= 0 else "▼"
+            _arrow_vta = "▲" if _d_vta >= 0 else "▼"
+            _arrow_uds = "▲" if _d_uds >= 0 else "▼"
+
+            with _tk2:
+                st.markdown(f"""<div style="background:{'#F0FDF4' if _d_ticket >= 0 else '#FEF2F2'}; border-radius:12px; padding:16px 20px; border-left:4px solid {_clr_ticket};">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Δ Ticket vs LY (sem {_sem_act})</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:{_clr_ticket};">{_arrow_ticket} {abs(_d_ticket):.1f}%</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">LY: S/ {_ticket_ly:,.0f} ({_year_ly})</div>
+                </div>""", unsafe_allow_html=True)
+            with _tk3:
+                st.markdown(f"""<div style="background:{'#F0FDF4' if _d_vta >= 0 else '#FEF2F2'}; border-radius:12px; padding:16px 20px; border-left:4px solid {_clr_vta};">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Δ Venta S/ vs LY</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:{_clr_vta};">{_arrow_vta} {abs(_d_vta):.1f}%</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">Sem actual vs misma sem {_year_ly}</div>
+                </div>""", unsafe_allow_html=True)
+            with _tk4:
+                st.markdown(f"""<div style="background:{'#F0FDF4' if _d_uds >= 0 else '#FEF2F2'}; border-radius:12px; padding:16px 20px; border-left:4px solid {_clr_uds};">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Δ Unidades vs LY</div>
+                    <div style="font-size:1.8rem; font-weight:700; color:{_clr_uds};">{_arrow_uds} {abs(_d_uds):.1f}%</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">Sem actual vs misma sem {_year_ly}</div>
+                </div>""", unsafe_allow_html=True)
+
+            # ── Tabla comparativa por marca ──
+            _ly_marca_data = ly_comparison.get('ly_marca', [])
+            if _ly_marca_data:
+                st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+                st.markdown(f"<h4 style='color:{SLATE_800}; margin:0 0 8px 0;'>Comparativo por Marca — Semana {_sem_act} actual vs {_year_ly}</h4>", unsafe_allow_html=True)
+
+                _ly_rows_html = ""
+                for _lm in _ly_marca_data:
+                    _m_name = _lm.get('marca', '')
+                    _m_ticket = _lm.get('ticket', 0)
+                    _m_ticket_ly = _lm.get('ticket_ly', 0)
+                    _m_dvta = _lm.get('delta_vta_pct', 0)
+                    _m_dticket = _lm.get('delta_ticket_pct', 0)
+                    _clr_mv = "#10b981" if _m_dvta >= 0 else "#ef4444"
+                    _clr_mt = "#10b981" if _m_dticket >= 0 else "#ef4444"
+                    _arr_mv = "▲" if _m_dvta >= 0 else "▼"
+                    _arr_mt = "▲" if _m_dticket >= 0 else "▼"
+                    _ly_rows_html += f"""<tr>
+                        <td style="padding:6px 10px; font-weight:500;">{_m_name}</td>
+                        <td style="padding:6px 10px; text-align:right;">S/ {_m_ticket:,.0f}</td>
+                        <td style="padding:6px 10px; text-align:right; color:var(--capi-text2);">S/ {_m_ticket_ly:,.0f}</td>
+                        <td style="padding:6px 10px; text-align:right; font-weight:600; color:{_clr_mt};">{_arr_mt} {abs(_m_dticket):.1f}%</td>
+                        <td style="padding:6px 10px; text-align:right; font-weight:600; color:{_clr_mv};">{_arr_mv} {abs(_m_dvta):.1f}%</td>
+                    </tr>"""
+
+                st.markdown(f"""<div style="overflow-x:auto; max-height:400px; overflow-y:auto;">
+                <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+                    <thead>
+                        <tr style="background:var(--capi-bg-surface); border-bottom:2px solid var(--capi-border); position:sticky; top:0;">
+                            <th style="padding:8px 10px; text-align:left;">Marca</th>
+                            <th style="padding:8px 10px; text-align:right;">Ticket Actual</th>
+                            <th style="padding:8px 10px; text-align:right;">Ticket LY</th>
+                            <th style="padding:8px 10px; text-align:right;">Δ Ticket</th>
+                            <th style="padding:8px 10px; text-align:right;">Δ Venta S/</th>
+                        </tr>
+                    </thead>
+                    <tbody>{_ly_rows_html}</tbody>
+                </table></div>""", unsafe_allow_html=True)
+        else:
+            with _tk2:
+                st.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {SLATE_400};">
+                    <div style="font-size:0.75rem; color:var(--capi-text2);">Comparativo LY</div>
+                    <div style="font-size:1rem; color:var(--capi-text2);">Sin data para sem {_sem_act}</div>
+                </div>""", unsafe_allow_html=True)
+
+    # (Sección "Acciones del Día" eliminada — info disponible en vistas del sidebar)
 
 # ═══════════════════════════════════════════════════════════════
 #  SALUD DEL STOCK (Prompt C)
@@ -5950,6 +5717,37 @@ elif nav_page == "🏪 Afinidad Producto×Plaza":
                         st.caption(f"🆕 {_n_fill:,} son **llenado inicial** (producto nuevo en la tienda, sin stock): "
                                    f"se manda mínimo 3 curvas en tallas completas para exhibir bien. Si el CD no alcanza, "
                                    f"baja a 2 o 1 curva entera; si no llega ni a 1, no se manda.")
+
+                    with st.expander("📐 Cómo se calcula el empuje (CD → tienda)", expanded=False):
+                        st.markdown(f"""
+**Empuje** = lo que el CD alcanza a mandar para llevar la tienda a su **stock objetivo de {_cob_sem} semanas** de venta.
+Se calcula por cada combo **SKU × tienda** candidato:
+
+**1. ¿Quién es candidato?**
+- El SKU tiene stock en el **CD** (≥ 5 uds).
+- La **línea rota bien en esa tienda**: rotación ≥ umbral (`rotación alta`, hoy 6%).
+- El SKU **no** está en liquidación (margen sobre el mínimo de la marca).
+
+**2. Venta semanal estimada** — columna `Vta/Sem Est`
+- Si el SKU **ya vende** en esa tienda → venta de las últimas 4 semanas ÷ 4.
+- Si es **nuevo** ahí (sin venta) → se usa el **promedio semanal de la línea** como proxy.
+
+**3. Stock objetivo** — columna `Target {_cob_sem}s`
+- `Target = ⌈ Vta/Sem Est × {_cob_sem} semanas ⌉`
+- Piso mínimo: el **UME** (nunca menor a 3).
+- **Llenado inicial** (tienda sin stock del producto): `Target = máx(Target, 3 curvas)` — 3 corridas de tallas completas para exhibir bien.
+
+**4. Necesidad bruta**
+- `Necesidad = Target − Stk Tienda`  (acotada entre 0 y 200 uds).
+
+**5. Reparto del pool del CD** → columna `Empujar`
+- El stock del CD es **único por SKU**: se reparte entre las tiendas por **prioridad = rotación × 1.2 (si es marca propia)**.
+- Tienda **sin stock**: se sirve en **curvas enteras** (si el CD no alcanza, baja a 2 o 1 curva; si no llega ni a 1, no se manda).
+- Tienda **con stock**: se sirve suelto = `mín(Necesidad, CD disponible)`.
+
+> **Empujar** = las unidades que el pool del CD efectivamente alcanzó a asignar a esa tienda (puede ser menor que la Necesidad si el CD no da para todas).
+""")
+
                     st.dataframe(_emp_display, use_container_width=True, hide_index=True)
 
                     # Descarga Excel
