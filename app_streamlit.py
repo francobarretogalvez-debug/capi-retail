@@ -1302,6 +1302,11 @@ def _add_pricing_cols(df_in, df_ref, sheet_name, writer):
     writer: pd.ExcelWriter activo
     """
     df_out = df_in.copy()
+    # Encabezado claro en el Excel: prom_vta_uds es la venta de la ÚLTIMA semana
+    # (Sem 1, dato real por tienda), no un promedio. Se renombra solo en la copia
+    # de salida; la variable interna del motor no cambia.
+    if 'prom_vta_uds' in df_out.columns:
+        df_out = df_out.rename(columns={'prom_vta_uds': 'vta_sem_ult'})
     # Agregar columnas de precio si no las tiene
     _precio_cols = ['precio_blanco', 'precio_vigente', 'costo']
     for _pc in _precio_cols:
