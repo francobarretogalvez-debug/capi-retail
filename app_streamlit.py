@@ -2495,6 +2495,21 @@ if nav_page == "🏠 Dashboard":
                     <div style="font-size:0.7rem; color:var(--capi-text2);">combos con stock en CD · S/ {_vp_evit_soles:,.0f}/sem en juego</div>
                 </div>""", unsafe_allow_html=True)
 
+            # Fórmula visible: de dónde sale el número
+            st.markdown(f"""
+            <div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:12px; padding:14px 18px; margin-top:12px;">
+                <div style="font-size:0.78rem; font-weight:600; color:var(--capi-text); margin-bottom:6px;">📐 Cómo se calcula (por cada SKU en quiebre)</div>
+                <div style="font-size:0.98rem; color:var(--capi-text); margin-bottom:8px;">
+                    Venta perdida = <strong>velocidad semanal</strong> &times; <strong>semanas en quiebre</strong> &times; <strong>precio de venta</strong>
+                </div>
+                <div style="font-size:0.72rem; color:var(--capi-text2); line-height:1.5;">
+                    <strong>Velocidad semanal</strong> = venta real por semana del SKU (serie reconstruida) &nbsp;·&nbsp;
+                    <strong>Semanas en quiebre</strong> = tiempo sin stock (0.5–1.0 por corte) &nbsp;·&nbsp;
+                    <strong>Precio de venta</strong> = precio vigente.<br>
+                    Es la <strong>venta (ingreso) que se dejó de hacer — NO el costo ni la utilidad</strong> (la utilidad perdida sería esto &times; el margen).
+                </div>
+            </div>""", unsafe_allow_html=True)
+
             st.caption(" · ".join(_vp['supuestos']))
 
             with st.expander(f"Ver detalle y soluciones — top quiebres actuales por tienda ({len(_vp_q):,} combos)", expanded=False):
