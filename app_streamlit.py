@@ -2213,14 +2213,52 @@ if nav_page == "🏠 Dashboard":
             st.markdown("---")
             st.markdown(f'<div class="section-header"><h3>📊 Evolución Semanal</h3><span class="live-badge">{len(_snap_weeks)} SEM</span></div>', unsafe_allow_html=True)
 
-            _snap_resumenes = []
-            for _sw in _snap_weeks:
-                _sr = snapshots_engine.api.get_resumen_semanal(_sw)
-                if _sr:
-                    _snap_resumenes.append(_sr)
+            # Snapshots a nivel SKU (cacheado) → permite filtrar por marca/temporada/rango
+            @st.cache_data(show_spinner=False)
+            def _evol_snaps_full():
+                _frames = []
+                for _sw in snapshots_engine.list_available_weeks():
+                    _d = snapshots_engine.load_snapshot(_sw)
+                    if _d is not None and not _d.empty:
+                        _frames.append(_d)
+                return pd.concat(_frames, ignore_index=True) if _frames else pd.DataFrame()
 
-            if _snap_resumenes:
-                _snap_df = pd.DataFrame(_snap_resumenes)
+            _evol_all = _evol_snaps_full()
+
+            if not _evol_all.empty:
+                # ── Filtros: marca / temporada / rango de edad ──
+                _evf1, _evf2, _evf3 = st.columns(3)
+                with _evf1:
+                    _ev_marcas = ["Todas"] + sorted(
+                        [m for m in _evol_all['marca'].dropna().astype(str).str.strip().unique() if m])
+                    _ev_marca = st.selectbox("Marca", _ev_marcas, key="evol_marca")
+                with _evf2:
+                    _ev_temps = ["Todas"] + sorted(
+                        [t for t in _evol_all['temporada'].dropna().astype(str).str.strip().unique() if t])
+                    _ev_temp = st.selectbox("Temporada", _ev_temps, key="evol_temp")
+                with _evf3:
+                    _ev_rangos = ["Todos"] + sorted(
+                        [r for r in _evol_all['rango_antiguedad'].dropna().astype(str).str.strip().unique() if r])
+                    _ev_rango = st.selectbox("Rango de Edad", _ev_rangos, key="evol_rango")
+
+                _ev_df = _evol_all.copy()
+                if _ev_marca != "Todas":
+                    _ev_df = _ev_df[_ev_df['marca'].astype(str).str.strip() == _ev_marca]
+                if _ev_temp != "Todas":
+                    _ev_df = _ev_df[_ev_df['temporada'].astype(str).str.strip() == _ev_temp]
+                if _ev_rango != "Todos":
+                    _ev_df = _ev_df[_ev_df['rango_antiguedad'].astype(str).str.strip() == _ev_rango]
+
+                # Total por semana (preservando orden cronológico de los snapshots)
+                _ev_orden = snapshots_engine.list_available_weeks()
+                _snap_df = (_ev_df.groupby('semana_iso')
+                            .agg(venta_total_unidades=('unidades_vendidas', 'sum'),
+                                 stock_total_unidades=('stock_total', 'sum'),
+                                 n_skus=('sku', 'nunique'))
+                            .reindex(_ev_orden).fillna(0).reset_index())
+                for _c in ['venta_total_unidades', 'stock_total_unidades', 'n_skus']:
+                    _snap_df[_c] = _snap_df[_c].astype(int)
+                _snap_resumenes = _snap_df.to_dict('records')
 
                 _evol_c1, _evol_c2 = st.columns(2)
 
