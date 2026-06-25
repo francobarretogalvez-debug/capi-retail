@@ -2249,10 +2249,14 @@ if nav_page == "🏠 Dashboard":
                 if _ev_rango != "Todos":
                     _ev_df = _ev_df[_ev_df['rango_antiguedad'].astype(str).str.strip() == _ev_rango]
 
-                # Total por semana (preservando orden cronológico de los snapshots)
+                # Total por semana (preservando orden cronológico de los snapshots).
+                # Venta = vta_u_sem_1ant (venta REAL de esa semana). 'unidades_vendidas'
+                # es un acumulado de temporada (crece monótono) → no sirve como
+                # "venta por semana". Stock sí es foto puntual (stock_total).
                 _ev_orden = snapshots_engine.list_available_weeks()
+                _ev_venta_col = 'vta_u_sem_1ant' if 'vta_u_sem_1ant' in _ev_df.columns else 'unidades_vendidas'
                 _snap_df = (_ev_df.groupby('semana_iso')
-                            .agg(venta_total_unidades=('unidades_vendidas', 'sum'),
+                            .agg(venta_total_unidades=(_ev_venta_col, 'sum'),
                                  stock_total_unidades=('stock_total', 'sum'),
                                  n_skus=('sku', 'nunique'))
                             .reindex(_ev_orden).fillna(0).reset_index())
