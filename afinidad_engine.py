@@ -46,14 +46,18 @@ def _load_calorico():
 # ─────────────────────────────────────────────────────────────
 
 def detect_stores(columns, excluir=None):
-    """Detecta tiendas activas en las columnas del Excel."""
+    """Detecta tiendas activas en las columnas del Excel.
+
+    Firma robusta Stk + UME + On Order (compatible con el formato viejo y el
+    nuevo del reporte micro, donde '{tienda} Vta' pasó a '{tienda} Unidades')."""
     if excluir is None:
         excluir = []
+    cols = set(columns)
     stores = []
     for c in columns:
         if c.endswith(' Stk'):
             prefix = c[:-4]
-            if f'{prefix} Vta' in columns and prefix not in excluir:
+            if f'{prefix} UME' in cols and f'{prefix} On Order' in cols and prefix not in excluir:
                 stores.append(prefix)
     return stores
 
@@ -103,6 +107,10 @@ def load_tienda_data(excel_path, config=None):
     margen_default = margen_por_marca.get('_default', 30)
 
     stores = detect_stores(df.columns, excluir)
+    # Compat formato nuevo: '{tienda} Unidades' es el nuevo nombre de '{tienda} Vta' (unidades)
+    for s in stores:
+        if f'{s} Vta' not in df.columns and f'{s} Unidades' in df.columns:
+            df[f'{s} Vta'] = df[f'{s} Unidades']
 
     # Columnas base del SKU
     base_cols = {

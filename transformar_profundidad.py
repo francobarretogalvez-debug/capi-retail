@@ -71,15 +71,31 @@ STORE_NAMES = {
 
 # Detect store codes from columns
 def detect_stores(columns):
-    """Find all store prefixes that have Stk/Vta/On Order columns."""
-    stk_cols = [c for c in columns if c.endswith(' Stk')]
+    """Encuentra los prefijos de tienda que tienen bloque Stk + UME.
+
+    Firma ROBUSTA: cada tienda real trae '{tienda} Stk' y '{tienda} UME' en
+    ambos formatos del reporte micro. (El formato viejo tenía '{tienda} Vta';
+    el nuevo lo renombró a '{tienda} Unidades' + agregó '{tienda} Vta S/.', por
+    eso ya no se puede usar 'Vta' como firma.)
+    """
+    cols = set(columns)
     stores = []
-    for c in stk_cols:
-        prefix = c[:-4]  # Remove ' Stk'
-        # Verify Vta column exists
-        if f'{prefix} Vta' in columns:
-            stores.append(prefix)
+    for c in columns:
+        if c.endswith(' Stk'):
+            prefix = c[:-4]  # quita ' Stk'
+            if f'{prefix} UME' in cols and f'{prefix} On Order' in cols:
+                stores.append(prefix)
     return stores
+
+
+def _normalizar_cols_tienda(df, stores):
+    """Compatibilidad de formatos: si una tienda no tiene '{t} Vta' (unidades)
+    pero sí '{t} Unidades' (nombre nuevo del reporte micro), crea el alias
+    '{t} Vta' = '{t} Unidades' para que todo el downstream funcione sin cambios."""
+    for s in stores:
+        if f'{s} Vta' not in df.columns and f'{s} Unidades' in df.columns:
+            df[f'{s} Vta'] = df[f'{s} Unidades']
+    return df
 
 
 def transform(input_path, output_path=None, fecha_corte='08/04/2026'):
@@ -92,6 +108,7 @@ def transform(input_path, output_path=None, fecha_corte='08/04/2026'):
 
     # Detect stores
     stores = detect_stores(df.columns)
+    df = _normalizar_cols_tienda(df, stores)  # alias '{t} Unidades' → '{t} Vta' (formato nuevo)
     print(f'  → {len(stores)} tiendas detectadas: {stores[:10]}...')
 
     # Clean data types
