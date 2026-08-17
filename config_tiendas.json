@@ -1,0 +1,323 @@
+{
+  "_doc": "Maestro de tiendas del modulo Rendimiento por Tienda. m2_corner es por marca: {'SPAVALDI': 42.5}. Solo tiendas que venden a precio llevan m2; outlets y liquidadoras van vacias a proposito y la contribucion/m2 sale 'no aplica', nunca cero.",
+  "_sin_codigo_micro": {
+    "OUTLET MEGAPLAZA": "Existe en el transaccional (580 und de Spavaldi) pero no tiene columnas en el Micro. Dejo de vender el 31-may-26. Se reporta como brecha, no se descarta en silencio."
+  },
+  "tiendas": {
+    "JP": {
+      "nombre": "Jockey Plaza",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "SM": {
+      "nombre": "San Miguel",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "MIRAF": {
+      "nombre": "Miraflores",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "SI": {
+      "nombre": "San Isidro",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "PRIM": {
+      "nombre": "Primavera",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "LO": {
+      "nombre": "Los Olivos",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [
+        "Los Olivos"
+      ],
+      "m2_corner": {}
+    },
+    "AQP": {
+      "nombre": "Arequipa",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "CHIC": {
+      "nombre": "Chiclayo",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "CHO": {
+      "nombre": "Chorrillos",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "Breña": {
+      "nombre": "Breña",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "PLN": {
+      "nombre": "Plaza Norte",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [
+        "PLAZA LIMA NORTE"
+      ],
+      "m2_corner": {}
+    },
+    "SLVR": {
+      "nombre": "Salaverry",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "SB": {
+      "nombre": "San Borja",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "STA ANITA": {
+      "nombre": "Santa Anita",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [
+        "Santa Anita"
+      ],
+      "m2_corner": {}
+    },
+    "TRUJ": {
+      "nombre": "Trujillo",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "CAJ": {
+      "nombre": "Cajamarca",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "CBT": {
+      "nombre": "Chimbote",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "HYO": {
+      "nombre": "Huancayo",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "ICA": {
+      "nombre": "Ica",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "JULIACA": {
+      "nombre": "Juliaca",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "PIU2": {
+      "nombre": "Piura",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [
+        "PIURAII"
+      ],
+      "m2_corner": {}
+    },
+    "MAC LARCO": {
+      "nombre": "Mac Larco",
+      "canal": "tienda",
+      "activa": false,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "CALLAO": {
+      "nombre": "Callao",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [
+        "Ripley Callao"
+      ],
+      "m2_corner": {}
+    },
+    "TV PI": {
+      "nombre": "Tienda Virtual PI",
+      "canal": "ecommerce",
+      "activa": false,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "FSF MAC LO": {
+      "nombre": "FSF Mac LO",
+      "canal": "tienda",
+      "activa": false,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "TV": {
+      "nombre": "Tienda Virtual",
+      "canal": "ecommerce",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "ASIA": {
+      "nombre": "Asia",
+      "canal": "tienda",
+      "activa": false,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "VTAS CORP": {
+      "nombre": "Ventas Corporativas",
+      "canal": "tienda",
+      "activa": false,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "ATO": {
+      "nombre": "Atocongo",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "CAY": {
+      "nombre": "Cayma",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "PUCALPA I": {
+      "nombre": "Pucallpa",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "MAC PLN": {
+      "nombre": "Mac Plaza Norte",
+      "canal": "tienda",
+      "activa": false,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "BTQ BBB": {
+      "nombre": "Boutique BBB",
+      "canal": "tienda",
+      "activa": false,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "EST CHI": {
+      "nombre": "Estacional Chiclayo",
+      "canal": "tienda",
+      "activa": false,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "PURU": {
+      "nombre": "Puruchuco",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "EST TRU": {
+      "nombre": "Estacional Trujillo",
+      "canal": "tienda",
+      "activa": false,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "EST VES": {
+      "nombre": "Estacional VES",
+      "canal": "tienda",
+      "activa": false,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "CHII": {
+      "nombre": "Chiclayo 2",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [
+        "CHICLAYO II"
+      ],
+      "m2_corner": {}
+    },
+    "CO": {
+      "nombre": "Comas",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [
+        "COMAS"
+      ],
+      "m2_corner": {}
+    },
+    "IQT": {
+      "nombre": "Iquitos",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "OPLN": {
+      "nombre": "Outlet Plaza Lima Norte",
+      "canal": "outlet",
+      "activa": false,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "OSI": {
+      "nombre": "Outlet San Isidro",
+      "canal": "outlet",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    },
+    "SJL": {
+      "nombre": "San Juan de Lurigancho",
+      "canal": "tienda",
+      "activa": true,
+      "alias_transaccional": [],
+      "m2_corner": {}
+    }
+  }
+}
