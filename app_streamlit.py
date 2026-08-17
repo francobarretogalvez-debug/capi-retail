@@ -79,6 +79,9 @@ except Exception:
 
 import chat_engine
 import agente_terceras
+import vistas_excel
+import reportes_marcas
+import rendimiento_tienda as rend_t
 
 # ══════════════════════════════════════════════════════════════
 #  CONFIG DE PÁGINA
@@ -949,6 +952,25 @@ with st.sidebar:
 
         st.markdown(f'<div style="border-bottom:1px solid {SLATE_200}; margin:4px 0 12px 0;"></div>', unsafe_allow_html=True)
 
+        # ── RENDIMIENTO POR TIENDA ──
+        # Sección propia: cruza marcas propias y terceras, así que no encaja en
+        # ninguno de los dos clusters de gestión. Responde contribución/m², que
+        # junto con EBITDA es lo que mira el dueño para área comercial.
+        _NAV_RENDIMIENTO = [("📐", "Rendimiento por Tienda")]
+        st.markdown('<div class="sidebar-section-label">RENDIMIENTO POR TIENDA</div>', unsafe_allow_html=True)
+        for _icon, _label in _NAV_RENDIMIENTO:
+            _full = f"{_icon} {_label}"
+            _is_active = st.session_state["nav_page"] == _full
+            if st.button(
+                _full, key=f"nav_{_label}",
+                use_container_width=True,
+                type="primary" if _is_active else "secondary",
+            ):
+                st.session_state["nav_page"] = _full
+                st.rerun()
+
+        st.markdown(f'<div style="border-bottom:1px solid {SLATE_200}; margin:4px 0 12px 0;"></div>', unsafe_allow_html=True)
+
     nav_page = st.session_state["nav_page"] if _has_results else None
 
     # ── Upload ──
@@ -1188,6 +1210,9 @@ if _DEMO_MODE and st.session_state["results"] is None and not st.session_state.g
                     _demo_plantilla = os.path.join(tempfile.gettempdir(), "capi_demo_plantilla.xlsx")
                     etl_profundidad.transform(_demo_path, output_path=_demo_plantilla)
                     _demo_input = _demo_plantilla
+                    # Rendimiento por Tienda relee el Micro crudo (la plantilla ya
+                    # perdió las columnas por tienda), así que hay que dejar la ruta.
+                    st.session_state["_base_profundidad_path"] = _demo_path
                 else:
                     _demo_input = _demo_path
                 st.session_state["results"] = motor_v2.run_analysis(_demo_input, params=params_ui, formato=formato_input)
@@ -1290,6 +1315,16 @@ def _filtrar_marcas(df, col="marca"):
         return df
     return df[df[col].str.upper().isin(_MARCAS_VIGENTES)].reset_index(drop=True)
 
+
+# ── Rendimiento por Tienda: lectura del Micro CRUDO ──
+# El motor necesita las 6 columnas por tienda del Micro (Stk, Unidades, Vta S/.,
+# On Order, UME, Precio Prom). La plantilla transformada ya las perdió, así que
+# se relee el archivo original que quedó guardado al correr el análisis.
+@st.cache_data(show_spinner=False)
+def _rt_cargar_micro(_path, marca):
+    return rend_t.desde_micro(pd.read_excel(_path), marcas=marca)
+
+
 # ── Helper: agregar columnas de precio + fórmula Nuevo Margen a Excel ──
 def _add_pricing_cols(df_in, df_ref, sheet_name, writer):
     """
@@ -1316,18 +1351,21 @@ def _add_pricing_cols(df_in, df_ref, sheet_name, writer):
 
     # Agregar columna vacía para Nuevo Precio
     df_out['nuevo_precio'] = np.nan
-    # Placeholder para la fórmula (se sobreescribe después)
+    # Placeholders para las fórmulas (se sobreescriben después)
     df_out['nuevo_margen'] = np.nan
+    df_out['nuevo_dscto'] = np.nan
 
     df_out.to_excel(writer, sheet_name=sheet_name, index=False)
 
-    # Escribir fórmulas Excel en la columna "nuevo_margen"
+    # Escribir fórmulas Excel en "nuevo_margen" y "nuevo_dscto"
     ws = writer.sheets[sheet_name]
     # Encontrar índices de columnas
     headers = [cell.value for cell in ws[1]]
     _col_np = headers.index('nuevo_precio') + 1  # 1-based
     _col_nm = headers.index('nuevo_margen') + 1
+    _col_nd = headers.index('nuevo_dscto') + 1
     _col_costo = headers.index('costo') + 1 if 'costo' in headers else None
+    _col_pb = headers.index('precio_blanco') + 1 if 'precio_blanco' in headers else None
 
     if _col_costo:
         _ltr_np = get_column_letter(_col_np)
@@ -1346,12 +1384,31 @@ def _add_pricing_cols(df_in, df_ref, sheet_name, writer):
                 for row in range(2, ws.max_row + 1):
                     ws[f'{_ltr}{row}'].number_format = '#,##0.00'
 
+    if _col_pb:
+        # Nuevo Dscto = 1 - NuevoPrecio / PrecioBlanco (pedido Franco 2026-08-05)
+        _ltr_np = get_column_letter(_col_np)
+        _ltr_pb = get_column_letter(_col_pb)
+        _ltr_nd = get_column_letter(_col_nd)
+        for row in range(2, ws.max_row + 1):
+            ws[f'{_ltr_nd}{row}'] = f'=IF(OR({_ltr_np}{row}="",{_ltr_pb}{row}=""),"",1-{_ltr_np}{row}/{_ltr_pb}{row})'
+            ws[f'{_ltr_nd}{row}'].number_format = '0.0%'
+
+    # Autofiltro + panel congelado de fábrica (auditoría formato 2026-08-05)
+    if ws.max_row > 1:
+        ws.auto_filter.ref = ws.dimensions
+    ws.freeze_panes = 'A2'
+
     # Renombrar headers a español
     _rename = {'precio_blanco': 'Precio Blanco', 'precio_vigente': 'Precio Vigente',
-               'costo': 'Costo', 'nuevo_precio': 'Nuevo Precio', 'nuevo_margen': 'Nuevo Margen'}
+               'costo': 'Costo', 'nuevo_precio': 'Nuevo Precio', 'nuevo_margen': 'Nuevo Margen',
+               'nuevo_dscto': 'Nuevo Dscto'}
     for cell in ws[1]:
         if cell.value in _rename:
             cell.value = _rename[cell.value]
+
+    # Estilo visual del mockup: header gris, chips de estado, input ámbar,
+    # fórmulas en verde (auditoría formato 2026-08-05)
+    vistas_excel.estilizar_hoja_pricing(ws)
 
     return df_out
 
@@ -1785,6 +1842,14 @@ if nav_page == "🏠 Dashboard":
         _dl_cols = [c for c in _dl_cols if c in _df_donut.columns]
         _dl_buf = io.BytesIO()
         with pd.ExcelWriter(_dl_buf, engine="openpyxl") as _w_dl:
+            # Vistas agregadas primero (auditoría formato 2026-08-05):
+            # Resumen → Liquidación x SKU → Terceras por marca → Cascada → Temporadas
+            vistas_excel.hoja_resumen_ejecutivo(_w_dl, _df_donut)
+            vistas_excel.hoja_liquidacion_sku(_w_dl, _df_donut, _add_pricing_cols)
+            vistas_excel.hojas_terceras_por_marca(_w_dl, _df_donut)
+            vistas_excel.hoja_cascada_dscto(_w_dl, _df_donut)
+            vistas_excel.hoja_estados_temporada(_w_dl, _df_donut)
+            # Data cruda al final (mismo contenido de siempre)
             _add_pricing_cols(
                 _df_donut[_dl_cols].sort_values(["estado", "stock_valor_costo"], ascending=[True, False]),
                 df_cob, "Todos los estados", _w_dl
@@ -4888,9 +4953,10 @@ elif nav_page == "📊 Gestión por Antigüedad":
                         )
 
                     # ── Botón de descarga: detalle completo de obsoletos ──
-                    _obs_dl_cols = ["sku", "nombre", "marca", "categoria", "tienda",
-                                    "rango_antiguedad", "stock_total", "stock_valor_costo",
-                                    "prom_vta_uds", "cobertura_sem", "edad_semanas"]
+                    _obs_dl_cols = ["sku", "nombre", "marca", "categoria", "temporada",
+                                    "tienda", "rango_antiguedad", "stock_total",
+                                    "stock_valor_costo", "prom_vta_uds", "cobertura_sem",
+                                    "edad_semanas"]
                     if "pct_descuento" in df_obs.columns:
                         _obs_dl_cols.append("pct_descuento")
                     _obs_dl_cols = [c for c in _obs_dl_cols if c in df_obs.columns]
@@ -4898,6 +4964,8 @@ elif nav_page == "📊 Gestión por Antigüedad":
                     _obs_dl = _obs_dl.sort_values(["marca", "stock_valor_costo"], ascending=[True, False])
                     _obs_buf = io.BytesIO()
                     with pd.ExcelWriter(_obs_buf, engine="openpyxl") as _w_obs:
+                        # Resumen rango × marca primero (auditoría formato 2026-08-05)
+                        vistas_excel.hoja_resumen_obsoletos(_w_obs, df_obs)
                         _add_pricing_cols(_obs_dl, df_cob, 'Obsoletos', _w_obs)
                     _obs_buf.seek(0)
                     st.download_button(
@@ -6019,6 +6087,169 @@ elif nav_page == "🤖 Alertas IA":
             st.info("ℹ️ Anomalías por tienda: no aplica (todos los SKUs están en una sola tienda en este dataset).")
 
 
+# ─── Rendimiento por Tienda ─────────────────────────────────
+
+elif nav_page == "📐 Rendimiento por Tienda":
+    st.markdown('<div class="section-header"><h3>📐 Rendimiento por Tienda</h3>'
+                '<span class="live-badge">CONTRIBUCIÓN / M²</span></div>', unsafe_allow_html=True)
+
+    _rt_path = st.session_state.get("_base_profundidad_path")
+    if not _rt_path or not os.path.exists(_rt_path):
+        st.info("Esta vista necesita el reporte Micro original. Vuelve a correr el análisis "
+                "subiendo la base de profundidad (no la plantilla transformada).")
+    else:
+        _rt_marcas = sorted(df_cob["marca"].dropna().str.upper().str.strip().unique()) \
+            if "marca" in df_cob.columns else []
+        _rt_default = _rt_marcas.index("SPAVALDI") if "SPAVALDI" in _rt_marcas else 0
+        _rt_c1, _rt_c2 = st.columns([1, 3])
+        with _rt_c1:
+            _rt_marca = st.selectbox("Marca", _rt_marcas, index=_rt_default, key="rend_t_marca")
+
+        try:
+            _rt_largo = _rt_cargar_micro(_rt_path, _rt_marca)
+        except rend_t.FormatoMicroError as _e:
+            _rt_largo = None
+            st.warning(f"⚠️ {_e}")
+        except rend_t.TiendaSinMapearError as _e:
+            _rt_largo = None
+            st.error(f"❌ {_e}")
+
+        if _rt_largo is None or _rt_largo.empty:
+            st.info(f"Sin datos de {_rt_marca} en el Micro cargado.")
+        else:
+            _rt_largo = rend_t.clasificar_liquidacion(_rt_largo)
+            _rt_m = rend_t.metricas_por_tienda(_rt_largo, marca=_rt_marca)
+            _rt_vivas = _rt_m[_rt_m["unidades"] > 0]
+
+            _rt_und = _rt_m["unidades"].sum()
+            _rt_vta = _rt_m["venta_soles"].sum()
+            _rt_con = _rt_m["contribucion"].sum()
+            _rt_liq = _rt_m["venta_liq"].sum()
+            _k = st.columns(5)
+            _k[0].markdown(_kpi_html(f"S/ {_rt_vta:,.0f}", "Venta neta (semana)"), unsafe_allow_html=True)
+            _k[1].markdown(_kpi_html(f"{_rt_und:,.0f}", "Unidades"), unsafe_allow_html=True)
+            _k[2].markdown(_kpi_html(f"S/ {_rt_con:,.0f}", "Contribución",
+                                     "green" if _rt_con >= 0 else "red"), unsafe_allow_html=True)
+            _k[3].markdown(_kpi_html(f"{(_rt_con/_rt_vta if _rt_vta else 0):.1%}", "Margen"),
+                           unsafe_allow_html=True)
+            _k[4].markdown(_kpi_html(f"{(_rt_liq/_rt_vta if _rt_vta else 0):.0%}", "Venta en liquidación",
+                                     "yellow"), unsafe_allow_html=True)
+            st.caption(f"{len(_rt_vivas)} tiendas con venta · datos de la última semana cerrada del Micro · "
+                       f"venta neta ex-IGV · liquidación = mercadería con más de "
+                       f"{rend_t.EDAD_LIQUIDACION:.0f} semanas (mismo umbral que la taxonomía de Capi)")
+
+            _t1, _t2, _t3, _t4, _t5 = st.tabs(
+                ["📋 Resumen", "📐 Rendimiento m²", "📦 Cobertura", "📅 Evolución", "⚖️ Comparar marcas"])
+
+            # ── Resumen: P&L partido temporada / liquidación ──
+            with _t1:
+                st.caption("El margen total engaña cuando la tienda absorbe liquidación. "
+                           "La columna que manda es **margen de temporada**.")
+                _c = ["tienda", "canal", "unidades", "venta_soles", "contribucion", "margen",
+                      "margen_temporada", "pct_venta_liquidacion", "edad_mediana", "n_skus"]
+                _c = [x for x in _c if x in _rt_vivas.columns]
+                _d = _rt_vivas[_c].rename(columns={
+                    "tienda": "Tienda", "canal": "Canal", "unidades": "Und",
+                    "venta_soles": "Venta S/", "contribucion": "Contribución S/",
+                    "margen": "Margen", "margen_temporada": "Margen temporada",
+                    "pct_venta_liquidacion": "% liquidación",
+                    "edad_mediana": "Edad mediana (sem)", "n_skus": "SKUs"})
+                st.dataframe(_d.style.format({
+                    "Venta S/": "{:,.0f}", "Contribución S/": "{:,.0f}", "Und": "{:,.0f}",
+                    "Margen": "{:.1%}", "Margen temporada": "{:.1%}", "% liquidación": "{:.0%}",
+                    "Edad mediana (sem)": "{:.0f}"}, na_rep="—"),
+                    use_container_width=True, hide_index=True, height=420)
+
+                _perd = rend_t.tiendas_en_perdida(_rt_vivas)
+                if not _perd.empty:
+                    st.markdown("**Tiendas con contribución negativa**")
+                    st.dataframe(_perd.rename(columns={
+                        "tienda": "Tienda", "contribucion": "Contribución S/", "margen": "Margen",
+                        "margen_temporada": "Margen temporada",
+                        "pct_venta_liquidacion": "% liquidación", "diagnostico": "Lectura"}
+                    ).style.format({"Contribución S/": "{:,.0f}", "Margen": "{:.1%}",
+                                    "Margen temporada": "{:.1%}", "% liquidación": "{:.0%}"},
+                                   na_rep="—"),
+                        use_container_width=True, hide_index=True)
+
+            # ── Rendimiento m² ──
+            with _t2:
+                _sin_m2 = _rt_vivas["m2"].isna().all()
+                if _sin_m2:
+                    st.warning("Falta cargar los m² de corner en `config_tiendas.json`. "
+                               "Sin ese dato la métrica queda vacía a propósito — un cero se leería "
+                               "como «no rinde». Outlets y tiendas liquidadoras van sin m² por diseño.")
+                _c = [x for x in ["tienda", "canal", "m2", "contribucion", "contrib_x_m2",
+                                  "contrib_temporada_x_m2", "venta_x_m2"] if x in _rt_vivas.columns]
+                st.dataframe(_rt_vivas[_c].rename(columns={
+                    "tienda": "Tienda", "canal": "Canal", "m2": "m² corner",
+                    "contribucion": "Contribución S/", "contrib_x_m2": "Contrib/m²",
+                    "contrib_temporada_x_m2": "Contrib temporada/m²", "venta_x_m2": "Venta/m²"}
+                ).style.format({"Contribución S/": "{:,.0f}", "m² corner": "{:,.1f}",
+                                "Contrib/m²": "{:,.0f}", "Contrib temporada/m²": "{:,.0f}",
+                                "Venta/m²": "{:,.0f}"}, na_rep="no aplica"),
+                    use_container_width=True, hide_index=True, height=420)
+
+            # ── Cobertura ──
+            with _t3:
+                _c = [x for x in ["tienda", "canal", "stock_uds", "unidades", "cobertura_sem", "n_skus"]
+                      if x in _rt_vivas.columns]
+                _cob = _rt_vivas[_c].copy()
+                _tot_stk = _rt_m["stock_uds"].sum() if "stock_uds" in _rt_m.columns else 0
+                _cob_cadena = _tot_stk / _rt_und if _rt_und else float("nan")
+                st.markdown(_kpi_html(f"{_cob_cadena:,.1f}", "Cobertura cadena (semanas)"),
+                            unsafe_allow_html=True)
+                st.caption("Cobertura = stock en tienda / venta semanal. No hay año anterior contra "
+                           "el cual medirse (la marca arrancó en oct-25), así que la cobertura es el "
+                           "sustituto del comparativo LY.")
+                st.dataframe(_cob.rename(columns={
+                    "tienda": "Tienda", "canal": "Canal", "stock_uds": "Stock und",
+                    "unidades": "Venta sem", "cobertura_sem": "Cobertura (sem)", "n_skus": "SKUs"}
+                ).style.format({"Stock und": "{:,.0f}", "Venta sem": "{:,.0f}",
+                                "Cobertura (sem)": "{:,.1f}"}, na_rep="—"),
+                    use_container_width=True, hide_index=True, height=420)
+
+            # ── Evolución ──
+            with _t4:
+                st.info("La serie mensual necesita acumular snapshots semanales por tienda — el Micro "
+                        "solo trae la última semana. Está planificado como fase siguiente, junto con "
+                        "el backfill del histórico desde la base transaccional.\n\n"
+                        "Ojo con la unidad: el calendario de Ripley es 4-4-5, así que un mes calendario "
+                        "nunca se compone exacto desde semanas. La serie va a ir por **Periodo**.")
+
+            # ── Comparar marcas ──
+            with _t5:
+                _otras = [m for m in _rt_marcas if m != _rt_marca]
+                _vs = st.multiselect("Comparar contra", _otras,
+                                     default=["CACHAREL"] if "CACHAREL" in _otras else _otras[:1],
+                                     key="rend_t_vs")
+                if not _vs:
+                    st.caption("Elige al menos una marca para comparar.")
+                else:
+                    _todas = rend_t.desde_micro(pd.read_excel(_rt_path), marcas=[_rt_marca] + _vs)
+                    _cmp = rend_t.comparar_marcas(_todas, [_rt_marca] + _vs, por=("tienda",))
+                    st.caption("Participación calculada solo sobre tiendas donde alguna de las marcas "
+                               "vende. Dos marcas no están en las mismas tiendas, así que el total "
+                               "global no es comparable sin esta salvedad.")
+                    st.dataframe(_cmp.style.format(
+                        {c: "{:,.0f}" for c in _cmp.columns if c not in ("tienda",)
+                         and not str(c).startswith("pct_") and not str(c).endswith("_vs_" + _vs[0])}
+                        | {c: "{:.1%}" for c in _cmp.columns if str(c).startswith("pct_")},
+                        na_rep="—"), use_container_width=True, hide_index=True, height=420)
+
+            # ── Export ──
+            _rt_buf = io.BytesIO()
+            with pd.ExcelWriter(_rt_buf, engine="openpyxl") as _rt_w:
+                _rt_vivas.to_excel(_rt_w, sheet_name="Rendimiento x Tienda", index=False)
+                _rt_largo.to_excel(_rt_w, sheet_name="Detalle SKU x Tienda", index=False)
+            _rt_buf.seek(0)
+            st.download_button(
+                f"📥 Descargar rendimiento de {_rt_marca} (.xlsx)", data=_rt_buf.getvalue(),
+                file_name=f"Capi_Rendimiento_Tienda_{_rt_marca}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_rend_t")
+
+
 # ─── TAB 7: Simulador Predictivo ────────────────────────────
 
 elif nav_page == "🔮 Simulador Predictivo":
@@ -6400,8 +6631,25 @@ def _build_excel(cob_json, rep_pivot_json, rep_json, trans_json, prec_json, aler
     buf = io.BytesIO()
     _df_cob_ref = pd.read_json(io.StringIO(cob_json))
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        # Resumen ejecutivo primero: la foto antes del detalle (auditoría 2026-08-05)
+        vistas_excel.hoja_resumen_ejecutivo(writer, _df_cob_ref)
         _add_pricing_cols(_df_cob_ref, _df_cob_ref, "Cobertura", writer)
-        pd.read_json(io.StringIO(rep_pivot_json)).to_excel(writer, sheet_name="Reposiciones", index=False)
+        _df_rep_piv_xl = pd.read_json(io.StringIO(rep_pivot_json))
+        _df_rep_piv_xl.to_excel(writer, sheet_name="Reposiciones", index=False)
+        # Fila TOTAL con SUBTOTAL (respeta filtros) al pie de la matriz — antes
+        # Franco la agregaba a mano encima del header (auditoría 2026-08-05)
+        _ws_rep = writer.sheets["Reposiciones"]
+        if not _df_rep_piv_xl.empty:
+            _num_cols = [i + 1 for i, c in enumerate(_df_rep_piv_xl.columns)
+                         if pd.api.types.is_numeric_dtype(_df_rep_piv_xl[c]) and c != "sku"]
+            _fila_tot = _ws_rep.max_row + 1
+            _ws_rep.cell(row=_fila_tot, column=1, value="TOTAL (visible)")
+            for _ci in _num_cols:
+                _ltr = get_column_letter(_ci)
+                _ws_rep.cell(row=_fila_tot, column=_ci,
+                             value=f"=SUBTOTAL(9,{_ltr}2:{_ltr}{_fila_tot - 1})")
+            _ws_rep.auto_filter.ref = f"A1:{get_column_letter(_ws_rep.max_column)}{_fila_tot - 1}"
+            _ws_rep.freeze_panes = "A2"
         _df_rep_xl = pd.read_json(io.StringIO(rep_json))
         if not _df_rep_xl.empty:
             _add_pricing_cols(_df_rep_xl, _df_cob_ref, "Reposiciones Detalle", writer)
@@ -6456,6 +6704,31 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     use_container_width=True,
 )
+
+# ── Reportes por marca tercera: un Excel por marca, enviable al proveedor ──
+# (decisión 2026-08-05; generación bajo demanda para no alentar cada rerun)
+# Fingerprint de la base: si Franco sube otra base, el zip viejo deja de
+# ofrecerse (evita mandar cifras de un corte anterior a un proveedor).
+_fp_base_marcas = f"{len(df_cob)}|{df_cob['stock_valor_costo'].sum():.0f}"
+if st.button("📦 Generar reportes por marca tercera (un Excel por marca)",
+             use_container_width=True):
+    with st.spinner("Generando reportes por marca..."):
+        st.session_state["zip_reportes_marcas"] = reportes_marcas.generar_zip_reportes(
+            df_cob, df_rep if not df_rep.empty else None,
+            df_trans if not df_trans.empty else None,
+            df_prec if not df_prec.empty else None,
+            _alertas_excel if not _alertas_excel.empty else None,
+        )
+        st.session_state["zip_reportes_marcas_fp"] = _fp_base_marcas
+if (st.session_state.get("zip_reportes_marcas")
+        and st.session_state.get("zip_reportes_marcas_fp") == _fp_base_marcas):
+    st.download_button(
+        label="📦 Descargar reportes por marca (.zip)",
+        data=st.session_state["zip_reportes_marcas"],
+        file_name="Reportes_Marcas_Terceras.zip",
+        mime="application/zip",
+        use_container_width=True,
+    )
 
 # ══════════════════════════════════════════════════════════════
 #  SNAPSHOT & COMPARATIVO SEMANAL
@@ -6584,196 +6857,7 @@ with _snap_tab3:
 
 
 
-# ══════════════════════════════════════════════════════════════
-#  CHAT IA — Panel lateral derecho (estilo Nansen)
-# ══════════════════════════════════════════════════════════════
-
-# Cerrar el contexto de la columna principal
-if _chat_is_open and _col_main is not None:
-    _col_main.__exit__(None, None, None)
-
-# Renderizar panel de chat en la columna derecha (estilo Nansen AI)
-if _chat_is_open and _col_chat is not None:
-    import re as _re_chat
-
-    with _col_chat:
-        # Marcador para CSS scoping
-        st.markdown('<div class="chat-panel-marker"></div>', unsafe_allow_html=True)
-
-        # ── Header estilo Nansen: logo + "Capi" + badge + preview query + X ──
-        _last_query_preview = ""
-        for _m in st.session_state["chat_messages"]:
-            if _m["role"] == "user":
-                _last_query_preview = _m["question"]
-        _preview_txt = (_last_query_preview[:40] + "...") if len(_last_query_preview) > 40 else _last_query_preview
-
-        st.markdown(
-            f'<div style="display:flex; align-items:center; gap:8px; padding:12px 0; '
-            f'border-bottom:1px solid {SLATE_200}; margin-bottom:16px;">'
-            f'<div style="width:28px; height:28px; background:{TEAL_600}; border-radius:50%; '
-            f'display:flex; align-items:center; justify-content:center; color:white; font-weight:700; '
-            f'font-size:0.75rem; flex-shrink:0;">C</div>'
-            f'<span style="font-weight:600; color:{SLATE_900}; font-size:0.88rem;">Capi</span>'
-            f'<span style="background:{TEAL_50}; color:{TEAL_600}; font-size:0.58rem; font-weight:700; '
-            f'padding:2px 7px; border-radius:3px; letter-spacing:0.06em; text-transform:uppercase;">AI</span>'
-            f'<span style="color:{SLATE_400}; font-size:0.78rem; margin-left:auto; '
-            f'white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;">{_preview_txt}</span>'
-            f'</div>',
-            unsafe_allow_html=True
-        )
-
-        # Botón cerrar panel (X)
-        if st.button("✕", key="close_chat_x", help="Cerrar chat"):
-            st.session_state["chat_open"] = False
-            st.rerun()
-
-        # ── Historial de conversación ──
-        for _msg_idx, _msg in enumerate(st.session_state["chat_messages"]):
-            if _msg["role"] == "user":
-                # Burbuja usuario — alineada a la derecha, fondo sutil
-                st.markdown(
-                    f'<div style="display:flex; justify-content:flex-end; margin:16px 0 12px 0;">'
-                    f'<div style="background:{TEAL_50}; color:{SLATE_900}; '
-                    f'padding:10px 16px; border-radius:16px 16px 4px 16px; max-width:88%; '
-                    f'font-size:0.88rem; line-height:1.5;">{_msg["question"]}</div></div>',
-                    unsafe_allow_html=True
-                )
-            elif _msg["role"] == "ai":
-                # Respuesta AI — texto directo estilo Nansen
-                _conv = _msg["conversacion"].replace("\n\n", "<br><br>").replace("\n", "<br>")
-                _conv = _re_chat.sub(r'\*\*(.+?)\*\*', r'<strong style="color:{SLATE_900};">\1</strong>', _conv)
-
-                # Step verde con check (estilo Nansen "Checking Smart Money positions >")
-                _step_html = (
-                    f'<div style="display:inline-flex; align-items:center; gap:6px; margin:8px 0 14px 0;">'
-                    f'<span style="color:{TEAL_600}; font-size:0.9rem;">●</span>'
-                    f'<span style="color:{SLATE_500}; font-size:0.82rem;">'
-                    f'Analizando inventario — {_msg.get("n_combos", 0):,} combos</span>'
-                    f'<span style="color:{SLATE_400}; font-size:0.82rem;">›</span>'
-                    f'</div>'
-                )
-
-                st.markdown(
-                    f'<div style="margin:4px 0 20px 0;">'
-                    f'{_step_html}'
-                    f'<div style="color:{SLATE_700}; font-size:0.88rem; line-height:1.7;">{_conv}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-
-                # Tabla de datos (colapsable)
-                if _msg.get("resultado_json"):
-                    try:
-                        _rdf = pd.read_json(io.StringIO(_msg["resultado_json"]))
-                        if not _rdf.empty:
-                            with st.expander(f"📊 Ver datos ({len(_rdf)} filas)", expanded=False):
-                                st.dataframe(_rdf, use_container_width=True, hide_index=True, height=200)
-                    except Exception:
-                        pass
-
-                # Separador sutil entre respuestas
-                st.markdown(
-                    f'<div style="border-bottom:1px solid {SLATE_200}; margin:4px 0 8px 0;"></div>',
-                    unsafe_allow_html=True
-                )
-
-        # ── Procesar pregunta pendiente (con memoria conversacional) ──
-        if (st.session_state["chat_messages"] and
-                st.session_state["chat_messages"][-1]["role"] == "user"):
-            _pending_q = st.session_state["chat_messages"][-1]["question"]
-
-            # Construir historial para memoria conversacional
-            _chat_history = []
-            _msgs = st.session_state["chat_messages"][:-1]  # excluir pregunta actual
-            i = 0
-            while i < len(_msgs):
-                if _msgs[i]["role"] == "user" and i + 1 < len(_msgs) and _msgs[i + 1]["role"] == "ai":
-                    _ai_msg = _msgs[i + 1]
-                    _chat_history.append({
-                        "user_question": _msgs[i]["question"],
-                        "titulo": _ai_msg.get("titulo", ""),
-                        "result_summary": _ai_msg.get("result_summary", ""),
-                        "conversation": _ai_msg.get("conversacion", ""),
-                    })
-                    i += 2
-                else:
-                    i += 1
-
-            # Spinner estilo Nansen
-            with st.spinner("Analizando datos de inventario..."):
-                _chat_result = chat_engine.ask(
-                    question=_pending_q,
-                    df=df_cob,
-                    history=_chat_history if _chat_history else None,
-                )
-            if _chat_result["error"]:
-                st.warning(f"⚠️ {_chat_result['error']}")
-                st.session_state["chat_messages"].pop()
-            else:
-                _res_json = None
-                if _chat_result["resultado"] is not None and not _chat_result["resultado"].empty:
-                    _res_json = _chat_result["resultado"].to_json()
-                st.session_state["chat_messages"].append({
-                    "role": "ai",
-                    "titulo": _chat_result["titulo"],
-                    "conversacion": _chat_result["conversacion"],
-                    "resultado_json": _res_json,
-                    "result_summary": _chat_result.get("result_summary", ""),
-                    "n_combos": len(df_cob),
-                })
-                st.rerun()
-
-        # ── Input estilo Nansen: "Pregunta a Capi" con borde teal ──
-        def _submit_chat_msg():
-            val = st.session_state.get("right_panel_q", "").strip()
-            if val:
-                st.session_state["chat_messages"].append({"role": "user", "question": val})
-                st.session_state["right_panel_q"] = ""  # limpiar input tras enviar
-
-        st.text_input("Pregunta a Capi", placeholder="Pregunta a Capi",
-                      key="right_panel_q", label_visibility="collapsed",
-                      on_change=_submit_chat_msg)
-
-        # ── Chips de sugerencia debajo del input (estilo Nansen) ──
-        _CHAT_SUGGESTIONS = [
-            "Top vendidos",
-            "Capital parado",
-            "Peor cobertura",
-            "Sobrestock",
-        ]
-        _chip_html = '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">'
-        for _idx, _s_label in enumerate(_CHAT_SUGGESTIONS):
-            _chip_html += (
-                f'<span class="nansen-chip" style="background:{SLATE_100}; '
-                f'color:{SLATE_700}; font-size:0.72rem; padding:4px 10px; '
-                f'border-radius:6px; border:1px solid {SLATE_200}; '
-                f'cursor:default;">{_s_label}</span>'
-            )
-        _chip_html += '</div>'
-        st.markdown(_chip_html, unsafe_allow_html=True)
-
-        # Botones funcionales para los chips (hidden behind the HTML)
-        _chip_button_cols = st.columns(len(_CHAT_SUGGESTIONS))
-        for _idx, _s_label in enumerate(_CHAT_SUGGESTIONS):
-            with _chip_button_cols[_idx]:
-                if st.button(_s_label, key=f"rchip_{_idx}", use_container_width=True):
-                    st.session_state["chat_messages"].append({"role": "user", "question": _s_label})
-                    st.rerun()
-
-        # Limpiar + disclaimer
-        _bot_cols = st.columns([3, 1])
-        with _bot_cols[0]:
-            st.markdown(
-                f'<span style="font-size:0.68rem; color:{SLATE_400};">AI-generated. Verify independently.</span>',
-                unsafe_allow_html=True
-            )
-        with _bot_cols[1]:
-            if st.session_state["chat_messages"]:
-                if st.button("🗑️", key="clear_right_chat", help="Limpiar chat"):
-                    st.session_state["chat_messages"] = []
-                    st.rerun()
-
-elif nav_page == "📲 Productos Venta Cero":
+if nav_page == "📲 Productos Venta Cero":
     st.markdown(f'<div class="section-header"><h3>📲 Productos Venta Cero</h3><span class="live-badge">REVISIÓN TIENDA</span></div>', unsafe_allow_html=True)
     st.caption("SKUs con stock en tienda que NO vendieron la semana pasada. Para que cada tienda revise "
                "exhibición y comunicación de precio. El tipo de evento indica si etiquetar (MD1) o poner cartel (PTR).")
@@ -7867,4 +7951,195 @@ elif nav_page == "📝 Diario de Gestión":
     else:
         st.info("No hay entradas aún. Usa la pestaña 'Nueva entrada' para registrar tu primera acción.")
 
+
+
+
+# ══════════════════════════════════════════════════════════════
+#  CHAT IA — Panel lateral derecho (estilo Nansen)
+# ══════════════════════════════════════════════════════════════
+
+# Cerrar el contexto de la columna principal
+if _chat_is_open and _col_main is not None:
+    _col_main.__exit__(None, None, None)
+
+# Renderizar panel de chat en la columna derecha (estilo Nansen AI)
+if _chat_is_open and _col_chat is not None:
+    import re as _re_chat
+
+    with _col_chat:
+        # Marcador para CSS scoping
+        st.markdown('<div class="chat-panel-marker"></div>', unsafe_allow_html=True)
+
+        # ── Header estilo Nansen: logo + "Capi" + badge + preview query + X ──
+        _last_query_preview = ""
+        for _m in st.session_state["chat_messages"]:
+            if _m["role"] == "user":
+                _last_query_preview = _m["question"]
+        _preview_txt = (_last_query_preview[:40] + "...") if len(_last_query_preview) > 40 else _last_query_preview
+
+        st.markdown(
+            f'<div style="display:flex; align-items:center; gap:8px; padding:12px 0; '
+            f'border-bottom:1px solid {SLATE_200}; margin-bottom:16px;">'
+            f'<div style="width:28px; height:28px; background:{TEAL_600}; border-radius:50%; '
+            f'display:flex; align-items:center; justify-content:center; color:white; font-weight:700; '
+            f'font-size:0.75rem; flex-shrink:0;">C</div>'
+            f'<span style="font-weight:600; color:{SLATE_900}; font-size:0.88rem;">Capi</span>'
+            f'<span style="background:{TEAL_50}; color:{TEAL_600}; font-size:0.58rem; font-weight:700; '
+            f'padding:2px 7px; border-radius:3px; letter-spacing:0.06em; text-transform:uppercase;">AI</span>'
+            f'<span style="color:{SLATE_400}; font-size:0.78rem; margin-left:auto; '
+            f'white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;">{_preview_txt}</span>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+        # Botón cerrar panel (X)
+        if st.button("✕", key="close_chat_x", help="Cerrar chat"):
+            st.session_state["chat_open"] = False
+            st.rerun()
+
+        # ── Historial de conversación ──
+        for _msg_idx, _msg in enumerate(st.session_state["chat_messages"]):
+            if _msg["role"] == "user":
+                # Burbuja usuario — alineada a la derecha, fondo sutil
+                st.markdown(
+                    f'<div style="display:flex; justify-content:flex-end; margin:16px 0 12px 0;">'
+                    f'<div style="background:{TEAL_50}; color:{SLATE_900}; '
+                    f'padding:10px 16px; border-radius:16px 16px 4px 16px; max-width:88%; '
+                    f'font-size:0.88rem; line-height:1.5;">{_msg["question"]}</div></div>',
+                    unsafe_allow_html=True
+                )
+            elif _msg["role"] == "ai":
+                # Respuesta AI — texto directo estilo Nansen
+                _conv = _msg["conversacion"].replace("\n\n", "<br><br>").replace("\n", "<br>")
+                _conv = _re_chat.sub(r'\*\*(.+?)\*\*', r'<strong style="color:{SLATE_900};">\1</strong>', _conv)
+
+                # Step verde con check (estilo Nansen "Checking Smart Money positions >")
+                _step_html = (
+                    f'<div style="display:inline-flex; align-items:center; gap:6px; margin:8px 0 14px 0;">'
+                    f'<span style="color:{TEAL_600}; font-size:0.9rem;">●</span>'
+                    f'<span style="color:{SLATE_500}; font-size:0.82rem;">'
+                    f'Analizando inventario — {_msg.get("n_combos", 0):,} combos</span>'
+                    f'<span style="color:{SLATE_400}; font-size:0.82rem;">›</span>'
+                    f'</div>'
+                )
+
+                st.markdown(
+                    f'<div style="margin:4px 0 20px 0;">'
+                    f'{_step_html}'
+                    f'<div style="color:{SLATE_700}; font-size:0.88rem; line-height:1.7;">{_conv}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+                # Tabla de datos (colapsable)
+                if _msg.get("resultado_json"):
+                    try:
+                        _rdf = pd.read_json(io.StringIO(_msg["resultado_json"]))
+                        if not _rdf.empty:
+                            with st.expander(f"📊 Ver datos ({len(_rdf)} filas)", expanded=False):
+                                st.dataframe(_rdf, use_container_width=True, hide_index=True, height=200)
+                    except Exception:
+                        pass
+
+                # Separador sutil entre respuestas
+                st.markdown(
+                    f'<div style="border-bottom:1px solid {SLATE_200}; margin:4px 0 8px 0;"></div>',
+                    unsafe_allow_html=True
+                )
+
+        # ── Procesar pregunta pendiente (con memoria conversacional) ──
+        if (st.session_state["chat_messages"] and
+                st.session_state["chat_messages"][-1]["role"] == "user"):
+            _pending_q = st.session_state["chat_messages"][-1]["question"]
+
+            # Construir historial para memoria conversacional
+            _chat_history = []
+            _msgs = st.session_state["chat_messages"][:-1]  # excluir pregunta actual
+            i = 0
+            while i < len(_msgs):
+                if _msgs[i]["role"] == "user" and i + 1 < len(_msgs) and _msgs[i + 1]["role"] == "ai":
+                    _ai_msg = _msgs[i + 1]
+                    _chat_history.append({
+                        "user_question": _msgs[i]["question"],
+                        "titulo": _ai_msg.get("titulo", ""),
+                        "result_summary": _ai_msg.get("result_summary", ""),
+                        "conversation": _ai_msg.get("conversacion", ""),
+                    })
+                    i += 2
+                else:
+                    i += 1
+
+            # Spinner estilo Nansen
+            with st.spinner("Analizando datos de inventario..."):
+                _chat_result = chat_engine.ask(
+                    question=_pending_q,
+                    df=df_cob,
+                    history=_chat_history if _chat_history else None,
+                )
+            if _chat_result["error"]:
+                st.warning(f"⚠️ {_chat_result['error']}")
+                st.session_state["chat_messages"].pop()
+            else:
+                _res_json = None
+                if _chat_result["resultado"] is not None and not _chat_result["resultado"].empty:
+                    _res_json = _chat_result["resultado"].to_json()
+                st.session_state["chat_messages"].append({
+                    "role": "ai",
+                    "titulo": _chat_result["titulo"],
+                    "conversacion": _chat_result["conversacion"],
+                    "resultado_json": _res_json,
+                    "result_summary": _chat_result.get("result_summary", ""),
+                    "n_combos": len(df_cob),
+                })
+                st.rerun()
+
+        # ── Input estilo Nansen: "Pregunta a Capi" con borde teal ──
+        def _submit_chat_msg():
+            val = st.session_state.get("right_panel_q", "").strip()
+            if val:
+                st.session_state["chat_messages"].append({"role": "user", "question": val})
+                st.session_state["right_panel_q"] = ""  # limpiar input tras enviar
+
+        st.text_input("Pregunta a Capi", placeholder="Pregunta a Capi",
+                      key="right_panel_q", label_visibility="collapsed",
+                      on_change=_submit_chat_msg)
+
+        # ── Chips de sugerencia debajo del input (estilo Nansen) ──
+        _CHAT_SUGGESTIONS = [
+            "Top vendidos",
+            "Capital parado",
+            "Peor cobertura",
+            "Sobrestock",
+        ]
+        _chip_html = '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">'
+        for _idx, _s_label in enumerate(_CHAT_SUGGESTIONS):
+            _chip_html += (
+                f'<span class="nansen-chip" style="background:{SLATE_100}; '
+                f'color:{SLATE_700}; font-size:0.72rem; padding:4px 10px; '
+                f'border-radius:6px; border:1px solid {SLATE_200}; '
+                f'cursor:default;">{_s_label}</span>'
+            )
+        _chip_html += '</div>'
+        st.markdown(_chip_html, unsafe_allow_html=True)
+
+        # Botones funcionales para los chips (hidden behind the HTML)
+        _chip_button_cols = st.columns(len(_CHAT_SUGGESTIONS))
+        for _idx, _s_label in enumerate(_CHAT_SUGGESTIONS):
+            with _chip_button_cols[_idx]:
+                if st.button(_s_label, key=f"rchip_{_idx}", use_container_width=True):
+                    st.session_state["chat_messages"].append({"role": "user", "question": _s_label})
+                    st.rerun()
+
+        # Limpiar + disclaimer
+        _bot_cols = st.columns([3, 1])
+        with _bot_cols[0]:
+            st.markdown(
+                f'<span style="font-size:0.68rem; color:{SLATE_400};">AI-generated. Verify independently.</span>',
+                unsafe_allow_html=True
+            )
+        with _bot_cols[1]:
+            if st.session_state["chat_messages"]:
+                if st.button("🗑️", key="clear_right_chat", help="Limpiar chat"):
+                    st.session_state["chat_messages"] = []
+                    st.rerun()
 
