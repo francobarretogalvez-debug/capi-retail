@@ -986,6 +986,12 @@ def build_acciones_precio(df_cobertura, df_transferencias, df_maestro, params):
 
         # Precio sugerido (no baja de precio_min, ambos con IGV)
         precio_sug  = max(round(precio_vigente * (1 - dscto_base), 2), precio_min)
+        # Regla de negocio (fix 2026-08-17): NUNCA sugerir subir el precio.
+        # Si el clamp al piso deja el sugerido ≥ vigente, el precio actual ya
+        # está en/bajo el piso de margen mínimo → la acción es mantener.
+        if precio_sug >= precio_vigente:
+            precio_sug = precio_vigente
+            motivos.append("Precio vigente ya en/bajo piso de margen mínimo — mantener, no descontar más")
         dscto_real  = round(1 - precio_sug / precio_vigente, 3) if precio_vigente > 0 else 0
         # Margen real: ex-IGV para que sea comparable con IMU y margen_vigente
         pv_sug_exigv = precio_sug / IGV

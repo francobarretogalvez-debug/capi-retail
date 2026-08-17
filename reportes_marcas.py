@@ -81,15 +81,34 @@ def _con_sugerencias(g: pd.DataFrame, precio_min_map: dict) -> pd.DataFrame:
     sug = g["edad_semanas"].apply(lambda e: agente_terceras.descuento_sugerido(e))
     g["dscto_sugerido"] = sug.map(lambda t: t[0])
     g["tipo_dscto"] = sug.map(lambda t: t[1])
+    if precio_min_map:
+        g["precio_minimo"] = g["sku"].map(precio_min_map)
     # Guards: una base sin columnas de precio no debe tumbar el reporte
     # (auditoría 2026-08-16) — las columnas ausentes simplemente no salen.
-    if "precio_blanco" in g.columns:
-        g["precio_sugerido"] = (g["precio_blanco"] * (1 - g["dscto_sugerido"])).round(2)
+    #
+    # Regla de negocio (fix 2026-08-17): NUNCA sugerir un precio mayor al
+    # vigente. El P. Sugerido solo aparece cuando implica BAJAR; si el dscto
+    # actual ya supera la pirámide, o el piso de margen no deja bajar más,
+    # la acción es Mantener.
+    if "precio_blanco" in g.columns and "precio_vigente" in g.columns:
+        p_obj = (g["precio_blanco"] * (1 - g["dscto_sugerido"])).round(2)
+        limitado_piso = pd.Series(False, index=g.index)
+        if "precio_minimo" in g.columns:
+            piso = g["precio_minimo"]
+            limitado_piso = piso.notna() & (p_obj < piso)
+            p_obj = np.where(limitado_piso, piso, p_obj)
+        bajar = p_obj < (g["precio_vigente"] - 0.01)
+        g["precio_sugerido"] = np.where(bajar, p_obj, np.nan)
+        g["accion"] = np.where(
+            bajar,
+            np.where(limitado_piso, "⬇️ Bajar (limitado por piso)", "⬇️ Bajar al sugerido"),
+            np.where(limitado_piso | (g["precio_vigente"] <= g.get("precio_minimo", pd.Series(np.nan, index=g.index)).fillna(-1)),
+                     "✋ Mantener — ya en/bajo piso de margen",
+                     "✓ Mantener — dscto actual ≥ sugerido"),
+        )
         if "costo" in g.columns:
             _base = g["precio_sugerido"] / 1.18
             g["margen_resultante"] = np.where(_base > 0, (_base - g["costo"]) / _base, np.nan)
-    if precio_min_map:
-        g["precio_minimo"] = g["sku"].map(precio_min_map)
     return g
 
 
@@ -100,7 +119,7 @@ _COLS_PRECIO = [
     ("vta_sem_prom4", "Vta sem (prom 4)"), ("cobertura_cadena", "Cobertura (sem)"),
     ("capital_costo", "Capital S/ (costo)"), ("costo", "Costo unit."),
     ("pct_descuento", "Dscto actual"), ("dscto_sugerido", "Dscto sugerido"),
-    ("tipo_dscto", "Tipo"), ("precio_blanco", "P. Blanco"),
+    ("tipo_dscto", "Tipo"), ("accion", "Acción"), ("precio_blanco", "P. Blanco"),
     ("precio_vigente", "P. Vigente"), ("precio_sugerido", "P. Sugerido"),
     ("margen_resultante", "Margen result."), ("precio_minimo", "P. Mínimo (piso)"),
 ]
@@ -325,6 +344,9 @@ def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
         fila += 2
         ws.cell(row=fila, column=1,
                 value="P. Mínimo (piso) = precio más bajo permitido para no vender bajo costo + margen mínimo.").font = F_HEADER
+        fila += 1
+        ws.cell(row=fila, column=1,
+                value="P. Sugerido solo aparece cuando implica BAJAR el precio; si el dscto actual ya supera la pirámide o el piso no deja bajar más, la Acción es Mantener.").font = F_HEADER
         fila += 1
         ws.cell(row=fila, column=1, value=_SUPUESTOS).font = F_HEADER
         ws.column_dimensions["A"].width = 20
