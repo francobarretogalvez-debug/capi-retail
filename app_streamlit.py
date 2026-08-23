@@ -80,6 +80,7 @@ except Exception:
 import agente_terceras
 import vistas_excel
 import reportes_marcas
+import acciones_log
 import rendimiento_tienda as rend_t
 
 # ══════════════════════════════════════════════════════════════
@@ -728,6 +729,7 @@ with st.sidebar:
             _NAV_PREDICTIVO = [
                 ("🏪", "Afinidad Producto×Plaza"),
                 ("🤖", "Alertas IA"),
+                ("🔮", "Simulador Predictivo"),
             ]
 
             for _icon, _label in _NAV_PREDICTIVO:
@@ -749,6 +751,8 @@ with st.sidebar:
             ("📈", "Cobertura x Tienda"),
             ("📲", "Productos Venta Cero"),
             ("📊", "Gestión por Antigüedad"),
+            ("📈", "Evolución Semanal"),
+            ("🏆", "Caso de Éxito"),
         ]
         if _DEMO_MODE:
             # Demo: solo las vistas protagonistas del guion de 3 minutos
@@ -7417,3 +7421,79 @@ elif nav_page == "📝 Diario de Gestión":
 
 
 
+
+
+# ─── CASO DE ÉXITO (Fase 1-2 auditoría 2026-08-23) ───────────
+
+elif nav_page == "🏆 Caso de Éxito":
+    st.markdown("#### 🏆 Caso de Éxito — capital en exceso, semana a semana")
+    st.caption("La métrica titular para gerencia: capital a costo en DORMIDO + ESTANCADO + "
+               "SOBRESTOCK + LIQUIDAR + MUERTO. Cada acción registrada hace el delta atribuible.")
+
+    if not _HAS_SNAPSHOTS:
+        st.warning("Esta vista necesita el módulo de snapshots.")
+    else:
+        _ce_serie = snapshots_engine.api.serie_capital_exceso()
+        if _ce_serie.empty or len(_ce_serie) < 2:
+            st.info("Aún no hay suficientes snapshots para la serie (mínimo 2 semanas).")
+        else:
+            _ce_ult = _ce_serie.iloc[-1]
+            _ce_prev = _ce_serie.iloc[-2]
+            _c1, _c2, _c3, _c4 = st.columns(4)
+            _c1.metric("Capital en exceso", f"S/ {_ce_ult['capital_exceso']:,.0f}",
+                       delta=f"{_ce_ult['delta_exceso_pct']:+.1f}% vs {_ce_prev['semana_iso']}",
+                       delta_color="inverse")
+            _c2.metric("% del capital total", f"{_ce_ult['pct_exceso']*100:.1f}%")
+            _c3.metric("SKUs en exceso", f"{int(_ce_ult['skus_exceso']):,}")
+            _c4.metric("Semana del corte", _ce_ult["semana_iso"])
+
+            st.markdown("##### Evolución del capital en exceso")
+            _ce_chart = _ce_serie.set_index("semana_iso")[["capital_exceso", "capital_total"]]
+            _ce_chart.columns = ["Capital en exceso", "Capital total"]
+            st.line_chart(_ce_chart, height=260)
+            st.caption("⚠️ Las semanas no son consecutivas todavía (huecos entre cortes). "
+                       "La disciplina semanal arranca en la semana 0 declarada.")
+
+            with st.expander("Ver serie completa por estado", expanded=False):
+                _ce_est = snapshots_engine.api.serie_capital_estados()
+                _ce_piv = _ce_est.pivot_table(index="semana_iso", columns="estado",
+                                              values="capital", aggfunc="sum", fill_value=0)
+                st.dataframe(_ce_piv.style.format("S/ {:,.0f}"), use_container_width=True)
+
+        # ── Registro de acciones (Gap G3: atribución) ──
+        st.markdown("---")
+        st.markdown("##### 📋 Acciones de gestión (lo que hace el delta atribuible)")
+        _tab_reg, _tab_log = st.tabs(["➕ Registrar acción", "📜 Log de acciones"])
+
+        with _tab_reg:
+            with st.form("form_accion", clear_on_submit=True):
+                _fa1, _fa2, _fa3 = st.columns(3)
+                _ac_sem = _fa1.text_input("Semana ISO", value="", placeholder="2026-35 (vacío = actual)")
+                _ac_tipo = _fa2.selectbox("Tipo", acciones_log.TIPOS)
+                _ac_marca = _fa3.text_input("Marca", placeholder="LACOSTE")
+                _ac_desc = st.text_input("Descripción", placeholder="Markdown 40% aprobado en 12 modelos MUERTO")
+                _fb1, _fb2, _fb3 = st.columns(3)
+                _ac_mag = _fb1.text_input("Magnitud", placeholder="40% / 500 uds / S/ 80K")
+                _ac_orig = _fb2.selectbox("Origen", acciones_log.ORIGENES)
+                _ac_est = _fb3.selectbox("Estado", acciones_log.ESTADOS_ACCION)
+                if st.form_submit_button("Registrar", use_container_width=True):
+                    if _ac_desc.strip():
+                        acciones_log.agregar(_ac_sem.strip(), _ac_tipo, _ac_marca.strip().upper(),
+                                             _ac_desc.strip(), magnitud=_ac_mag.strip(),
+                                             origen=_ac_orig, estado=_ac_est)
+                        st.success("Acción registrada ✅")
+                    else:
+                        st.warning("La descripción es obligatoria.")
+
+        with _tab_log:
+            _log = acciones_log.cargar()
+            if _log.empty:
+                st.info("Sin acciones registradas todavía. La primera se registra en la pestaña de al lado.")
+            else:
+                st.dataframe(_log.sort_values("fecha_registro", ascending=False),
+                             use_container_width=True, hide_index=True, height=300)
+                st.download_button("📥 Descargar log (CSV)",
+                                   data=_log.to_csv(index=False).encode("utf-8"),
+                                   file_name="acciones_log.csv", mime="text/csv")
+                st.caption("☁️ En la nube el registro es temporal: descarga el CSV al terminar y "
+                           "pásalo al flujo semanal (se versiona en el repo junto al snapshot).")

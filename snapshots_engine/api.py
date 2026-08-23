@@ -1052,3 +1052,75 @@ def estimate_cd_reliability(umbral_volatil: float = 0.3, cd_min_relevante: int =
             'cd_volatil': volatil,
         })
     return pd.DataFrame(rows)
+
+
+# ─────────────────────────────────────────────────────────────
+#  CAPITAL POR ESTADO — serie semanal (Caso de Éxito, G2)
+#  Auditoría integral 2026-08-23: la métrica titular para gerencia
+#  es el capital en EXCESO, no el DORMIDO puro (ruidoso).
+# ─────────────────────────────────────────────────────────────
+
+ESTADOS_EXCESO = ["DORMIDO", "ESTANCADO", "SOBRESTOCK", "LIQUIDAR", "MUERTO"]
+
+
+def capital_por_estado(semana: str) -> pd.DataFrame:
+    """Capital a costo, SKUs y unidades por estado para una semana.
+
+    El estado se deriva con taxonomia.classify_series sobre el snapshot
+    (cobertura + edad + rango), igual que detect_state_changes.
+    """
+    from taxonomia import classify_series
+
+    try:
+        df = load_snapshot(semana)
+    except FileNotFoundError:
+        return pd.DataFrame()
+    if df.empty or 'stock_valor_costo' not in df.columns:
+        return pd.DataFrame()
+
+    df = df.copy()
+    df['estado'] = classify_series(
+        df['cobertura_sem'],
+        edad=df.get('edad_semanas'),
+        rango=df.get('rango_antiguedad'),
+    )
+    out = df.groupby('estado', as_index=False).agg(
+        n_skus=('sku', 'nunique'),
+        uds=('stock_total', 'sum'),
+        capital=('stock_valor_costo', 'sum'),
+    )
+    out['semana_iso'] = semana
+    return out
+
+
+def serie_capital_estados(desde: str = None, hasta: str = None) -> pd.DataFrame:
+    """Serie semanal de capital por estado (formato largo) para todas las
+    semanas disponibles en snapshots."""
+    weeks = list_available_weeks()
+    if desde:
+        weeks = [w for w in weeks if w >= desde]
+    if hasta:
+        weeks = [w for w in weeks if w <= hasta]
+    frames = [capital_por_estado(w) for w in weeks]
+    frames = [f for f in frames if not f.empty]
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def serie_capital_exceso(desde: str = None, hasta: str = None) -> pd.DataFrame:
+    """Serie semanal de la métrica titular del caso de éxito:
+    capital en exceso (DORMIDO+ESTANCADO+SOBRESTOCK+LIQUIDAR+MUERTO)
+    vs capital total, con % y delta WoW."""
+    serie = serie_capital_estados(desde, hasta)
+    if serie.empty:
+        return pd.DataFrame()
+    total = serie.groupby('semana_iso')['capital'].sum().rename('capital_total')
+    exceso = (serie[serie['estado'].isin(ESTADOS_EXCESO)]
+              .groupby('semana_iso')
+              .agg(capital_exceso=('capital', 'sum'),
+                   skus_exceso=('n_skus', 'sum'),
+                   uds_exceso=('uds', 'sum')))
+    out = exceso.join(total).reset_index().sort_values('semana_iso')
+    out['pct_exceso'] = (out['capital_exceso'] / out['capital_total']).round(4)
+    out['delta_exceso'] = out['capital_exceso'].diff().round(0)
+    out['delta_exceso_pct'] = (out['capital_exceso'].pct_change() * 100).round(1)
+    return out.reset_index(drop=True)
