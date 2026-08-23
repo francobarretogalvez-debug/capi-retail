@@ -52,9 +52,13 @@ def agregar(semana_iso: str, tipo: str, marca: str, descripcion: str,
             estado: str = "Ejecutada") -> pd.DataFrame:
     """Agrega una acción y persiste. Devuelve el log actualizado."""
     df = cargar()
+    # Validar formato YYYY-WW; cualquier otra cosa cae a la semana actual
+    import re as _re
+    _sem_ok = bool(semana_iso and _re.fullmatch(r"\d{4}-\d{2}", str(semana_iso).strip()))
+    _sem_default = f"{date.today().isocalendar()[0]}-{date.today().isocalendar()[1]:02d}"
     fila = {
         "fecha_registro": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "semana_iso": semana_iso or f"{date.today().isocalendar()[0]}-{date.today().isocalendar()[1]:02d}",
+        "semana_iso": str(semana_iso).strip() if _sem_ok else _sem_default,
         "tipo": tipo, "marca": marca, "sku": str(sku or ""),
         "descripcion": descripcion, "magnitud": str(magnitud or ""),
         "origen": origen, "estado": estado,
