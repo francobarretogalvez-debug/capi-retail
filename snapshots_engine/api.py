@@ -60,8 +60,9 @@ def get_venta_ultimas_n_semanas(n: int = 4, hasta_semana: str = None) -> pd.Data
             # conteo. La venta SEMANAL real es vta_u_sem_1ant; los soles
             # semanales se estiman con el precio realizado promedio.
             _f = df[['sku', 'marca']].copy()
-            _f['vta_uds_semana'] = pd.to_numeric(
-                df.get('vta_u_sem_1ant'), errors='coerce').fillna(0)
+            _col_sem = df['vta_u_sem_1ant'] if 'vta_u_sem_1ant' in df.columns \
+                else pd.Series(0, index=df.index)
+            _f['vta_uds_semana'] = pd.to_numeric(_col_sem, errors='coerce').fillna(0)
             _uds_acum = pd.to_numeric(df.get('unidades_vendidas'), errors='coerce')
             _soles_acum = pd.to_numeric(df.get('venta_soles'), errors='coerce')
             _precio_real = (_soles_acum / _uds_acum).where(_uds_acum > 0)
@@ -240,7 +241,9 @@ def compare_weeks(sem_a: str, sem_b: str) -> dict:
         # Fix B1 (auditoría 2026-08-23): la venta comparable entre semanas es
         # la SEMANAL (vta_u_sem_1ant), no los acumulados de temporada — el Δ%
         # que se mostraba antes comparaba acumulado vs acumulado y salía mal.
-        _uds_sem = pd.to_numeric(df.get('vta_u_sem_1ant'), errors='coerce').fillna(0)
+        _col_sem = df['vta_u_sem_1ant'] if 'vta_u_sem_1ant' in df.columns \
+            else pd.Series(0, index=df.index)
+        _uds_sem = pd.to_numeric(_col_sem, errors='coerce').fillna(0)
         _uds_acum = pd.to_numeric(df.get('unidades_vendidas'), errors='coerce')
         _soles_acum = pd.to_numeric(df.get('venta_soles'), errors='coerce')
         _precio_real = (_soles_acum / _uds_acum).where(_uds_acum > 0)
