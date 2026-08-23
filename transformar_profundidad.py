@@ -98,7 +98,28 @@ def _normalizar_cols_tienda(df, stores):
     return df
 
 
-def transform(input_path, output_path=None, fecha_corte='08/04/2026'):
+def fecha_corte_desde_nombre(nombre):
+    """Deriva la fecha de corte del nombre del archivo ("Base al 04.08.xlsx",
+    "Base al 22.06.26.xlsx"). Fix auditoría 2026-08-23: antes fecha_corte era
+    la constante '08/04/2026' y toda base quedaba estampada en semana 15."""
+    import re as _re
+    from datetime import date as _date
+    if nombre:
+        m = (_re.search(r'al\s+(\d{1,2})[._-](\d{1,2})(?:[._-](\d{2,4}))?', str(nombre))
+             or _re.search(r'(\d{1,2})[._-](\d{1,2})(?:[._-](\d{2,4}))?', str(nombre)))
+        if m:
+            d, mth = int(m.group(1)), int(m.group(2))
+            y = int(m.group(3)) if m.group(3) else _date.today().year
+            if y < 100:
+                y += 2000
+            if 1 <= d <= 31 and 1 <= mth <= 12:
+                return f'{d:02d}/{mth:02d}/{y}'
+    return _date.today().strftime('%d/%m/%Y')
+
+
+def transform(input_path, output_path=None, fecha_corte=None):
+    if fecha_corte is None:
+        fecha_corte = fecha_corte_desde_nombre(os.path.basename(str(input_path)))
     if output_path is None:
         output_path = os.path.join(os.path.dirname(input_path), 'Plantilla_Capi_Profundidad.xlsx')
 

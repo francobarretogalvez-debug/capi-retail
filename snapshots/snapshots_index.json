@@ -1,0 +1,74 @@
+[
+  {
+    "semana_iso": "2026-14",
+    "fecha_cierre": "2026-04-05",
+    "n_filas": 5333,
+    "n_skus": 5333,
+    "timestamp": "2026-06-10T22:45:02.396332",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-14/snapshot.parquet",
+    "hash": "77c509bc3df3"
+  },
+  {
+    "semana_iso": "2026-15",
+    "fecha_cierre": "2026-04-12",
+    "n_filas": 5260,
+    "n_skus": 5260,
+    "timestamp": "2026-06-10T22:46:18.449784",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-15/snapshot.parquet",
+    "hash": "a91ea5460385"
+  },
+  {
+    "semana_iso": "2026-17",
+    "fecha_cierre": "2026-04-26",
+    "n_filas": 5323,
+    "n_skus": 5323,
+    "timestamp": "2026-06-10T22:46:36.981394",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-17/snapshot.parquet",
+    "hash": "dbdda6123827"
+  },
+  {
+    "semana_iso": "2026-18",
+    "fecha_cierre": "2026-05-03",
+    "n_filas": 5338,
+    "n_skus": 5338,
+    "timestamp": "2026-06-10T22:45:41.254966",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-18/snapshot.parquet",
+    "hash": "bbe3588d46ef"
+  },
+  {
+    "semana_iso": "2026-19",
+    "fecha_cierre": "2026-05-10",
+    "n_filas": 5333,
+    "n_skus": 5333,
+    "timestamp": "2026-06-10T22:45:59.846002",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-19/snapshot.parquet",
+    "hash": "0a51ff29c4a2"
+  },
+  {
+    "semana_iso": "2026-22",
+    "fecha_cierre": "2026-05-31",
+    "n_filas": 5425,
+    "n_skus": 5425,
+    "timestamp": "2026-06-10T22:45:22.119020",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-22/snapshot.parquet",
+    "hash": "caa94dc8b2bc"
+  },
+  {
+    "semana_iso": "2026-25",
+    "fecha_cierre": "2026-06-21",
+    "n_filas": 5560,
+    "n_skus": 5560,
+    "timestamp": "2026-06-25T11:33:11.729739",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-25/snapshot.parquet",
+    "hash": "8d1abfbfc838"
+  },
+  {
+    "semana_iso": "2026-31",
+    "fecha_cierre": "2026-08-02",
+    "n_filas": 5506,
+    "n_skus": 5506,
+    "timestamp": "2026-08-03T21:35:47.857376",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-31/snapshot.parquet",
+    "hash": "b3786f5c8b85"
+  }
+]

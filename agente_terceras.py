@@ -12,7 +12,7 @@ Dos tipos de oportunidad:
   - quiebre: marca tercera agotada que vendía bien (requiere_proveedor) →
     correo pidiendo reorder.
 
-Reusa el patrón de llamada a Claude de chat_engine, con system prompt comercial.
+Llamada directa a Claude con system prompt comercial.
 """
 from __future__ import annotations
 

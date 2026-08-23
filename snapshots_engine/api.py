@@ -55,7 +55,18 @@ def get_venta_ultimas_n_semanas(n: int = 4, hasta_semana: str = None) -> pd.Data
     for w in weeks_ventana:
         try:
             df = load_snapshot(w)
-            frames.append(df[['sku', 'marca', 'unidades_vendidas', 'venta_soles']].copy())
+            # Fix B1 (auditoría 2026-08-23): unidades_vendidas / venta_soles son
+            # ACUMULADOS de temporada — sumarlos entre semanas multiplica el
+            # conteo. La venta SEMANAL real es vta_u_sem_1ant; los soles
+            # semanales se estiman con el precio realizado promedio.
+            _f = df[['sku', 'marca']].copy()
+            _f['vta_uds_semana'] = pd.to_numeric(
+                df.get('vta_u_sem_1ant'), errors='coerce').fillna(0)
+            _uds_acum = pd.to_numeric(df.get('unidades_vendidas'), errors='coerce')
+            _soles_acum = pd.to_numeric(df.get('venta_soles'), errors='coerce')
+            _precio_real = (_soles_acum / _uds_acum).where(_uds_acum > 0)
+            _f['vta_soles_semana'] = (_f['vta_uds_semana'] * _precio_real.fillna(0)).round(2)
+            frames.append(_f)
         except Exception:
             continue
 
@@ -66,9 +77,9 @@ def get_venta_ultimas_n_semanas(n: int = 4, hasta_semana: str = None) -> pd.Data
 
     # Agregar por SKU
     result = df_all.groupby(['sku', 'marca'], as_index=False).agg(
-        vta_total_unidades=('unidades_vendidas', 'sum'),
-        vta_total_soles=('venta_soles', 'sum'),
-        n_semanas_con_data=('unidades_vendidas', 'count'),
+        vta_total_unidades=('vta_uds_semana', 'sum'),
+        vta_total_soles=('vta_soles_semana', 'sum'),
+        n_semanas_con_data=('vta_uds_semana', 'count'),
     )
     result['vta_promedio_unidades'] = (
         result['vta_total_unidades'] / result['n_semanas_con_data']
@@ -226,13 +237,21 @@ def compare_weeks(sem_a: str, sem_b: str) -> dict:
         return {}
 
     def _kpis(df, sem):
+        # Fix B1 (auditoría 2026-08-23): la venta comparable entre semanas es
+        # la SEMANAL (vta_u_sem_1ant), no los acumulados de temporada — el Δ%
+        # que se mostraba antes comparaba acumulado vs acumulado y salía mal.
+        _uds_sem = pd.to_numeric(df.get('vta_u_sem_1ant'), errors='coerce').fillna(0)
+        _uds_acum = pd.to_numeric(df.get('unidades_vendidas'), errors='coerce')
+        _soles_acum = pd.to_numeric(df.get('venta_soles'), errors='coerce')
+        _precio_real = (_soles_acum / _uds_acum).where(_uds_acum > 0)
+        _soles_sem = float((_uds_sem * _precio_real.fillna(0)).sum())
         return {
             'semana': sem,
             'n_skus': int(df['sku'].nunique()),
             'stock_total': int(df['stock_total'].sum()),
             'stock_valorizado': float(df['stock_valor_costo'].sum()) if 'stock_valor_costo' in df.columns else 0,
-            'venta_unidades': int(df['unidades_vendidas'].sum()),
-            'venta_soles': float(df['venta_soles'].sum()) if 'venta_soles' in df.columns else 0,
+            'venta_unidades': int(_uds_sem.sum()),
+            'venta_soles': round(_soles_sem, 2),
             'contribucion': float(df['contribucion_soles'].sum()) if 'contribucion_soles' in df.columns else 0,
             'cob_promedio': float(df['cobertura_sem'].mean()) if 'cobertura_sem' in df.columns else 0,
         }
@@ -680,7 +699,9 @@ def get_resumen_semanal(semana: str = None) -> dict:
 
 
 def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
-                        min_semanas_velocidad: int = 2) -> dict:
+                        min_semanas_velocidad: int = 2,
+                        tasa_recaptura: float = 0.30,
+                        ajuste_estacional: bool = False) -> dict:  # v1 confunde quiebre con baja estación — ver nota
     """
     Estima la venta perdida (S/) por quiebres de stock en la ventana de
     snapshots disponibles. Devuelve una BANDA (conservadora-optimista),
@@ -795,12 +816,46 @@ def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
             meta[sku] = {
                 'descripcion': getattr(row, 'descripcion', ''),
                 'marca': getattr(row, 'marca', ''),
+                'linea': getattr(row, 'linea', '') or '',
                 'venta_soles_w': float(getattr(row, 'venta_soles', 0) or 0),
                 'uds_w': float(getattr(row, 'unidades_vendidas', 0) or 0),
+                'contrib_w': float(getattr(row, 'contribucion_soles', 0) or 0),
+                'costo': float(getattr(row, 'costo_unitario', 0) or 0),
             }
             # último precio VÁLIDO de la historia (guard contra basura tipo S/ 0.01)
             if _pv >= 5 and (_pb <= 0 or _pv >= 0.2 * _pb):
                 precio_valido[sku] = _pv
+
+    # ── Índice estacional por línea: nivel de demanda semanal de la línea ──
+    # Escala la velocidad histórica del SKU a la demanda que habría tenido EN la(s)
+    # semana(s) del quiebre. Una línea que cae hacia invierno vendía menos cuando
+    # quebró que cuando se midió su velocidad → no toda la velocidad histórica aplica.
+    linea_sem = {}
+    if ajuste_estacional:
+        for _sku, _wkmap in ventas_any.items():
+            _ln = meta.get(_sku, {}).get('linea', '') or '—'
+            _d = linea_sem.setdefault(_ln, {})
+            for _wk, _val in _wkmap.items():
+                _d[_wk] = _d.get(_wk, 0.0) + float(_val or 0.0)
+
+    def _factor_estacional(linea, vel_weeks, q_weeks):
+        """Razón nivel-de-línea en semanas de quiebre vs semanas de velocidad,
+        acotada a [0.5, 1.5] para no amplificar ruido. Solo usa semanas con data."""
+        if not ajuste_estacional:
+            return 1.0
+        d = linea_sem.get(linea or '—')
+        if not d:
+            return 1.0
+        base_vals = [d[w] for w in vel_weeks if w in d]
+        targ_vals = [d[w] for w in q_weeks if w in d]
+        if not base_vals or not targ_vals:
+            return 1.0
+        base, target = float(np.mean(base_vals)), float(np.mean(targ_vals))
+        if base <= 0:
+            return 1.0
+        return float(min(1.5, max(0.5, target / base)))
+
+    _recap = float(min(0.9, max(0.0, tasa_recaptura)))  # recaptura por sustitución
 
     # ── Candidatos: stock 0 en algún cierre Y venta semanal real > 0 (gate) ──
     n_excluidos = 0
@@ -813,8 +868,7 @@ def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
         if venta_total <= 0:
             continue  # mercadería muerta, no quiebre
 
-        # Velocidad: serie semanal reconstruida de filas válidas (incluye semanas
-        # en cero legítimas — el SKU tenía stock y no vendió)
+        # Velocidad: serie semanal reconstruida de filas válidas
         vel_weeks = sorted(v.keys())
         if len(vel_weeks) < min_semanas_velocidad:
             n_excluidos += 1
@@ -829,13 +883,15 @@ def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
             n_excluidos += 1
             continue
 
-        # Semanas en quiebre: cierres con stock 0 (0.5 c/u) + gaps confirmados
+        # Semanas en quiebre (+ ordinales donde hubo quiebre, para estacionalidad)
         sem_q_min = sem_q_max = 0.0
+        q_weeks = []
         cierres = sorted(stk.keys())
         for wk in cierres:
             if stk[wk] == 0:
                 sem_q_min += 0.5
                 sem_q_max += 0.5
+                q_weeks.append(wk)
         v_any = ventas_any.get(sku, {})
         for a, b in zip(cierres, cierres[1:]):
             if stk[a] == 0 and stk[b] == 0:
@@ -843,46 +899,89 @@ def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
                     if v_any.get(gap_wk) == 0:
                         sem_q_min += 0.5
                         sem_q_max += 1.0
+                        q_weeks.append(gap_wk)
         if sem_q_max <= 0:
             continue
 
-        # Precio: último válido de la historia; fallback a venta/unidades
+        # Precio NETO (sin IGV) y margen — de la economía realizada del sistema.
+        # venta_soles/unidades y contribucion/venta son acumulados de temporada →
+        # precio promedio realizado y margen contable, ambos SIN IGV (consistentes
+        # entre sí y con cómo Ripley reporta venta/margen). Evita el desfase de IGV
+        # de precio_vigente y el costo_unitario faltante (~48% de SKUs).
         m = meta[sku]
-        precio = precio_valido.get(sku, 0.0)
-        if precio <= 0:
-            precio = (m['venta_soles_w'] / m['uds_w']) if m['uds_w'] > 0 else 0.0
+        precio = (m['venta_soles_w'] / m['uds_w']) if m['uds_w'] > 0 else 0.0
+        if precio <= 0:  # fallback: precio vigente desinflado de IGV
+            _pv = precio_valido.get(sku, 0.0)
+            precio = _pv / 1.18 if _pv > 0 else 0.0
         if precio <= 0:
             n_excluidos += 1
             continue
+        margen_pct = (m['contrib_w'] / m['venta_soles_w']) if m['venta_soles_w'] > 0 else 0.35
+        margen_pct = float(min(0.90, max(0.0, margen_pct)))  # margen contable acotado
+        margen_unit = precio * margen_pct
+
+        # Ajuste estacional de la velocidad (refinamiento #3)
+        factor = _factor_estacional(m.get('linea', ''), vel_weeks, q_weeks)
+        vlow_aj, vhigh_aj = vel_low * factor, vel_high * factor
+
+        # Unidades perdidas (banda) y variantes de pérdida
+        uds_min, uds_max = vlow_aj * sem_q_min, vhigh_aj * sem_q_max
+        ing_bruto_min, ing_bruto_max = uds_min * precio, uds_max * precio        # ingreso (demanda)
+        ing_neto_min, ing_neto_max = ing_bruto_min * (1 - _recap), ing_bruto_max * (1 - _recap)  # neto negocio
+        mg_bruto_min, mg_bruto_max = uds_min * margen_unit, uds_max * margen_unit  # margen perdido
+        mg_neto_min, mg_neto_max = mg_bruto_min * (1 - _recap), mg_bruto_max * (1 - _recap)
 
         detalle.append({
-            'sku': sku,
-            'descripcion': m['descripcion'],
-            'marca': m['marca'],
+            'sku': sku, 'descripcion': m['descripcion'], 'marca': m['marca'],
+            'linea': m.get('linea', ''),
             'velocidad_uds_sem': round(vel_simple, 2),
-            'semanas_quiebre_min': sem_q_min,
-            'semanas_quiebre_max': sem_q_max,
-            'precio_usado': round(precio, 2),
-            'perdida_min_soles': round(vel_low * sem_q_min * precio, 0),
-            'perdida_max_soles': round(vel_high * sem_q_max * precio, 0),
+            'factor_estacional': round(factor, 2),
+            'velocidad_ajustada': round(vel_simple * factor, 2),
+            'semanas_quiebre_min': sem_q_min, 'semanas_quiebre_max': sem_q_max,
+            'precio_usado': round(precio, 2), 'margen_pct': round(margen_pct * 100, 1),
+            'uds_perdidas_min': round(uds_min, 0), 'uds_perdidas_max': round(uds_max, 0),
+            # ingreso (revenue) — bruto = señal de demanda
+            'perdida_min_soles': round(ing_bruto_min, 0),
+            'perdida_max_soles': round(ing_bruto_max, 0),
+            'ingreso_neto_min': round(ing_neto_min, 0),
+            'ingreso_neto_max': round(ing_neto_max, 0),
+            # margen perdido — lo que mueve EBITDA
+            'margen_bruto_min': round(mg_bruto_min, 0), 'margen_bruto_max': round(mg_bruto_max, 0),
+            'margen_neto_min': round(mg_neto_min, 0), 'margen_neto_max': round(mg_neto_max, 0),
         })
 
     df_detalle = pd.DataFrame(detalle)
     if not df_detalle.empty:
         df_detalle = df_detalle.sort_values('perdida_max_soles', ascending=False).reset_index(drop=True)
 
+    def _sum(col):
+        return float(df_detalle[col].sum()) if (not df_detalle.empty and col in df_detalle) else 0.0
+
     supuestos = [
         f"Ventana: {sem_list[0]} a {sem_list[-1]} ({len(sem_list)} cierres de snapshot).",
-        "Semana de cierre con stock 0 cuenta como 0.5 semanas de quiebre (convención del sistema).",
-        "Semanas entre snapshots cuentan solo si stock 0 en ambos extremos y venta 0: banda 0.5-1.0.",
-        "Velocidad estimada con la serie de venta semanal reconstruida (sem. previas de cada corte); banda = promedio simple vs ponderado reciente.",
+        "Semana de cierre con stock 0 = 0.5 sem de quiebre; semanas gap entre snapshots 0.5-1.0 (confirmadas).",
+        "Velocidad = serie semanal reconstruida (banda: promedio simple vs ponderado reciente).",
+        ("Ajuste estacional ON: velocidad escalada por el nivel de demanda de la línea en la semana del quiebre (acotado 0.5-1.5x)."
+         if ajuste_estacional else "Ajuste estacional OFF."),
+        f"Recaptura por sustitución: {int(_recap*100)}% de la demanda en quiebre se recupera con otro SKU → 'neto al negocio'.",
+        "Precio e ingreso SIN IGV (venta_soles/uds realizado); margen perdido = ingreso × margen contable (contribución/venta).",
         f"{n_excluidos} SKUs excluidos por historia o precio insuficientes." if n_excluidos else "Sin SKUs excluidos.",
         "Nivel SKU agregado cadena (el detalle por tienda usa la base actual).",
     ]
 
     return {
-        'banda_min': float(df_detalle['perdida_min_soles'].sum()) if not df_detalle.empty else 0.0,
-        'banda_max': float(df_detalle['perdida_max_soles'].sum()) if not df_detalle.empty else 0.0,
+        # Compat: banda_min/max = INGRESO BRUTO (señal de demanda, nivel SKU)
+        'banda_min': _sum('perdida_min_soles'),
+        'banda_max': _sum('perdida_max_soles'),
+        # Ingreso NETO al negocio (descontada sustitución) — titular recomendado
+        'ingreso_neto_min': _sum('ingreso_neto_min'),
+        'ingreso_neto_max': _sum('ingreso_neto_max'),
+        # Margen perdido (lo que mueve EBITDA)
+        'margen_bruto_min': _sum('margen_bruto_min'),
+        'margen_bruto_max': _sum('margen_bruto_max'),
+        'margen_neto_min': _sum('margen_neto_min'),
+        'margen_neto_max': _sum('margen_neto_max'),
+        'tasa_recaptura': _recap,
         'semanas_analizadas': sem_list,
         'df_detalle': df_detalle,
         'n_skus_afectados': int(len(df_detalle)),

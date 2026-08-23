@@ -52,7 +52,7 @@ if _HAS_SNAPSHOTS and not st.session_state.get("_snapshots_initialized"):
     except Exception:
         st.session_state["_snapshots_initialized"] = True
 
-# Cargar .env antes de importar chat_engine
+# Cargar .env antes de importar agente_terceras
 try:
     from dotenv import load_dotenv
     _env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -69,7 +69,7 @@ except ImportError:
                     os.environ[_k.strip()] = _v.strip()
 
 # En Streamlit Cloud la API key vive en st.secrets, no en variables de entorno.
-# La propagamos a os.environ para que chat_engine y agente_terceras (que usan
+# La propagamos a os.environ para que agente_terceras (que usa
 # os.getenv) la encuentren igual que en local con .env.
 try:
     if "ANTHROPIC_API_KEY" in st.secrets and not os.getenv("ANTHROPIC_API_KEY"):
@@ -77,7 +77,6 @@ try:
 except Exception:
     pass
 
-import chat_engine
 import agente_terceras
 import vistas_excel
 import reportes_marcas
@@ -223,187 +222,6 @@ st.markdown(f"""
     [data-testid="stTextInput"] input[aria-label="Pregunta a Capi"]:focus {{
         border-color: {TEAL_600} !important;
         box-shadow: 0 0 0 2px rgba(27,79,114,0.12) !important;
-    }}
-
-    /* ── Right Chat Column (corporate) ──────── */
-    div[data-testid="stHorizontalBlock"]:has(.chat-panel-marker) {{
-        align-items: flex-start !important;
-    }}
-    div[data-testid="stColumn"]:has(.chat-panel-marker) {{
-        position: sticky;
-        top: 0;
-        max-height: 100vh;
-        min-width: 380px;
-        overflow-y: auto;
-        background: #FFFFFF !important;
-        border-left: 1px solid {SLATE_200};
-        border-radius: 0;
-        padding: 16px 20px !important;
-    }}
-    div[data-testid="stColumn"]:has(.chat-panel-marker) .stTextInput input {{
-        background: {SLATE_50} !important;
-        border: 1px solid {SLATE_200} !important;
-        color: {SLATE_900} !important;
-        border-radius: 8px !important;
-        padding: 12px 16px !important;
-        font-size: 0.9rem !important;
-    }}
-    div[data-testid="stColumn"]:has(.chat-panel-marker) .stTextInput input::placeholder {{
-        color: {SLATE_400} !important;
-    }}
-    div[data-testid="stColumn"]:has(.chat-panel-marker) .stTextInput input:focus {{
-        border-color: {TEAL_600} !important;
-        box-shadow: 0 0 0 2px rgba(27,79,114,0.1) !important;
-    }}
-    div[data-testid="stColumn"]:has(.chat-panel-marker) .stButton > button {{
-        background: {SLATE_50} !important;
-        color: {SLATE_500} !important;
-        border: 1px solid {SLATE_200} !important;
-        font-size: 0.75em !important;
-        padding: 4px 8px !important;
-        border-radius: 6px !important;
-        min-height: 0 !important;
-    }}
-    div[data-testid="stColumn"]:has(.chat-panel-marker) .stButton > button:hover {{
-        background: {TEAL_50} !important;
-        color: {TEAL_600} !important;
-        border-color: {TEAL_600} !important;
-    }}
-    div[data-testid="stColumn"]:has(.chat-panel-marker) .stExpander {{
-        border-color: {SLATE_200} !important;
-    }}
-    div[data-testid="stColumn"]:has(.chat-panel-marker) .stExpander summary {{
-        color: {SLATE_500} !important;
-        font-size: 0.8rem !important;
-    }}
-    div[data-testid="stColumn"]:has(.chat-panel-marker) .stSpinner > div {{
-        color: {SLATE_500} !important;
-    }}
-    div[data-testid="stColumn"]:has(.chat-panel-marker) .stAlert {{
-        background: {SLATE_50} !important;
-        color: {SLATE_700} !important;
-        border-color: {SLATE_200} !important;
-    }}
-
-    /* ── Chat Panel (corporate light) ────────── */
-    .nansen-chat-panel {{
-        background: #FFFFFF;
-        border: 1px solid {SLATE_200};
-        border-radius: 10px;
-        overflow: hidden;
-        margin-top: 0.5rem;
-        margin-bottom: 1rem;
-    }}
-    .nansen-chat-header {{
-        background: {SLATE_50};
-        border-bottom: 1px solid {SLATE_200};
-        padding: 14px 20px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }}
-    .nansen-chat-header .chat-logo {{
-        width: 28px; height: 28px;
-        background: {TEAL_600};
-        border-radius: 6px;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 0.8rem; color: white; font-weight: 700;
-        flex-shrink: 0;
-    }}
-    .nansen-chat-header .chat-title {{
-        font-size: 0.88rem; font-weight: 600; color: {SLATE_900};
-    }}
-    .nansen-chat-header .chat-badge {{
-        background: {TEAL_50};
-        color: {TEAL_600};
-        font-size: 0.6rem; font-weight: 700;
-        padding: 2px 8px; border-radius: 4px;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-    }}
-    .nansen-chat-header .chat-query-preview {{
-        color: {SLATE_400};
-        font-size: 0.78rem;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        max-width: 300px;
-        margin-left: auto;
-    }}
-    .nansen-chat-body {{
-        padding: 20px;
-        max-height: 500px;
-        overflow-y: auto;
-    }}
-    .chat-msg-user {{
-        display: flex;
-        justify-content: flex-end;
-        margin-bottom: 16px;
-    }}
-    .chat-msg-user .bubble {{
-        background: {TEAL_50};
-        color: {TEAL_700};
-        padding: 10px 16px;
-        border-radius: 12px 12px 4px 12px;
-        font-size: 0.88rem;
-        max-width: 80%;
-    }}
-    .chat-msg-ai {{
-        margin-bottom: 16px;
-    }}
-    .chat-msg-ai .ai-step {{
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        background: {SLATE_100};
-        border-radius: 20px;
-        padding: 5px 14px;
-        font-size: 0.78rem;
-        color: {SLATE_500};
-        margin-bottom: 12px;
-    }}
-    .chat-msg-ai .ai-step .check {{
-        color: #059669;
-        font-size: 0.9rem;
-    }}
-    .chat-msg-ai h4 {{
-        color: {SLATE_900};
-        font-size: 1rem;
-        font-weight: 700;
-        margin: 0 0 10px 0;
-    }}
-    .chat-msg-ai p {{
-        color: {SLATE_700};
-        margin: 0 0 10px 0;
-        font-size: 0.88rem;
-        line-height: 1.7;
-    }}
-    .chat-msg-ai strong {{
-        color: {SLATE_900};
-    }}
-    .chat-msg-ai .chat-insight {{
-        border-top: 1px solid {SLATE_200};
-        margin-top: 14px;
-        padding-top: 12px;
-    }}
-    .nansen-chat-footer {{
-        border-top: 1px solid {SLATE_200};
-        padding: 10px 20px;
-        text-align: center;
-    }}
-    .nansen-chat-footer span {{
-        font-size: 0.72rem;
-        color: {SLATE_400};
-    }}
-
-    /* ── Legacy chat-response ──────────────── */
-    .chat-response {{
-        background: #FFFFFF;
-        border: 1px solid {SLATE_200};
-        border-radius: 10px;
-        padding: 22px 26px;
-        margin-bottom: 1rem;
-        color: {SLATE_700};
-        font-size: 0.92rem;
-        line-height: 1.7;
     }}
 
     /* ── Live badge ─────────────────────────── */
@@ -1151,7 +969,9 @@ if run_btn:
                             pass  # Silencioso — no bloquear el flujo
 
                     plantilla_path = tmp_path.replace(".xlsx", "_plantilla.xlsx")
-                    etl_profundidad.transform(tmp_path, output_path=plantilla_path)
+                    etl_profundidad.transform(
+                        tmp_path, output_path=plantilla_path,
+                        fecha_corte=etl_profundidad.fecha_corte_desde_nombre(uploaded.name))
                     os.unlink(tmp_path)
                     tmp_path = plantilla_path
                     st.toast("Base Profundidad transformada a plantilla Capi")
@@ -1337,11 +1157,11 @@ def _add_pricing_cols(df_in, df_ref, sheet_name, writer):
     writer: pd.ExcelWriter activo
     """
     df_out = df_in.copy()
-    # Encabezado claro en el Excel: prom_vta_uds es la venta de la ÚLTIMA semana
-    # (Sem 1, dato real por tienda), no un promedio. Se renombra solo en la copia
-    # de salida; la variable interna del motor no cambia.
+    # Encabezado claro en el Excel: desde el fix B6/F3 (2026-08-23),
+    # prom_vta_uds es la venta sem1 por tienda SUAVIZADA por el factor
+    # cadena de 4 semanas — misma base que el estado y la cobertura.
     if 'prom_vta_uds' in df_out.columns:
-        df_out = df_out.rename(columns={'prom_vta_uds': 'vta_sem_ult'})
+        df_out = df_out.rename(columns={'prom_vta_uds': 'vta_sem_prom'})
     # Agregar columnas de precio si no las tiene
     _precio_cols = ['precio_blanco', 'precio_vigente', 'costo']
     for _pc in _precio_cols:
@@ -1484,23 +1304,6 @@ s["n_acciones_precio"] = len(df_prec)
 # Nota: marcas propias sin stock CD ya están excluidas por motor_v2.build_reposiciones()
 # Marcas propias: MARQUIS, NAVIGATA, CACHAREL, SPAVALDI, OSCAR DE LA RENTA, US POLO
 
-# ══════════════════════════════════════════════════════════════
-#  LAYOUT: Columnas (main + chat panel derecho)
-# ══════════════════════════════════════════════════════════════
-
-if "chat_messages" not in st.session_state:
-    st.session_state["chat_messages"] = []
-if "chat_open" not in st.session_state:
-    st.session_state["chat_open"] = False
-
-_chat_is_open = st.session_state["chat_open"]
-
-if _chat_is_open:
-    _col_main, _col_chat = st.columns([3, 2])
-    _col_main.__enter__()
-else:
-    _col_main = None
-    _col_chat = None
 
 # ══════════════════════════════════════════════════════════════
 #  DASHBOARD VISUAL  (solo se renderiza en vista Dashboard)
@@ -1606,17 +1409,13 @@ def _build_excel_propias(_dfc, _dfr, _dft, _gaps, _ret):
 
 
 def _capi_base_path():
-    """Path de la última Base Profundidad (para leer campos crudos que no pasan por el ETL)."""
+    """Path de la Base Profundidad SUBIDA EN ESTA SESIÓN (para leer campos
+    crudos que no pasan por el ETL). Fix B8 auditoría 2026-08-23: se eliminó
+    el fallback a data2/bases antiguas/ — mezclaba silenciosamente datos de
+    otra base con el análisis actual (caso John Holden S/1.01M vs S/1.26M)."""
     _p = st.session_state.get("_base_profundidad_path")
     if _p and os.path.exists(_p):
         return _p
-    _dir = os.path.join(os.path.dirname(__file__), "data2", "bases antiguas")
-    try:
-        _b = [f for f in os.listdir(_dir) if f.lower().endswith(".xlsx") and not f.startswith("~$")]
-        if _b:
-            return os.path.join(_dir, max(_b, key=lambda f: os.path.getmtime(os.path.join(_dir, f))))
-    except OSError:
-        pass
     return None
 
 
@@ -1886,16 +1685,11 @@ if nav_page == "🏠 Dashboard":
                 return {}
 
         def _vp_base_path():
+            # Fix B8 (2026-08-23): solo la base de ESTA sesión, sin fallback
+            # silencioso a archivos del repo.
             _p = st.session_state.get("_base_profundidad_path")
             if _p and os.path.exists(_p):
                 return _p
-            _dir = os.path.join(os.path.dirname(__file__), "data2", "bases antiguas")
-            try:
-                _bases = [f for f in os.listdir(_dir) if f.lower().endswith(".xlsx") and not f.startswith("~$")]
-                if _bases:
-                    return os.path.join(_dir, max(_bases, key=lambda f: os.path.getmtime(os.path.join(_dir, f))))
-            except OSError:
-                pass
             return None
 
         @st.cache_data(show_spinner=False)
@@ -5269,333 +5063,6 @@ elif nav_page == "💰 Acciones Precio":
         )
 
 
-# ─── FENÓMENO DEL NIÑO ───────────────────────────────────────
-
-elif nav_page == "🌡️ Fenómeno del Niño":
-    st.markdown("#### 🌡️ Fenómeno del Niño — Análisis Climático de Inventario")
-    st.caption("Análisis del impacto del Fenómeno del Niño en la demanda por categoría calórica.")
-
-    # ── Cargar snapshots y temperatura ──
-    import clima_engine as _ce
-    from snapshots_engine import load_snapshot as _nino_load_snap, list_available_weeks as _nino_list_weeks
-
-    _nino_weeks = _nino_list_weeks()
-    if not _nino_weeks:
-        st.warning("No hay snapshots disponibles para el análisis del Fenómeno del Niño.")
-    else:
-        _nino_snaps = {}
-        for _w in _nino_weeks:
-            try:
-                _nino_snaps[_w] = _nino_load_snap(_w)
-            except Exception:
-                pass
-
-        # Temperatura semanal
-        _nino_start, _nino_end = _ce.get_snapshot_date_range()
-        _nino_temp = []
-        if _nino_start and _nino_end:
-            try:
-                _nino_temp = _ce.get_weekly_temperature(_nino_start, _nino_end)
-            except Exception:
-                _nino_temp = []
-
-        # Ejecutar motor
-        from motor_v2 import build_fenomeno_nino as _build_nino
-        _nino_result = _build_nino(_nino_snaps, _nino_temp)
-
-        if 'error' in _nino_result:
-            st.error(_nino_result['error'])
-        else:
-            _nino_resumen = _nino_result['resumen_ejecutivo']
-
-            # ── KPIs resumen ejecutivo (Output 6) ──
-            _k1, _k2, _k3, _k4 = st.columns(4)
-            with _k1:
-                _temp_act = _nino_resumen.get('temp_promedio_actual')
-                _delta_t = _nino_resumen.get('delta_temp_vs_normal')
-                _delta_str = f"+{_delta_t}°C" if _delta_t and _delta_t > 0 else f"{_delta_t}°C" if _delta_t else ""
-                st.markdown(f"""<div style="background:{SLATE_50};border:1px solid {SLATE_200};border-radius:8px;padding:12px;text-align:center;">
-                    <div style="font-size:0.75rem;color:{SLATE_500};text-transform:uppercase;letter-spacing:0.5px;">Temp. Promedio</div>
-                    <div style="font-size:1.8rem;font-weight:700;color:#dc2626;">{_temp_act or '—'}°C</div>
-                    <div style="font-size:0.75rem;color:#dc2626;">{_delta_str} vs normal</div>
-                </div>""", unsafe_allow_html=True)
-            with _k2:
-                _ratio = _nino_resumen.get('ratio_venta_ligero_grueso', 0)
-                st.markdown(f"""<div style="background:{SLATE_50};border:1px solid {SLATE_200};border-radius:8px;padding:12px;text-align:center;">
-                    <div style="font-size:0.75rem;color:{SLATE_500};text-transform:uppercase;letter-spacing:0.5px;">Ratio Ligero/Grueso</div>
-                    <div style="font-size:1.8rem;font-weight:700;color:{TEAL_600};">{_ratio}x</div>
-                    <div style="font-size:0.75rem;color:{SLATE_500};">venta LIGERO vs GRUESO</div>
-                </div>""", unsafe_allow_html=True)
-            with _k3:
-                _cap_riesgo = _nino_resumen.get('capital_grueso_en_riesgo', 0)
-                st.markdown(f"""<div style="background:{SLATE_50};border:1px solid {SLATE_200};border-radius:8px;padding:12px;text-align:center;">
-                    <div style="font-size:0.75rem;color:{SLATE_500};text-transform:uppercase;letter-spacing:0.5px;">Capital GRUESO</div>
-                    <div style="font-size:1.8rem;font-weight:700;color:#dc2626;">S/{_cap_riesgo:,.0f}</div>
-                    <div style="font-size:0.75rem;color:{SLATE_500};">{_nino_resumen.get('pct_capital_en_grueso', 0)}% del total</div>
-                </div>""", unsafe_allow_html=True)
-            with _k4:
-                _n_riesgo = _nino_resumen.get('n_skus_ligero_riesgo_quiebre', 0)
-                st.markdown(f"""<div style="background:{SLATE_50};border:1px solid {SLATE_200};border-radius:8px;padding:12px;text-align:center;">
-                    <div style="font-size:0.75rem;color:{SLATE_500};text-transform:uppercase;letter-spacing:0.5px;">SKUs Ligero en Riesgo</div>
-                    <div style="font-size:1.8rem;font-weight:700;color:#f59e0b;">{_n_riesgo}</div>
-                    <div style="font-size:0.75rem;color:{SLATE_500};">cobertura &lt; 4 sem</div>
-                </div>""", unsafe_allow_html=True)
-
-            st.markdown(f"<div style='border-bottom:1px solid {SLATE_200};margin:16px 0;'></div>", unsafe_allow_html=True)
-
-            # ── Tabs para los 5 outputs restantes ──
-            _nino_tab1, _nino_tab2, _nino_tab3, _nino_tab4, _nino_tab5 = st.tabs([
-                "📊 Riesgo Quiebre por Línea",
-                "🚨 SKUs en Riesgo",
-                "💰 Capital por Calórica",
-                "🏷️ Marcas Expuestas",
-                "📈 Tendencia Temp×Venta",
-            ])
-
-            # ── Tab 1: Output 1 — Riesgo quiebre por línea ──
-            with _nino_tab1:
-                st.markdown("##### Cobertura restante por línea — ¿Cuántas semanas de stock quedan?")
-                st.caption("Decisión: Si cobertura < 4 semanas → hablar con comprador para adelantar reposición")
-                _df_riesgo = _nino_result['riesgo_quiebre_linea'].copy()
-                _df_riesgo_display = _df_riesgo[_df_riesgo['cat_calorica'] != 'NEUTRO'].copy()
-
-                # Formatear tabla
-                _rows_riesgo = ""
-                for _, _r in _df_riesgo_display.iterrows():
-                    _cat = _r['cat_calorica']
-                    _cat_color = '#dc2626' if _cat == 'GRUESO' else '#f59e0b' if _cat == 'MEDIO' else '#10b981'
-                    _estado = str(_r['estado_riesgo'])
-                    _cob = _r['cobertura_semanas']
-                    _cob_color = '#dc2626' if _cob < 4 else '#f59e0b' if _cob < 8 else SLATE_700
-                    _rows_riesgo += f"""<tr>
-                        <td style="padding:8px 10px;font-weight:600;">{_r['linea']}</td>
-                        <td style="padding:8px 10px;"><span style="background:{_cat_color}15;color:{_cat_color};padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;">{_cat}</span></td>
-                        <td style="padding:8px 10px;text-align:right;">{_r['n_skus']:,}</td>
-                        <td style="padding:8px 10px;text-align:right;">{_r['stock_total']:,.0f}</td>
-                        <td style="padding:8px 10px;text-align:right;">{_r['vta_semanal_uds']:,.0f}</td>
-                        <td style="padding:8px 10px;text-align:right;font-weight:700;color:{_cob_color};">{_cob:.1f}</td>
-                        <td style="padding:8px 10px;">{_estado}</td>
-                    </tr>"""
-
-                st.markdown(f"""<div style="overflow-x:auto;">
-                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
-                <thead><tr style="background:{SLATE_100};border-bottom:2px solid {SLATE_200};">
-                    <th style="padding:8px 10px;text-align:left;">Línea</th>
-                    <th style="padding:8px 10px;text-align:left;">Calórica</th>
-                    <th style="padding:8px 10px;text-align:right;">SKUs</th>
-                    <th style="padding:8px 10px;text-align:right;">Stock Uds</th>
-                    <th style="padding:8px 10px;text-align:right;">Venta/Sem</th>
-                    <th style="padding:8px 10px;text-align:right;">Cob. Semanas</th>
-                    <th style="padding:8px 10px;text-align:left;">Estado</th>
-                </tr></thead>
-                <tbody>{_rows_riesgo}</tbody>
-                </table></div>""", unsafe_allow_html=True)
-
-            # ── Tab 2: Output 2 — SKUs en riesgo de quiebre ──
-            with _nino_tab2:
-                st.markdown("##### SKUs LIGERO con riesgo de quiebre — Priorizar reposición")
-                st.caption("Decisión: Enviar lista al comprador con urgencia de reposición")
-                _df_skus_r = _nino_result['skus_riesgo_quiebre']
-                if _df_skus_r.empty:
-                    st.success("No hay SKUs LIGERO en riesgo de quiebre en este momento.")
-                else:
-                    st.warning(f"**{len(_df_skus_r)} SKUs** de productos LIGERO con cobertura < 4 semanas y venta superior a mediana")
-
-                    _rows_sku = ""
-                    for _, _s in _df_skus_r.head(30).iterrows():
-                        _sem_rest = _s.get('semanas_restantes', 0)
-                        _sem_color = '#dc2626' if _sem_rest < 2 else '#f59e0b' if _sem_rest < 3 else SLATE_700
-                        _rows_sku += f"""<tr>
-                            <td style="padding:6px 8px;font-size:0.78rem;">{_s['sku']}</td>
-                            <td style="padding:6px 8px;font-size:0.78rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{_s.get('descripcion','')}</td>
-                            <td style="padding:6px 8px;font-size:0.78rem;">{_s.get('marca','')}</td>
-                            <td style="padding:6px 8px;font-size:0.78rem;">{_s.get('linea','')}</td>
-                            <td style="padding:6px 8px;text-align:right;font-size:0.78rem;">{_s.get('stock_total',0):,.0f}</td>
-                            <td style="padding:6px 8px;text-align:right;font-size:0.78rem;font-weight:700;color:{_sem_color};">{_sem_rest:.1f}</td>
-                            <td style="padding:6px 8px;text-align:right;font-size:0.78rem;">S/{_s.get('venta_soles',0):,.0f}</td>
-                        </tr>"""
-
-                    st.markdown(f"""<div style="overflow-x:auto;max-height:500px;overflow-y:auto;">
-                    <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
-                    <thead><tr style="background:{SLATE_100};border-bottom:2px solid {SLATE_200};position:sticky;top:0;">
-                        <th style="padding:6px 8px;text-align:left;">SKU</th>
-                        <th style="padding:6px 8px;text-align:left;">Descripción</th>
-                        <th style="padding:6px 8px;text-align:left;">Marca</th>
-                        <th style="padding:6px 8px;text-align:left;">Línea</th>
-                        <th style="padding:6px 8px;text-align:right;">Stock</th>
-                        <th style="padding:6px 8px;text-align:right;">Sem. Rest.</th>
-                        <th style="padding:6px 8px;text-align:right;">Venta S/</th>
-                    </tr></thead>
-                    <tbody>{_rows_sku}</tbody>
-                    </table></div>""", unsafe_allow_html=True)
-
-            # ── Tab 3: Output 3 — Capital por categoría calórica ──
-            with _nino_tab3:
-                st.markdown("##### Capital invertido por categoría calórica")
-                st.caption("Decisión: Si GRUESO crece >5% semana a semana → activar liquidación")
-                _df_cap = _nino_result['capital_por_calorica']
-
-                _rows_cap = ""
-                for _, _c in _df_cap.iterrows():
-                    _cat = _c['cat_calorica']
-                    _cat_color = '#dc2626' if _cat == 'GRUESO' else '#f59e0b' if _cat == 'MEDIO' else '#10b981' if _cat == 'LIGERO' else SLATE_500
-                    _rot = _c['rotacion']
-                    _rot_color = '#10b981' if _rot > 1.5 else '#f59e0b' if _rot > 0.5 else '#dc2626'
-                    _rows_cap += f"""<tr>
-                        <td style="padding:10px 12px;"><span style="background:{_cat_color}15;color:{_cat_color};padding:3px 10px;border-radius:4px;font-weight:700;font-size:0.82rem;">{_cat}</span></td>
-                        <td style="padding:10px 12px;text-align:right;">{_c['n_skus']:,}</td>
-                        <td style="padding:10px 12px;text-align:right;font-weight:700;">S/{_c['capital_invertido']:,.0f}</td>
-                        <td style="padding:10px 12px;text-align:right;">{_c['pct_capital']:.1f}%</td>
-                        <td style="padding:10px 12px;text-align:right;">S/{_c['venta_soles']:,.0f}</td>
-                        <td style="padding:10px 12px;text-align:right;font-weight:700;color:{_rot_color};">{_rot*100:.1f}%</td>
-                    </tr>"""
-
-                st.markdown(f"""<div style="overflow-x:auto;">
-                <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
-                <thead><tr style="background:{SLATE_100};border-bottom:2px solid {SLATE_200};">
-                    <th style="padding:10px 12px;text-align:left;">Categoría</th>
-                    <th style="padding:10px 12px;text-align:right;">SKUs</th>
-                    <th style="padding:10px 12px;text-align:right;">Capital S/</th>
-                    <th style="padding:10px 12px;text-align:right;">% Capital</th>
-                    <th style="padding:10px 12px;text-align:right;">Venta S/</th>
-                    <th style="padding:10px 12px;text-align:right;">Rotación</th>
-                </tr></thead>
-                <tbody>{_rows_cap}</tbody>
-                </table></div>""", unsafe_allow_html=True)
-
-                # Insight box
-                _cap_grueso_val = _df_cap[_df_cap['cat_calorica']=='GRUESO']['capital_invertido'].sum()
-                _rot_grueso = _df_cap[_df_cap['cat_calorica']=='GRUESO']['rotacion'].values
-                _rot_grueso_val = _rot_grueso[0] if len(_rot_grueso) > 0 else 0
-                _rot_ligero = _df_cap[_df_cap['cat_calorica']=='LIGERO']['rotacion'].values
-                _rot_ligero_val = _rot_ligero[0] if len(_rot_ligero) > 0 else 0
-                st.markdown(f"""<div style="background:#fef2f2;border-left:4px solid #dc2626;padding:12px 16px;border-radius:4px;margin-top:12px;font-size:0.85rem;">
-                    <strong>GRUESO tiene S/{_cap_grueso_val:,.0f} de capital invertido con rotación de solo {_rot_grueso_val*100:.1f}%</strong>,
-                    mientras que LIGERO rota a {_rot_ligero_val*100:.1f}% — {_rot_ligero_val/_rot_grueso_val:.0f}x más rápido.
-                    El Fenómeno del Niño está generando que el capital en prendas abrigadoras se quede parado.
-                </div>""", unsafe_allow_html=True)
-
-            # ── Tab 4: Output 4 — Marcas expuestas ──
-            with _nino_tab4:
-                st.markdown("##### Marcas más expuestas al Fenómeno del Niño")
-                st.caption("Decisión: Priorizar negociación con proveedores de marcas más vulnerables")
-                _df_exp = _nino_result['marcas_expuestas']
-
-                _rows_exp = ""
-                for _, _m in _df_exp.head(15).iterrows():
-                    _vuln = _m['idx_vulnerabilidad']
-                    _vuln_color = '#dc2626' if _vuln > 0.3 else '#f59e0b' if _vuln > 0.15 else '#10b981'
-                    _vuln_label = 'ALTA' if _vuln > 0.3 else 'MEDIA' if _vuln > 0.15 else 'BAJA'
-                    _rows_exp += f"""<tr>
-                        <td style="padding:8px 10px;font-weight:600;">{_m['marca']}</td>
-                        <td style="padding:8px 10px;text-align:right;">S/{_m['capital_total']:,.0f}</td>
-                        <td style="padding:8px 10px;text-align:right;">S/{_m['capital_grueso']:,.0f}</td>
-                        <td style="padding:8px 10px;text-align:right;">{_m['pct_capital_grueso']:.1f}%</td>
-                        <td style="padding:8px 10px;text-align:right;">{_m['rotacion_grueso']*100:.1f}%</td>
-                        <td style="padding:8px 10px;text-align:center;"><span style="background:{_vuln_color}15;color:{_vuln_color};padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;">{_vuln_label} ({_vuln:.3f})</span></td>
-                    </tr>"""
-
-                st.markdown(f"""<div style="overflow-x:auto;">
-                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
-                <thead><tr style="background:{SLATE_100};border-bottom:2px solid {SLATE_200};">
-                    <th style="padding:8px 10px;text-align:left;">Marca</th>
-                    <th style="padding:8px 10px;text-align:right;">Capital Total</th>
-                    <th style="padding:8px 10px;text-align:right;">Capital GRUESO</th>
-                    <th style="padding:8px 10px;text-align:right;">% GRUESO</th>
-                    <th style="padding:8px 10px;text-align:right;">Rotación GRUESO</th>
-                    <th style="padding:8px 10px;text-align:center;">Vulnerabilidad</th>
-                </tr></thead>
-                <tbody>{_rows_exp}</tbody>
-                </table></div>""", unsafe_allow_html=True)
-
-            # ── Tab 5: Output 5 — Tendencia Temp × Venta ──
-            with _nino_tab5:
-                st.markdown("##### Tendencia: Temperatura vs Venta semanal por categoría calórica")
-                st.caption("Insight: Cómo responde la venta de cada categoría a los cambios de temperatura")
-                _df_tend = _nino_result['tendencia_temp_venta']
-                if _df_tend.empty:
-                    st.info("Se necesitan al menos 2 snapshots para calcular tendencia.")
-                else:
-                    # Chart con Plotly
-                    import plotly.graph_objects as go
-                    from plotly.subplots import make_subplots
-
-                    _fig_nino = make_subplots(specs=[[{"secondary_y": True}]])
-
-                    for _cat, _color in [('GRUESO', '#dc2626'), ('LIGERO', '#10b981'), ('MEDIO', '#f59e0b')]:
-                        _sub = _df_tend[_df_tend['cat_calorica'] == _cat].sort_values('semana_iso')
-                        if not _sub.empty:
-                            _fig_nino.add_trace(
-                                go.Bar(x=_sub['semana_iso'], y=_sub['delta_venta'],
-                                       name=f'Venta {_cat}', marker_color=_color, opacity=0.7),
-                                secondary_y=False,
-                            )
-
-                    # Temperatura como línea
-                    _temp_df = _df_tend[['semana_iso', 'temp_avg']].drop_duplicates().dropna().sort_values('semana_iso')
-                    if not _temp_df.empty:
-                        _fig_nino.add_trace(
-                            go.Scatter(x=_temp_df['semana_iso'], y=_temp_df['temp_avg'],
-                                       name='Temp. Promedio °C', line=dict(color='#6366f1', width=3),
-                                       mode='lines+markers'),
-                            secondary_y=True,
-                        )
-
-                    _fig_nino.update_layout(
-                        barmode='group',
-                        height=400,
-                        margin=dict(l=40, r=40, t=30, b=40),
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                        plot_bgcolor='rgba(0,0,0,0)',
-                    )
-                    _fig_nino.update_yaxes(title_text="Venta Semanal S/", secondary_y=False)
-                    _fig_nino.update_yaxes(title_text="Temperatura °C", secondary_y=True)
-
-                    st.plotly_chart(_fig_nino, use_container_width=True)
-
-                    st.markdown(f"""<div style="background:{TEAL_50};border-left:4px solid {TEAL_600};padding:12px 16px;border-radius:4px;font-size:0.85rem;">
-                        <strong>Nota:</strong> Con solo {len(_temp_df)} semanas de datos, la tendencia es visual — no estadística.
-                        Cuando se integre la data 2023, se podrá calcular la correlación formal temperatura × venta.
-                    </div>""", unsafe_allow_html=True)
-
-            # ── Comparación histórica ──
-            st.markdown(f"<div style='border-bottom:1px solid {SLATE_200};margin:16px 0;'></div>", unsafe_allow_html=True)
-            st.markdown("##### 🌍 Comparación Histórica — Temperatura Mar-May por año")
-            try:
-                _hist = _ce.get_historical_comparison()
-                _rows_hist = ""
-                for _h in _hist:
-                    _label_color = '#dc2626' if _h['label'] == 'Niño' else '#10b981'
-                    _rows_hist += f"""<tr>
-                        <td style="padding:8px 12px;font-weight:700;font-size:1rem;">{_h['year']}</td>
-                        <td style="padding:8px 12px;text-align:center;"><span style="background:{_label_color}15;color:{_label_color};padding:2px 10px;border-radius:4px;font-weight:600;">{_h['label']}</span></td>
-                        <td style="padding:8px 12px;text-align:right;font-weight:700;font-size:1rem;">{_h['temp_avg']}°C</td>
-                        <td style="padding:8px 12px;text-align:right;">{_h['temp_max_periodo']}°C</td>
-                        <td style="padding:8px 12px;text-align:right;">{_h['temp_min_periodo']}°C</td>
-                        <td style="padding:8px 12px;text-align:right;">{_h['n_dias']} días</td>
-                    </tr>"""
-                st.markdown(f"""<div style="overflow-x:auto;">
-                <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
-                <thead><tr style="background:{SLATE_100};border-bottom:2px solid {SLATE_200};">
-                    <th style="padding:8px 12px;text-align:left;">Año</th>
-                    <th style="padding:8px 12px;text-align:center;">Clima</th>
-                    <th style="padding:8px 12px;text-align:right;">Temp Prom</th>
-                    <th style="padding:8px 12px;text-align:right;">Máx Período</th>
-                    <th style="padding:8px 12px;text-align:right;">Mín Período</th>
-                    <th style="padding:8px 12px;text-align:right;">Datos</th>
-                </tr></thead>
-                <tbody>{_rows_hist}</tbody>
-                </table></div>""", unsafe_allow_html=True)
-
-                st.markdown(f"""<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:4px;margin-top:12px;font-size:0.85rem;">
-                    <strong>2023 vs 2026:</strong> Temperatura similar (Niño), pero contexto económico opuesto.
-                    2023 = economía débil → venta desastre. 2026 = economía fuerte → oportunidad real.
-                    La data 2023 servirá como control para aislar el efecto temperatura del efecto económico.
-                </div>""", unsafe_allow_html=True)
-            except Exception as _e_hist:
-                st.info(f"No se pudo cargar la comparación histórica: {_e_hist}")
-
-
 # ─── Afinidad Producto × Plaza ────────────────────────────────
 
 elif nav_page == "🏪 Afinidad Producto×Plaza":
@@ -5608,19 +5075,16 @@ elif nav_page == "🏪 Afinidad Producto×Plaza":
     st.caption("Qué productos funcionan en qué tiendas — empujes inteligentes, redistribución y señales de producción")
 
     # Detectar base más reciente — priorizar la última subida por el usuario
+    # Fix B8 (2026-08-23): solo la base subida en esta sesión — el fallback a
+    # data2/bases antiguas/ analizaba silenciosamente una base distinta.
     _base_path_af = st.session_state.get("_base_profundidad_path")
     if _base_path_af and os.path.exists(_base_path_af):
         _base_name_af = os.path.basename(_base_path_af)
     else:
-        _bases_af = _glob_mod.glob("data2/bases antiguas/Base*.xlsx")
-        _bases_af = sorted(_bases_af, key=os.path.getmtime)  # por fecha real, no alfabético
-        if _bases_af:
-            _base_path_af = _bases_af[-1]
-            _base_name_af = os.path.basename(_base_path_af)
-        else:
-            _base_path_af = None
+        _base_path_af = None
     if _base_path_af is None:
-        st.warning("No se encontraron Bases de Profundidad. Sube tu archivo y ejecuta el análisis primero.")
+        st.warning("Esta vista necesita la Base Profundidad ORIGINAL de esta sesión. "
+                   "Sube tu base (no la plantilla) y ejecuta el análisis primero.")
     else:
         st.info(f"📂 Base: **{_base_name_af}**")
 
@@ -7952,194 +7416,4 @@ elif nav_page == "📝 Diario de Gestión":
         st.info("No hay entradas aún. Usa la pestaña 'Nueva entrada' para registrar tu primera acción.")
 
 
-
-
-# ══════════════════════════════════════════════════════════════
-#  CHAT IA — Panel lateral derecho (estilo Nansen)
-# ══════════════════════════════════════════════════════════════
-
-# Cerrar el contexto de la columna principal
-if _chat_is_open and _col_main is not None:
-    _col_main.__exit__(None, None, None)
-
-# Renderizar panel de chat en la columna derecha (estilo Nansen AI)
-if _chat_is_open and _col_chat is not None:
-    import re as _re_chat
-
-    with _col_chat:
-        # Marcador para CSS scoping
-        st.markdown('<div class="chat-panel-marker"></div>', unsafe_allow_html=True)
-
-        # ── Header estilo Nansen: logo + "Capi" + badge + preview query + X ──
-        _last_query_preview = ""
-        for _m in st.session_state["chat_messages"]:
-            if _m["role"] == "user":
-                _last_query_preview = _m["question"]
-        _preview_txt = (_last_query_preview[:40] + "...") if len(_last_query_preview) > 40 else _last_query_preview
-
-        st.markdown(
-            f'<div style="display:flex; align-items:center; gap:8px; padding:12px 0; '
-            f'border-bottom:1px solid {SLATE_200}; margin-bottom:16px;">'
-            f'<div style="width:28px; height:28px; background:{TEAL_600}; border-radius:50%; '
-            f'display:flex; align-items:center; justify-content:center; color:white; font-weight:700; '
-            f'font-size:0.75rem; flex-shrink:0;">C</div>'
-            f'<span style="font-weight:600; color:{SLATE_900}; font-size:0.88rem;">Capi</span>'
-            f'<span style="background:{TEAL_50}; color:{TEAL_600}; font-size:0.58rem; font-weight:700; '
-            f'padding:2px 7px; border-radius:3px; letter-spacing:0.06em; text-transform:uppercase;">AI</span>'
-            f'<span style="color:{SLATE_400}; font-size:0.78rem; margin-left:auto; '
-            f'white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;">{_preview_txt}</span>'
-            f'</div>',
-            unsafe_allow_html=True
-        )
-
-        # Botón cerrar panel (X)
-        if st.button("✕", key="close_chat_x", help="Cerrar chat"):
-            st.session_state["chat_open"] = False
-            st.rerun()
-
-        # ── Historial de conversación ──
-        for _msg_idx, _msg in enumerate(st.session_state["chat_messages"]):
-            if _msg["role"] == "user":
-                # Burbuja usuario — alineada a la derecha, fondo sutil
-                st.markdown(
-                    f'<div style="display:flex; justify-content:flex-end; margin:16px 0 12px 0;">'
-                    f'<div style="background:{TEAL_50}; color:{SLATE_900}; '
-                    f'padding:10px 16px; border-radius:16px 16px 4px 16px; max-width:88%; '
-                    f'font-size:0.88rem; line-height:1.5;">{_msg["question"]}</div></div>',
-                    unsafe_allow_html=True
-                )
-            elif _msg["role"] == "ai":
-                # Respuesta AI — texto directo estilo Nansen
-                _conv = _msg["conversacion"].replace("\n\n", "<br><br>").replace("\n", "<br>")
-                _conv = _re_chat.sub(r'\*\*(.+?)\*\*', r'<strong style="color:{SLATE_900};">\1</strong>', _conv)
-
-                # Step verde con check (estilo Nansen "Checking Smart Money positions >")
-                _step_html = (
-                    f'<div style="display:inline-flex; align-items:center; gap:6px; margin:8px 0 14px 0;">'
-                    f'<span style="color:{TEAL_600}; font-size:0.9rem;">●</span>'
-                    f'<span style="color:{SLATE_500}; font-size:0.82rem;">'
-                    f'Analizando inventario — {_msg.get("n_combos", 0):,} combos</span>'
-                    f'<span style="color:{SLATE_400}; font-size:0.82rem;">›</span>'
-                    f'</div>'
-                )
-
-                st.markdown(
-                    f'<div style="margin:4px 0 20px 0;">'
-                    f'{_step_html}'
-                    f'<div style="color:{SLATE_700}; font-size:0.88rem; line-height:1.7;">{_conv}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-
-                # Tabla de datos (colapsable)
-                if _msg.get("resultado_json"):
-                    try:
-                        _rdf = pd.read_json(io.StringIO(_msg["resultado_json"]))
-                        if not _rdf.empty:
-                            with st.expander(f"📊 Ver datos ({len(_rdf)} filas)", expanded=False):
-                                st.dataframe(_rdf, use_container_width=True, hide_index=True, height=200)
-                    except Exception:
-                        pass
-
-                # Separador sutil entre respuestas
-                st.markdown(
-                    f'<div style="border-bottom:1px solid {SLATE_200}; margin:4px 0 8px 0;"></div>',
-                    unsafe_allow_html=True
-                )
-
-        # ── Procesar pregunta pendiente (con memoria conversacional) ──
-        if (st.session_state["chat_messages"] and
-                st.session_state["chat_messages"][-1]["role"] == "user"):
-            _pending_q = st.session_state["chat_messages"][-1]["question"]
-
-            # Construir historial para memoria conversacional
-            _chat_history = []
-            _msgs = st.session_state["chat_messages"][:-1]  # excluir pregunta actual
-            i = 0
-            while i < len(_msgs):
-                if _msgs[i]["role"] == "user" and i + 1 < len(_msgs) and _msgs[i + 1]["role"] == "ai":
-                    _ai_msg = _msgs[i + 1]
-                    _chat_history.append({
-                        "user_question": _msgs[i]["question"],
-                        "titulo": _ai_msg.get("titulo", ""),
-                        "result_summary": _ai_msg.get("result_summary", ""),
-                        "conversation": _ai_msg.get("conversacion", ""),
-                    })
-                    i += 2
-                else:
-                    i += 1
-
-            # Spinner estilo Nansen
-            with st.spinner("Analizando datos de inventario..."):
-                _chat_result = chat_engine.ask(
-                    question=_pending_q,
-                    df=df_cob,
-                    history=_chat_history if _chat_history else None,
-                )
-            if _chat_result["error"]:
-                st.warning(f"⚠️ {_chat_result['error']}")
-                st.session_state["chat_messages"].pop()
-            else:
-                _res_json = None
-                if _chat_result["resultado"] is not None and not _chat_result["resultado"].empty:
-                    _res_json = _chat_result["resultado"].to_json()
-                st.session_state["chat_messages"].append({
-                    "role": "ai",
-                    "titulo": _chat_result["titulo"],
-                    "conversacion": _chat_result["conversacion"],
-                    "resultado_json": _res_json,
-                    "result_summary": _chat_result.get("result_summary", ""),
-                    "n_combos": len(df_cob),
-                })
-                st.rerun()
-
-        # ── Input estilo Nansen: "Pregunta a Capi" con borde teal ──
-        def _submit_chat_msg():
-            val = st.session_state.get("right_panel_q", "").strip()
-            if val:
-                st.session_state["chat_messages"].append({"role": "user", "question": val})
-                st.session_state["right_panel_q"] = ""  # limpiar input tras enviar
-
-        st.text_input("Pregunta a Capi", placeholder="Pregunta a Capi",
-                      key="right_panel_q", label_visibility="collapsed",
-                      on_change=_submit_chat_msg)
-
-        # ── Chips de sugerencia debajo del input (estilo Nansen) ──
-        _CHAT_SUGGESTIONS = [
-            "Top vendidos",
-            "Capital parado",
-            "Peor cobertura",
-            "Sobrestock",
-        ]
-        _chip_html = '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">'
-        for _idx, _s_label in enumerate(_CHAT_SUGGESTIONS):
-            _chip_html += (
-                f'<span class="nansen-chip" style="background:{SLATE_100}; '
-                f'color:{SLATE_700}; font-size:0.72rem; padding:4px 10px; '
-                f'border-radius:6px; border:1px solid {SLATE_200}; '
-                f'cursor:default;">{_s_label}</span>'
-            )
-        _chip_html += '</div>'
-        st.markdown(_chip_html, unsafe_allow_html=True)
-
-        # Botones funcionales para los chips (hidden behind the HTML)
-        _chip_button_cols = st.columns(len(_CHAT_SUGGESTIONS))
-        for _idx, _s_label in enumerate(_CHAT_SUGGESTIONS):
-            with _chip_button_cols[_idx]:
-                if st.button(_s_label, key=f"rchip_{_idx}", use_container_width=True):
-                    st.session_state["chat_messages"].append({"role": "user", "question": _s_label})
-                    st.rerun()
-
-        # Limpiar + disclaimer
-        _bot_cols = st.columns([3, 1])
-        with _bot_cols[0]:
-            st.markdown(
-                f'<span style="font-size:0.68rem; color:{SLATE_400};">AI-generated. Verify independently.</span>',
-                unsafe_allow_html=True
-            )
-        with _bot_cols[1]:
-            if st.session_state["chat_messages"]:
-                if st.button("🗑️", key="clear_right_chat", help="Limpiar chat"):
-                    st.session_state["chat_messages"] = []
-                    st.rerun()
 

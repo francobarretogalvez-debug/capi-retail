@@ -81,8 +81,18 @@ def _con_sugerencias(g: pd.DataFrame, precio_min_map: dict) -> pd.DataFrame:
     sug = g["edad_semanas"].apply(lambda e: agente_terceras.descuento_sugerido(e))
     g["dscto_sugerido"] = sug.map(lambda t: t[0])
     g["tipo_dscto"] = sug.map(lambda t: t[1])
-    if precio_min_map:
-        g["precio_minimo"] = g["sku"].map(precio_min_map)
+    # Piso de margen UNIVERSAL (fix B7 auditoría 2026-08-23): df_prec solo trae
+    # precio_minimo para estados críticos; para el resto se calcula igual que
+    # el motor: costo/(1-margen_min) llevado a base con IGV.
+    g["precio_minimo"] = g["sku"].map(precio_min_map) if precio_min_map else np.nan
+    if "costo" in g.columns:
+        try:
+            from motor_v2 import DEFAULT_PARAMS as _DP
+            _margen_min = float(_DP.get("margen_min", 0.15))
+        except Exception:
+            _margen_min = 0.15
+        _piso_calc = (g["costo"] / (1 - _margen_min) * 1.18).round(2)
+        g["precio_minimo"] = g["precio_minimo"].fillna(_piso_calc)
     # Guards: una base sin columnas de precio no debe tumbar el reporte
     # (auditoría 2026-08-16) — las columnas ausentes simplemente no salen.
     #
@@ -97,14 +107,21 @@ def _con_sugerencias(g: pd.DataFrame, precio_min_map: dict) -> pd.DataFrame:
             piso = g["precio_minimo"]
             limitado_piso = piso.notna() & (p_obj < piso)
             p_obj = np.where(limitado_piso, piso, p_obj)
-        bajar = p_obj < (g["precio_vigente"] - 0.01)
+        # Sin piso conocido (costo faltante en la base) no se sugiere precio
+        # al proveedor — se pide revisar el costo primero.
+        _sin_piso = g["precio_minimo"].isna() if "precio_minimo" in g.columns else pd.Series(False, index=g.index)
+        bajar = (p_obj < (g["precio_vigente"] - 0.01)) & ~_sin_piso
         g["precio_sugerido"] = np.where(bajar, p_obj, np.nan)
         g["accion"] = np.where(
-            bajar,
-            np.where(limitado_piso, "⬇️ Bajar (limitado por piso)", "⬇️ Bajar al sugerido"),
-            np.where(limitado_piso | (g["precio_vigente"] <= g.get("precio_minimo", pd.Series(np.nan, index=g.index)).fillna(-1)),
-                     "✋ Mantener — ya en/bajo piso de margen",
-                     "✓ Mantener — dscto actual ≥ sugerido"),
+            _sin_piso,
+            "⚠️ Sin costo en base — revisar antes de sugerir",
+            np.where(
+                bajar,
+                np.where(limitado_piso, "⬇️ Bajar (limitado por piso)", "⬇️ Bajar al sugerido"),
+                np.where(limitado_piso | (g["precio_vigente"] <= g.get("precio_minimo", pd.Series(np.nan, index=g.index)).fillna(-1)),
+                         "✋ Mantener — ya en/bajo piso de margen",
+                         "✓ Mantener — dscto actual ≥ sugerido"),
+            ),
         )
         if "costo" in g.columns:
             _base = g["precio_sugerido"] / 1.18

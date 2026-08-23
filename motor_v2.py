@@ -431,6 +431,30 @@ def build_cobertura(df_maestro, df_ventas, df_stock, params):
     # Excluir filas con stock <= 0
     df = df[df['stock_total'] > 0].reset_index(drop=True)
 
+    # ── Velocidad suavizada por promedio 4 semanas (fix B6/F3, 2026-08-23) ──
+    # La venta POR TIENDA solo es real en la semana 1; clasificar 20K combos
+    # con una sola semana mete ruido (un pico o valle cambia el estado).
+    # Se escala la sem1 de cada tienda por el factor cadena (prom 4 sem ÷
+    # sem 1 cadena), clamp [0.5, 2.0]. Si la cadena no vendió en sem1 pero
+    # sí en sem2-4, el promedio cadena se reparte por participación de stock.
+    # Con esto estado y cobertura usan la MISMA base que los reportes (antes
+    # el Excel mostraba estado de 1 sem con cobertura de 4 sem al lado).
+    _sem_cols = [c for c in ['vta_sem1_total', 'vta_sem2_total',
+                             'vta_sem3_total', 'vta_sem4_total'] if c in df.columns]
+    if len(_sem_cols) == 4:
+        _tot = df[_sem_cols].fillna(0)
+        _prom4_cadena = _tot.sum(axis=1) / 4.0
+        _sem1_cadena = _tot['vta_sem1_total']
+        with np.errstate(divide='ignore', invalid='ignore'):
+            _factor = (_prom4_cadena / _sem1_cadena).clip(0.5, 2.0)
+        _suave = np.where(_sem1_cadena > 0, df['prom_vta_uds'] * _factor, 0.0)
+        _sin_sem1 = (_sem1_cadena <= 0) & (_prom4_cadena > 0)
+        if _sin_sem1.any():
+            _stock_sku = df.groupby('sku')['stock_total'].transform('sum')
+            _share = np.where(_stock_sku > 0, df['stock_total'] / _stock_sku, 0.0)
+            _suave = np.where(_sin_sem1, _prom4_cadena * _share, _suave)
+        df['prom_vta_uds'] = pd.Series(_suave, index=df.index).round(2)
+
     # Cobertura = stock_total / promedio_vta_semanal
     df['cobertura_sem'] = df.apply(
         lambda r: round(r['stock_total'] / r['prom_vta_uds'], 1)
@@ -813,6 +837,17 @@ def build_transferencias(df_cobertura, params):
         if fuentes.empty or destinos.empty:
             continue
 
+        # Déficit restante por tienda destino, compartido entre TODAS las
+        # fuentes (fix B4 auditoría 2026-08-23: antes cada fuente veía el
+        # déficit original y un destino podía recibir su necesidad ×N — el
+        # espejo del pool único de CD que ya existe en reposiciones).
+        deficit_restante = {}
+        for _, dst in destinos.iterrows():
+            _avg = dst['prom_vta_uds']
+            deficit_restante[dst['tienda']] = (
+                ceil(cob_target * _avg - dst['stock_total']) if _avg > 0 else 0
+            )
+
         for _, src in fuentes.iterrows():
             avg_src = src['prom_vta_uds']
             stk_src = src['stock_total']
@@ -839,10 +874,7 @@ def build_transferencias(df_cobertura, params):
                 avg_dst = dst['prom_vta_uds']
                 stk_dst = dst['stock_total']
 
-                if avg_dst > 0:
-                    deficit = ceil(cob_target * avg_dst - stk_dst)
-                else:
-                    deficit = 0
+                deficit = deficit_restante.get(dst['tienda'], 0)
 
                 if deficit <= 0:
                     continue
@@ -850,6 +882,8 @@ def build_transferencias(df_cobertura, params):
                 uds_trans = min(exceso_disponible, deficit)
                 if uds_trans < uds_min:
                     continue
+
+                deficit_restante[dst['tienda']] = deficit - uds_trans
 
                 uds_transferido_total += uds_trans
 
@@ -2993,8 +3027,14 @@ def build_ly_comparison(df_cob, semana_actual=None):
     else:
         _df_sku['vta_soles_4sem'] = 0
 
-    # Vta uds 4sem = SUMA prom_vta_uds × 4 across todas las tiendas del SKU
-    _vta_uds_por_sku = df_cob.groupby('sku')['prom_vta_uds'].sum() * 4
+    # Vta uds 4sem REAL: suma de los totales semanales cadena (fix B2 auditoría
+    # 2026-08-23 — antes se extrapolaba semana 1 × 4 y el ticket salía sesgado)
+    _sem_tot_cols = [c for c in ['vta_sem1_total', 'vta_sem2_total',
+                                 'vta_sem3_total', 'vta_sem4_total'] if c in df_cob.columns]
+    if _sem_tot_cols:
+        _vta_uds_por_sku = df_cob.drop_duplicates('sku').set_index('sku')[_sem_tot_cols].sum(axis=1)
+    else:
+        _vta_uds_por_sku = df_cob.groupby('sku')['prom_vta_uds'].sum() * 4
     _df_sku['vta_uds_4sem'] = _df_sku['sku'].map(_vta_uds_por_sku).fillna(0)
 
     # Global
@@ -3281,8 +3321,9 @@ def build_forecast_marca(df_cob, horizonte_semanas=8, semana_actual=None):
             })
             otb_por_semana.append(round(_otb_soles, 0))
 
-        # OTB total
-        otb_total = sum(o for o in otb_por_semana if o > 0)
+        # OTB total = déficit acumulado MÁXIMO del horizonte (fix B5 auditoría
+        # 2026-08-23 — sumar la serie contaba el mismo déficit N veces, ~4x)
+        otb_total = max((o for o in otb_por_semana if o > 0), default=0)
 
         resultados.append({
             'marca': marca,
@@ -3758,8 +3799,18 @@ def run_analysis(path, params=None, formato='plantilla'):
             'embarque_n_rojos':      embarque['kpis']['n_rojos'],
         })
 
+    # Semana del corte derivada de la BASE, no del reloj (fix B3 auditoría
+    # 2026-08-23 — date.today() comparaba contra la semana LY equivocada)
+    semana_corte = None
+    if 'fecha_corte' in df_s.columns and not df_s['fecha_corte'].dropna().empty:
+        _fc = pd.to_datetime(df_s['fecha_corte'].dropna().iloc[0],
+                             errors='coerce', dayfirst=True)
+        if pd.notna(_fc):
+            semana_corte = int(_fc.isocalendar()[1])
+    summary['semana_corte_base'] = semana_corte
+
     # Comparativo LY + Ticket Promedio
-    ly_comparison = build_ly_comparison(df_cob)
+    ly_comparison = build_ly_comparison(df_cob, semana_actual=semana_corte)
     summary['ticket_actual_global'] = ly_comparison['ticket_actual_global']
     summary['semana_actual'] = ly_comparison['semana_actual']
     if ly_comparison['ly_disponible'] and ly_comparison['ly_global']:
@@ -3768,7 +3819,7 @@ def run_analysis(path, params=None, formato='plantilla'):
         summary['ly_ticket'] = ly_comparison['ly_global']['ticket_ly']
 
     # Forecast de ventas por marca (proyección + OTB)
-    forecast = build_forecast_marca(df_cob)
+    forecast = build_forecast_marca(df_cob, semana_actual=semana_corte)
 
     # Briefing ejecutivo
     briefing = build_briefing(df_cob, df_v, summary, p)
@@ -4053,339 +4104,6 @@ def print_report(results):
         print("   (sin acciones de precio recomendadas)")
 
     print("\n" + "═" * 62 + "\n")
-
-
-# ─────────────────────────────────────────────────────────────
-#  MÓDULO FENÓMENO DEL NIÑO
-# ─────────────────────────────────────────────────────────────
-# Outputs (cada uno con decisión accionable asociada):
-#   1. Tabla riesgo quiebre por línea (LIGERO)  → ¿reponemos? ¿adelantamos OC?
-#   2. SKUs en riesgo de quiebre               → ¿qué SKUs priorizo?
-#   3. Capital parado por categoría calórica    → ¿liquido? ¿cuánto margen sacrifico?
-#   4. Marcas más expuestas al Niño             → ¿con quién negocio devoluciones?
-#   5. Data para curva temp × venta             → insight: ¿cuánto responde la venta?
-#   6. Resumen ejecutivo KPIs Niño              → para reunión con gerencia
-
-# ── Config calórico ──
-_CALORICO_PATH = os.path.join(os.path.dirname(__file__), 'config_calorico.json')
-try:
-    with open(_CALORICO_PATH, 'r') as _f:
-        _CALORICO_RAW = json.load(_f)
-    MAPEO_CALORICO = {k.upper().strip(): v for k, v in _CALORICO_RAW.get('mapeo', {}).items()}
-except (FileNotFoundError, json.JSONDecodeError):
-    MAPEO_CALORICO = {}
-
-
-def _assign_calorico(df):
-    """Agrega columna 'cat_calorica' al DataFrame basado en la columna 'linea'."""
-    if 'linea' not in df.columns:
-        df['cat_calorica'] = 'NEUTRO'
-        return df
-    df['cat_calorica'] = df['linea'].str.upper().str.strip().map(MAPEO_CALORICO).fillna('NEUTRO')
-    return df
-
-
-def _compute_weekly_deltas(snapshots_dict):
-    """
-    Calcula deltas semanales a partir de snapshots (data acumulativa).
-
-    Parámetros
-    ----------
-    snapshots_dict : dict {semana_iso: DataFrame} — snapshots ordenados
-
-    Retorna
-    -------
-    list of dict: cada uno con semana, delta_venta_soles, delta_unidades por línea y cat_calorica
-    """
-    sorted_weeks = sorted(snapshots_dict.keys())
-    if len(sorted_weeks) < 2:
-        return []
-
-    deltas = []
-    for i in range(1, len(sorted_weeks)):
-        prev_week = sorted_weeks[i - 1]
-        curr_week = sorted_weeks[i]
-        df_prev = _assign_calorico(snapshots_dict[prev_week].copy())
-        df_curr = _assign_calorico(snapshots_dict[curr_week].copy())
-
-        # Agregar por línea + cat_calorica
-        agg_prev = df_prev.groupby(['linea', 'cat_calorica']).agg(
-            venta_soles=('venta_soles', 'sum'),
-            unidades=('unidades_vendidas', 'sum'),
-        ).reset_index()
-
-        agg_curr = df_curr.groupby(['linea', 'cat_calorica']).agg(
-            venta_soles=('venta_soles', 'sum'),
-            unidades=('unidades_vendidas', 'sum'),
-        ).reset_index()
-
-        # Merge y calcular delta
-        merged = agg_curr.merge(agg_prev, on=['linea', 'cat_calorica'],
-                                 suffixes=('_curr', '_prev'), how='outer').fillna(0)
-        merged['delta_venta'] = merged['venta_soles_curr'] - merged['venta_soles_prev']
-        merged['delta_unidades'] = merged['unidades_curr'] - merged['unidades_prev']
-        merged['semana_iso'] = curr_week
-        merged['semana_prev'] = prev_week
-
-        deltas.append(merged)
-
-    if deltas:
-        return pd.concat(deltas, ignore_index=True)
-    return pd.DataFrame()
-
-
-def build_fenomeno_nino(snapshots_dict, temp_semanal=None, params=None):
-    """
-    Construye los 6 outputs del módulo Fenómeno del Niño.
-
-    Parámetros
-    ----------
-    snapshots_dict : dict {semana_iso: DataFrame} — snapshots disponibles
-    temp_semanal   : list of dict — output de clima_engine.get_weekly_temperature()
-                     Si None, se intenta generar automáticamente.
-    params         : dict — parámetros override
-
-    Retorna
-    -------
-    dict con keys:
-        'riesgo_quiebre_linea'  : DataFrame — Output 1
-        'skus_riesgo_quiebre'   : DataFrame — Output 2
-        'capital_por_calorica'  : DataFrame — Output 3
-        'marcas_expuestas'      : DataFrame — Output 4
-        'tendencia_temp_venta'  : DataFrame — Output 5
-        'resumen_ejecutivo'     : dict      — Output 6
-        'deltas_semanales'      : DataFrame — deltas intermedios
-    """
-    p = {**DEFAULT_PARAMS, **(params or {})}
-
-    # Usar el snapshot más reciente como base
-    sorted_weeks = sorted(snapshots_dict.keys())
-    if not sorted_weeks:
-        return {'error': 'No hay snapshots disponibles'}
-
-    latest_week = sorted_weeks[-1]
-    df_latest = _assign_calorico(snapshots_dict[latest_week].copy())
-
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    #  OUTPUT 1: Tabla Riesgo de Quiebre por Línea
-    #  → Decisión: ¿reponemos? ¿adelantamos OC?
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    # Calcular velocidad de venta semanal (promedio últimas 4 semanas de venta)
-    vta_cols = [c for c in df_latest.columns if c.startswith('vta_u_sem_')]
-    if vta_cols:
-        df_latest['vta_semanal_uds'] = df_latest[vta_cols].mean(axis=1).fillna(0)
-    else:
-        # Fallback: unidades / edad_semanas
-        df_latest['vta_semanal_uds'] = np.where(
-            df_latest['edad_semanas'] > 0,
-            df_latest['unidades_vendidas'] / df_latest['edad_semanas'],
-            0
-        )
-
-    # Cobertura restante a nivel línea
-    riesgo_linea = df_latest.groupby(['linea', 'cat_calorica']).agg(
-        n_skus=('sku', 'nunique'),
-        stock_total=('stock_total', 'sum'),
-        stock_cd=('stock_cd', 'sum'),
-        vta_semanal_uds=('vta_semanal_uds', 'sum'),
-        venta_soles=('venta_soles', 'sum'),
-        stock_valor_costo=('stock_valor_costo', 'sum'),
-    ).reset_index()
-
-    riesgo_linea['cobertura_semanas'] = np.where(
-        riesgo_linea['vta_semanal_uds'] > 0,
-        (riesgo_linea['stock_total'] / riesgo_linea['vta_semanal_uds']).round(1),
-        999  # Sin venta → cobertura infinita
-    )
-
-    # Semáforo de riesgo
-    riesgo_linea['estado_riesgo'] = pd.cut(
-        riesgo_linea['cobertura_semanas'],
-        bins=[-1, 3, 6, 10, 9999],
-        labels=['🔴 QUIEBRE INMINENTE', '🟡 RIESGO', '🟢 OK', '⚪ SOBRESTOCK']
-    )
-
-    riesgo_linea = riesgo_linea.sort_values('cobertura_semanas')
-
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    #  OUTPUT 2: SKUs en Riesgo de Quiebre (LIGERO con cob < 4 sem)
-    #  → Decisión: ¿qué SKUs priorizo para reposición urgente?
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    # Solo LIGERO (oportunidad Niño)
-    df_ligero = df_latest[df_latest['cat_calorica'] == 'LIGERO'].copy()
-
-    # Mediana de venta por línea para filtro de materialidad
-    mediana_vta = df_ligero.groupby('linea')['vta_semanal_uds'].transform('median')
-
-    # SKUs con cobertura < 4 semanas Y venta > mediana de su línea
-    skus_riesgo = df_ligero[
-        (df_ligero['cobertura_sem'] < 4) &
-        (df_ligero['vta_semanal_uds'] > mediana_vta) &
-        (df_ligero['stock_total'] > 0)  # Excluir ya quebrados (stock 0)
-    ].copy()
-
-    skus_riesgo['semanas_restantes'] = np.where(
-        skus_riesgo['vta_semanal_uds'] > 0,
-        (skus_riesgo['stock_total'] / skus_riesgo['vta_semanal_uds']).round(1),
-        0
-    )
-
-    skus_riesgo = skus_riesgo.sort_values('venta_soles', ascending=False)
-
-    cols_riesgo = ['sku', 'descripcion', 'marca', 'linea', 'stock_total', 'stock_cd',
-                   'vta_semanal_uds', 'semanas_restantes', 'venta_soles', 'cobertura_sem']
-    skus_riesgo = skus_riesgo[[c for c in cols_riesgo if c in skus_riesgo.columns]]
-
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    #  OUTPUT 3: Capital Parado por Categoría Calórica
-    #  → Decisión: ¿liquido? ¿cuánto margen sacrifico?
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    capital_cal = df_latest.groupby('cat_calorica').agg(
-        n_skus=('sku', 'nunique'),
-        capital_invertido=('stock_valor_costo', 'sum'),
-        stock_total=('stock_total', 'sum'),
-        venta_soles=('venta_soles', 'sum'),
-        vta_semanal_uds=('vta_semanal_uds', 'sum'),
-    ).reset_index()
-
-    total_capital = capital_cal['capital_invertido'].sum()
-    capital_cal['pct_capital'] = np.where(
-        total_capital > 0,
-        (capital_cal['capital_invertido'] / total_capital * 100).round(1),
-        0
-    )
-
-    # Rotación: venta / capital
-    capital_cal['rotacion'] = np.where(
-        capital_cal['capital_invertido'] > 0,
-        (capital_cal['venta_soles'] / capital_cal['capital_invertido']).round(3),
-        0
-    )
-
-    capital_cal = capital_cal.sort_values('capital_invertido', ascending=False)
-
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    #  OUTPUT 4: Marcas más Expuestas al Niño
-    #  → Decisión: ¿con qué proveedor negocio devoluciones?
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    marca_cal = df_latest.groupby(['marca', 'cat_calorica']).agg(
-        n_skus=('sku', 'nunique'),
-        capital=('stock_valor_costo', 'sum'),
-        venta_soles=('venta_soles', 'sum'),
-    ).reset_index()
-
-    # Pivot: una fila por marca, columnas por categoría
-    marca_total = df_latest.groupby('marca').agg(
-        n_skus_total=('sku', 'nunique'),
-        capital_total=('stock_valor_costo', 'sum'),
-        venta_total=('venta_soles', 'sum'),
-    ).reset_index()
-
-    marca_grueso = marca_cal[marca_cal['cat_calorica'] == 'GRUESO'].rename(
-        columns={'n_skus': 'n_skus_grueso', 'capital': 'capital_grueso', 'venta_soles': 'venta_grueso'}
-    )[['marca', 'n_skus_grueso', 'capital_grueso', 'venta_grueso']]
-
-    marcas_exp = marca_total.merge(marca_grueso, on='marca', how='left').fillna(0)
-
-    marcas_exp['pct_capital_grueso'] = np.where(
-        marcas_exp['capital_total'] > 0,
-        (marcas_exp['capital_grueso'] / marcas_exp['capital_total'] * 100).round(1),
-        0
-    )
-
-    # Rotación del GRUESO de cada marca
-    marca_grueso_rot = marca_cal[marca_cal['cat_calorica'] == 'GRUESO'].copy()
-    marca_grueso_rot['rotacion_grueso'] = np.where(
-        marca_grueso_rot['capital'] > 0,
-        (marca_grueso_rot['venta_soles'] / marca_grueso_rot['capital']).round(3),
-        0
-    )
-    marcas_exp = marcas_exp.merge(
-        marca_grueso_rot[['marca', 'rotacion_grueso']], on='marca', how='left'
-    ).fillna(0)
-
-    # Índice vulnerabilidad = (% capital GRUESO / 100) × (1 - rotación GRUESO)
-    # Mayor cuando mucho capital en GRUESO que no rota
-    marcas_exp['idx_vulnerabilidad'] = (
-        (marcas_exp['pct_capital_grueso'] / 100) *
-        (1 - marcas_exp['rotacion_grueso'].clip(upper=1))
-    ).round(3)
-
-    marcas_exp = marcas_exp.sort_values('idx_vulnerabilidad', ascending=False)
-
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    #  OUTPUT 5: Tendencia Temperatura × Venta
-    #  → Insight: ¿cuánto responde la venta a temperatura?
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    deltas_df = _compute_weekly_deltas(snapshots_dict)
-
-    tendencia = pd.DataFrame()
-    if not deltas_df.empty and temp_semanal:
-        # Agregar deltas por categoría calórica × semana
-        tend_cal = deltas_df.groupby(['semana_iso', 'cat_calorica']).agg(
-            delta_venta=('delta_venta', 'sum'),
-            delta_unidades=('delta_unidades', 'sum'),
-        ).reset_index()
-
-        # Merge con temperatura
-        df_temp = pd.DataFrame(temp_semanal)
-        tendencia = tend_cal.merge(df_temp, on='semana_iso', how='left')
-
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    #  OUTPUT 6: Resumen Ejecutivo KPIs Niño
-    #  → Para reunión con gerencia
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    # Temp promedio semana más reciente
-    temp_actual = None
-    if temp_semanal:
-        # Buscar la semana que coincida o la más reciente
-        for tw in reversed(temp_semanal):
-            if tw.get('semana_iso') and tw['semana_iso'] <= latest_week:
-                temp_actual = tw.get('temp_avg')
-                break
-
-    # Ratio venta LIGERO vs GRUESO
-    venta_ligero = df_latest[df_latest['cat_calorica'] == 'LIGERO']['venta_soles'].sum()
-    venta_grueso = df_latest[df_latest['cat_calorica'] == 'GRUESO']['venta_soles'].sum()
-    ratio_lig_gru = round(venta_ligero / venta_grueso, 1) if venta_grueso > 0 else float('inf')
-
-    # Capital GRUESO sin rotación (rot < 0.1)
-    capital_grueso_total = marcas_exp['capital_grueso'].sum()
-
-    # Número de SKUs LIGERO en riesgo
-    n_skus_riesgo = len(skus_riesgo)
-
-    resumen = {
-        'semana_analisis': latest_week,
-        'temp_promedio_actual': temp_actual,
-        'temp_historico_normal': 20.8,  # Promedio 2024-2025 Mar-May
-        'delta_temp_vs_normal': round(temp_actual - 20.8, 1) if temp_actual else None,
-        'ratio_venta_ligero_grueso': ratio_lig_gru,
-        'venta_ligero_soles': round(venta_ligero),
-        'venta_grueso_soles': round(venta_grueso),
-        'capital_grueso_en_riesgo': round(capital_grueso_total),
-        'n_skus_ligero_riesgo_quiebre': n_skus_riesgo,
-        'pct_capital_en_grueso': round(
-            capital_grueso_total / total_capital * 100, 1
-        ) if total_capital > 0 else 0,
-        'n_marcas_alta_vulnerabilidad': int((marcas_exp['idx_vulnerabilidad'] > 0.3).sum()),
-    }
-
-    return {
-        'riesgo_quiebre_linea': riesgo_linea,
-        'skus_riesgo_quiebre': skus_riesgo,
-        'capital_por_calorica': capital_cal,
-        'marcas_expuestas': marcas_exp,
-        'tendencia_temp_venta': tendencia,
-        'resumen_ejecutivo': resumen,
-        'deltas_semanales': deltas_df,
-    }
 
 
 # ─────────────────────────────────────────────────────────────
