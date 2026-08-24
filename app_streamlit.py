@@ -1584,7 +1584,8 @@ if nav_page == "🏠 Dashboard":
                 st.info("Se necesitan al menos 2 snapshots para comparar cortes.")
             else:
                 _an_da, _an_db = _an_dw[-2], _an_dw[-1]
-                st.caption(f"Comparando {_an_da} → {_an_db} (los dos últimos cortes). "
+                st.caption(f"Comparando {analisis_estados.etiqueta_semana(_an_da)} → "
+                           f"{analisis_estados.etiqueta_semana(_an_db)} (los dos últimos cortes). "
                            f"Análisis completo y migraciones: vista 🏆 Caso de Éxito.")
                 for _an_dc in analisis_estados.conclusiones(_an_da, _an_db, acciones_log.cargar()):
                     _an_dr = {"positivo": st.success, "atencion": st.warning,
@@ -7489,10 +7490,12 @@ elif nav_page == "🏆 Caso de Éxito":
             _an_weeks = list(_ce_serie["semana_iso"])
             _an_c1, _an_c2 = st.columns(2)
             _an_a = _an_c1.selectbox("Comparar desde", _an_weeks[:-1],
-                                     index=len(_an_weeks) - 2, key="an_sem_a")
+                                     index=len(_an_weeks) - 2, key="an_sem_a",
+                                     format_func=analisis_estados.etiqueta_semana)
             _an_b_opts = [w for w in _an_weeks if w > _an_a]
             _an_b = _an_c2.selectbox("hasta", _an_b_opts,
-                                     index=len(_an_b_opts) - 1, key="an_sem_b")
+                                     index=len(_an_b_opts) - 1, key="an_sem_b",
+                                     format_func=analisis_estados.etiqueta_semana)
             _an_conc = analisis_estados.conclusiones(_an_a, _an_b, acciones_log.cargar())
             if not _an_conc:
                 st.info("Sin movimientos materiales entre esas dos semanas (umbral S/ 100K).")
@@ -7527,7 +7530,8 @@ elif nav_page == "🏆 Caso de Éxito":
                 st.markdown(f"**Flujos {_an_a} → {_an_b}** (ordenados por capital)")
                 _mg_show = _mg_m.head(15).copy()
                 _mg_show["clase"] = _mg_show["clase"].map(
-                    {"mejora": "✅ mejora", "deterioro": "🔻 deterioro", "lateral": "↔ lateral"})
+                    {"mejora": "✅ mejora", "deterioro": "🔻 deterioro",
+                     "lateral": "↔ lateral", "relanzamiento": "🔁 relanzamiento"})
                 _mg_show.columns = ["De", "A", "SKUs", "Capital S/", "Clase"]
                 st.dataframe(_mg_show.style.format({"Capital S/": "S/ {:,.0f}"}),
                              use_container_width=True, hide_index=True, height=320)

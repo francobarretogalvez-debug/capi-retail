@@ -154,6 +154,11 @@ def conclusiones(sem_a: str, sem_b: str, acciones_df: pd.DataFrame = None) -> li
             if (ea, eb) in _LECTURA_FLUJOS:
                 out.append({"nivel": "atencion", "titulo": f"Migración {ea} → {eb}",
                             "detalle": _LECTURA_FLUJOS[(ea, eb)].format(cap=cap)})
+            elif ea in ("MUERTO", "DORMIDO", "LIQUIDAR") and eb == "NUEVO SIN VENTA":
+                out.append({"nivel": "info", "titulo": f"Relanzamiento {ea} → {eb}",
+                            "detalle": (f"S/ {cap:,.0f} reapareció como producto nuevo "
+                                        "(recodificación de temporada) — no es mejora "
+                                        "comercial ni deterioro; monitorear su tracción.")})
             elif ea in ("MUERTO", "DORMIDO", "LIQUIDAR") and eb in _ESTADOS_VIVOS:
                 out.append({"nivel": "positivo", "titulo": f"Reactivación {ea} → {eb}",
                             "detalle": f"S/ {cap:,.0f} volvió a tener venta — mejora REAL, no maquillaje."})
@@ -216,6 +221,12 @@ def matriz_migraciones(sem_a: str, sem_b: str) -> pd.DataFrame:
     _sb = out["estado_b"].map(SALUD_ESTADO).fillna(3)
     out["clase"] = np.where(_sb > _sa, "mejora",
                             np.where(_sb < _sa, "deterioro", "lateral"))
+    # Auditoría 2026-08-24: DORMIDO/MUERTO/LIQUIDAR → NUEVO SIN VENTA implica
+    # edad reseteada (SKU recodificado/relanzado de temporada) — no es mejora
+    # comercial ni deterioro; se clasifica aparte para no inflar los KPIs.
+    _relanz = (out["estado_b"] == "NUEVO SIN VENTA") & \
+              out["estado_a"].isin(["DORMIDO", "MUERTO", "LIQUIDAR"])
+    out.loc[_relanz, "clase"] = "relanzamiento"
     return out.sort_values("capital", ascending=False).reset_index(drop=True)
 
 
@@ -256,3 +267,20 @@ def serie_migraciones() -> pd.DataFrame:
                      "capital_mejora": mej, "capital_deterioro": det,
                      "neto": mej - det})
     return pd.DataFrame(rows)
+
+
+def etiqueta_semana(semana: str) -> str:
+    """'2026-33' → '2026-33 · cierre 16.08' (la fecha nadie la discute;
+    el número ISO puede no coincidir con la semana comercial Ripley)."""
+    import json, os
+    _idx = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "snapshots", "snapshots_index.json")
+    try:
+        for r in json.load(open(_idx)):
+            if r.get("semana_iso") == semana:
+                f = str(r.get("fecha_cierre", ""))[5:]  # MM-DD
+                if f:
+                    return f"{semana} · cierre {f[3:5]}.{f[0:2]}"
+    except Exception:
+        pass
+    return semana

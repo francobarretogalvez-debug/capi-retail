@@ -21,7 +21,9 @@ print("✅ test_analisis OK:", len(c), "conclusiones 32→33 ·", len(c2), "en 3
 
 # ── Migraciones (pedido Franco 2026-08-24) ──
 m = analisis_estados.matriz_migraciones("2026-32", "2026-33")
-assert not m.empty and set(m["clase"]) <= {"mejora", "deterioro", "lateral"}
+assert not m.empty and set(m["clase"]) <= {"mejora", "deterioro", "lateral", "relanzamiento"}
+rel = m[(m["estado_a"] == "DORMIDO") & (m["estado_b"] == "NUEVO SIN VENTA")]
+assert rel.empty or (rel["clase"] == "relanzamiento").all(), "edad reseteada no puede ser mejora"
 assert (m["capital"] >= 0).all()
 s = analisis_estados.serie_migraciones()
 assert len(s) >= 9 and {"capital_mejora", "capital_deterioro", "neto"} <= set(s.columns)
