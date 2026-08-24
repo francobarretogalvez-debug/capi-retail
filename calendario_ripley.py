@@ -54,7 +54,9 @@ def etiqueta_fecha(fecha, corta: bool = False) -> str:
     ddmm = f"{fecha.day:02d}.{fecha.month:02d}" if fecha else "?"
     if not info:
         return ddmm if corta else f"cierre {ddmm}"
+    _vent = str(info.get("ventana", "") or "").strip()
     if corta:
         return f"S{int(info['sem_num'])}·{ddmm}"
+    _vent_txt = f" · Vent. {_vent}" if _vent and _vent != "---" else ""
     return (f"Sem {int(info['sem_num'])} Ripley · {info['temporada_ventanas']}"
-            f" · cierre {ddmm}")
+            f"{_vent_txt} · cierre {ddmm}")
