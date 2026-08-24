@@ -97,5 +97,14 @@
     "timestamp": "2026-08-24T13:08:41.466306",
     "path": "/Users/francobarreto/capi-retail/snapshots/2026-33/snapshot.parquet",
     "hash": "4c1d0ee24418"
+  },
+  {
+    "semana_iso": "2026-34",
+    "fecha_cierre": "2026-08-23",
+    "n_filas": 5573,
+    "n_skus": 5573,
+    "timestamp": "2026-08-24T16:50:10.338477",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-34/snapshot.parquet",
+    "hash": "da2221662549"
   }
 ]

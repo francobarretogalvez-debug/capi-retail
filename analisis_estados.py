@@ -269,18 +269,33 @@ def serie_migraciones() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def etiqueta_semana(semana: str) -> str:
-    """'2026-33' → '2026-33 · cierre 16.08' (la fecha nadie la discute;
-    el número ISO puede no coincidir con la semana comercial Ripley)."""
+def _fecha_cierre_de(semana: str):
+    """fecha_cierre (ISO str) del snapshot según el índice, o None."""
     import json, os
     _idx = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "snapshots", "snapshots_index.json")
     try:
         for r in json.load(open(_idx)):
             if r.get("semana_iso") == semana:
-                f = str(r.get("fecha_cierre", ""))[5:]  # MM-DD
-                if f:
-                    return f"{semana} · cierre {f[3:5]}.{f[0:2]}"
+                return r.get("fecha_cierre")
     except Exception:
         pass
+    return None
+
+
+def etiqueta_semana(semana: str, corta: bool = False) -> str:
+    """Etiqueta en SEMANA COMERCIAL RIPLEY (BD Periodo de Franco, 2026-08-24):
+    '2026-34' → 'Sem 27 Ripley · PV 26-27 · cierre 23.08'. La clave ISO sigue
+    siendo el identificador interno de los snapshots."""
+    fc = _fecha_cierre_de(semana)
+    if fc:
+        try:
+            import calendario_ripley
+            et = calendario_ripley.etiqueta_fecha(fc, corta=corta)
+            if et:
+                return et
+        except Exception:
+            pass
+        f = str(fc)[5:]
+        return f"{semana} · cierre {f[3:5]}.{f[0:2]}"
     return semana

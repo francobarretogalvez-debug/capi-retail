@@ -7466,10 +7466,13 @@ elif nav_page == "🏆 Caso de Éxito":
                        delta_color="inverse")
             _c2.metric("% del capital total", f"{_ce_ult['pct_exceso']*100:.1f}%")
             _c3.metric("SKUs en exceso", f"{int(_ce_ult['skus_exceso']):,}")
-            _c4.metric("Semana del corte", _ce_ult["semana_iso"])
+            _c4.metric("Semana del corte", analisis_estados.etiqueta_semana(_ce_ult["semana_iso"], corta=True))
 
             st.markdown("##### Evolución del capital en exceso")
-            _ce_chart = _ce_serie.set_index("semana_iso")[["capital_exceso", "capital_total"]]
+            _ce_chart = _ce_serie.copy()
+            _ce_chart["semana_iso"] = _ce_chart["semana_iso"].map(
+                lambda w: analisis_estados.etiqueta_semana(w, corta=True))
+            _ce_chart = _ce_chart.set_index("semana_iso")[["capital_exceso", "capital_total"]]
             _ce_chart.columns = ["Capital en exceso", "Capital total"]
             st.line_chart(_ce_chart, height=260)
             st.caption("⚠️ Las semanas no son consecutivas todavía (huecos entre cortes). "

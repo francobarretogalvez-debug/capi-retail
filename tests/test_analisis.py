@@ -31,3 +31,13 @@ d = analisis_estados.detalle_migracion("2026-32", "2026-33",
                                        m.iloc[0]["estado_a"], m.iloc[0]["estado_b"])
 assert not d.empty and "stock_valor_costo" in d.columns
 print("✅ test_migraciones OK:", len(m), "flujos ·", len(s), "pares en la serie")
+
+# ── Calendario Ripley (BD Periodo, 2026-08-24) ──
+import calendario_ripley
+i = calendario_ripley.info_fecha("2026-08-23")
+assert i and i["semact"] == "W202627" and int(i["sem_num"]) == 27, i
+assert calendario_ripley.info_fecha("2026-08-16")["semact"] == "W202626"
+assert calendario_ripley.info_fecha("2015-01-01") == {}  # fuera de rango
+et = analisis_estados.etiqueta_semana("2026-34")
+assert "Sem 27 Ripley" in et and "23.08" in et, et
+print("✅ test_calendario OK:", et)
