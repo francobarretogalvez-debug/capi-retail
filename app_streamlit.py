@@ -1572,6 +1572,25 @@ if nav_page == "🏠 Dashboard":
         {total_donut:,} combos SKU×Tienda
         </div>""", unsafe_allow_html=True)
 
+    # ── 🧠 Análisis de estados desplegable (pedido Franco 2026-08-24) ──
+    if _HAS_SNAPSHOTS:
+        with st.expander("🧠 Analizar movimientos de estados (vs corte anterior)", expanded=False):
+            try:
+                from snapshots_engine.storage import list_available_weeks as _law_dash
+                _an_dw = _law_dash()
+            except Exception:
+                _an_dw = []
+            if len(_an_dw) < 2:
+                st.info("Se necesitan al menos 2 snapshots para comparar cortes.")
+            else:
+                _an_da, _an_db = _an_dw[-2], _an_dw[-1]
+                st.caption(f"Comparando {_an_da} → {_an_db} (los dos últimos cortes). "
+                           f"Análisis completo y migraciones: vista 🏆 Caso de Éxito.")
+                for _an_dc in analisis_estados.conclusiones(_an_da, _an_db, acciones_log.cargar()):
+                    _an_dr = {"positivo": st.success, "atencion": st.warning,
+                              "critico": st.error}.get(_an_dc["nivel"], st.info)
+                    _an_dr(f"**{_an_dc['titulo']}** — {_an_dc['detalle']}")
+
     # ── Desglose por marca del estado seleccionado + descarga ──
     st.markdown("---")
 
@@ -7481,6 +7500,49 @@ elif nav_page == "🏆 Caso de Éxito":
                 _an_render = {"positivo": st.success, "atencion": st.warning,
                               "critico": st.error}.get(_an_c["nivel"], st.info)
                 _an_render(f"**{_an_c['titulo']}** — {_an_c['detalle']}")
+
+            # ── 🔀 Migraciones entre estados, semana a semana ──
+            st.markdown("---")
+            st.markdown("##### 🔀 Migraciones entre estados — dónde están las oportunidades")
+            st.caption("Capital que MEJORÓ de estado (reactivaciones: dormido que vuelve a "
+                       "vender, sobrestock que drena) vs capital que se DETERIORÓ. El "
+                       "deterioro recurrente marca la oportunidad de gestión.")
+            _mg_serie = analisis_estados.serie_migraciones()
+            if not _mg_serie.empty:
+                _mg_ult = _mg_serie.iloc[-1]
+                _mg_k1, _mg_k2, _mg_k3 = st.columns(3)
+                _mg_k1.metric("Capital que mejoró", f"S/ {_mg_ult['capital_mejora']/1e6:,.2f}M",
+                              help=f"Par {_mg_ult['par']}")
+                _mg_k2.metric("Capital que se deterioró", f"S/ {_mg_ult['capital_deterioro']/1e6:,.2f}M")
+                _mg_k3.metric("Neto", f"S/ {_mg_ult['neto']/1e6:+,.2f}M",
+                              delta=f"{_mg_ult['neto']/1e6:+,.2f}M", delta_color="normal")
+                _mg_chart = _mg_serie.set_index("par")[["capital_mejora", "capital_deterioro"]]
+                _mg_chart.columns = ["Mejoró de estado", "Se deterioró"]
+                st.bar_chart(_mg_chart, height=240, color=["#2E7D5B", "#A03028"])
+
+            _mg_m = analisis_estados.matriz_migraciones(_an_a, _an_b)
+            if _mg_m.empty:
+                st.info(f"Sin migraciones entre {_an_a} y {_an_b}.")
+            else:
+                st.markdown(f"**Flujos {_an_a} → {_an_b}** (ordenados por capital)")
+                _mg_show = _mg_m.head(15).copy()
+                _mg_show["clase"] = _mg_show["clase"].map(
+                    {"mejora": "✅ mejora", "deterioro": "🔻 deterioro", "lateral": "↔ lateral"})
+                _mg_show.columns = ["De", "A", "SKUs", "Capital S/", "Clase"]
+                st.dataframe(_mg_show.style.format({"Capital S/": "S/ {:,.0f}"}),
+                             use_container_width=True, hide_index=True, height=320)
+
+                # Drill-down: SKUs de un flujo específico
+                _mg_ops = [f"{r['estado_a']} → {r['estado_b']}" for _, r in _mg_m.iterrows()]
+                _mg_sel = st.selectbox("Ver los SKUs de un flujo (para accionar)", _mg_ops,
+                                       key="mg_flujo_sel")
+                _mg_ea, _mg_eb = [x.strip() for x in _mg_sel.split("→")]
+                _mg_det = analisis_estados.detalle_migracion(_an_a, _an_b, _mg_ea, _mg_eb)
+                if not _mg_det.empty:
+                    st.dataframe(_mg_det.style.format(
+                        {"stock_valor_costo": "S/ {:,.0f}", "cobertura_sem": "{:.1f}",
+                         "edad_semanas": "{:.0f}"}, na_rep="—"),
+                        use_container_width=True, hide_index=True, height=300)
 
         # ── Registro de acciones (Gap G3: atribución) ──
         st.markdown("---")

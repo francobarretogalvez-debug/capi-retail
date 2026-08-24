@@ -11,6 +11,7 @@ Origen: pedido de Franco 2026-08-24 a partir del análisis del rebote de la
 semana 2026-33 (ESTANCADO +0.92M = compras nuevas acumulándose).
 """
 
+import numpy as np
 import pandas as pd
 
 from snapshots_engine import api
@@ -178,3 +179,80 @@ def conclusiones(sem_a: str, sem_b: str, acciones_df: pd.DataFrame = None) -> li
                         "detalle": ("El delta aún no es atribuible: registra las acciones que "
                                     "ejecutaste esta semana para poder defenderlo como resultado de gestión.")})
     return out
+
+
+# ─────────────────────────────────────────────────────────────
+#  MIGRACIONES ENTRE ESTADOS — medición semana a semana
+#  (pedido Franco 2026-08-24: dónde están las oportunidades)
+# ─────────────────────────────────────────────────────────────
+
+# Escala de "salud de rotación": subir = el capital mejoró de estado.
+# QUIEBRE puntúa 4 (venta fuerte pero riesgo): ÓPTIMO→QUIEBRE es deterioro,
+# MUERTO→QUIEBRE es mejora (volvió a vender con fuerza).
+SALUD_ESTADO = {
+    "MUERTO": 0, "LIQUIDAR": 1, "DORMIDO": 2, "ESTANCADO": 3,
+    "NUEVO SIN VENTA": 3, "SOBRESTOCK": 4, "QUIEBRE": 4,
+    "PRE-QUIEBRE": 5, "ALTO": 5, "ÓPTIMO": 7,
+}
+
+
+def matriz_migraciones(sem_a: str, sem_b: str) -> pd.DataFrame:
+    """Flujos de capital entre estados de sem_a → sem_b.
+
+    Columnas: estado_a, estado_b, n_skus, capital (valorizado en sem_b),
+    clase ('mejora' | 'deterioro' | 'lateral').
+    """
+    try:
+        cambios = api.detect_state_changes(sem_a, sem_b)
+    except Exception:
+        return pd.DataFrame()
+    if cambios is None or cambios.empty:
+        return pd.DataFrame()
+    snap_b = load_snapshot(sem_b)[["sku", "stock_valor_costo"]].drop_duplicates("sku")
+    fl = cambios.merge(snap_b, on="sku", how="left").fillna({"stock_valor_costo": 0})
+    out = (fl.groupby(["estado_a", "estado_b"], as_index=False)
+             .agg(n_skus=("sku", "nunique"), capital=("stock_valor_costo", "sum")))
+    _sa = out["estado_a"].map(SALUD_ESTADO).fillna(3)
+    _sb = out["estado_b"].map(SALUD_ESTADO).fillna(3)
+    out["clase"] = np.where(_sb > _sa, "mejora",
+                            np.where(_sb < _sa, "deterioro", "lateral"))
+    return out.sort_values("capital", ascending=False).reset_index(drop=True)
+
+
+def detalle_migracion(sem_a: str, sem_b: str, estado_a: str, estado_b: str,
+                      top_n: int = 25) -> pd.DataFrame:
+    """Top SKUs de un flujo específico (para accionar la oportunidad)."""
+    try:
+        cambios = api.detect_state_changes(sem_a, sem_b)
+    except Exception:
+        return pd.DataFrame()
+    if cambios is None or cambios.empty:
+        return pd.DataFrame()
+    fl = cambios[(cambios["estado_a"] == estado_a) & (cambios["estado_b"] == estado_b)]
+    if fl.empty:
+        return pd.DataFrame()
+    cols = ["sku", "descripcion", "marca", "stock_valor_costo", "stock_total",
+            "cobertura_sem", "edad_semanas"]
+    snap_b = load_snapshot(sem_b)
+    snap_b = snap_b[[c for c in cols if c in snap_b.columns]].drop_duplicates("sku")
+    det = fl[["sku", "marca"]].merge(snap_b.drop(columns=["marca"], errors="ignore"),
+                                     on="sku", how="left")
+    return det.sort_values("stock_valor_costo", ascending=False).head(top_n).reset_index(drop=True)
+
+
+def serie_migraciones() -> pd.DataFrame:
+    """Para cada par de semanas CONSECUTIVAS disponibles: capital que mejoró,
+    que se deterioró y neto. Alimenta el gráfico WoW de migraciones."""
+    from snapshots_engine.storage import list_available_weeks
+    weeks = list_available_weeks()
+    rows = []
+    for a, b in zip(weeks[:-1], weeks[1:]):
+        m = matriz_migraciones(a, b)
+        if m.empty:
+            continue
+        mej = float(m.loc[m["clase"] == "mejora", "capital"].sum())
+        det = float(m.loc[m["clase"] == "deterioro", "capital"].sum())
+        rows.append({"desde": a, "hasta": b, "par": f"{a}→{b}",
+                     "capital_mejora": mej, "capital_deterioro": det,
+                     "neto": mej - det})
+    return pd.DataFrame(rows)
