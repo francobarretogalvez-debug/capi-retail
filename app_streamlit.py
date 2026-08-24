@@ -81,6 +81,7 @@ import agente_terceras
 import vistas_excel
 import reportes_marcas
 import acciones_log
+import analisis_estados
 import rendimiento_tienda as rend_t
 
 # ══════════════════════════════════════════════════════════════
@@ -7459,6 +7460,27 @@ elif nav_page == "🏆 Caso de Éxito":
                 _ce_piv = _ce_est.pivot_table(index="semana_iso", columns="estado",
                                               values="capital", aggfunc="sum", fill_value=0)
                 st.dataframe(_ce_piv.style.format("S/ {:,.0f}"), use_container_width=True)
+
+            # ── 🧠 Análisis de estados: conclusiones automáticas ──
+            st.markdown("---")
+            st.markdown("##### 🧠 Análisis de estados — qué se movió, quién lo impulsó y qué hacer")
+            st.caption("Conclusiones generadas por reglas de retail sobre los movimientos "
+                       "entre dos cortes: subidas/bajadas por estado, marca que impulsa, "
+                       "migraciones (¿mejora real o deterioro encubierto?) y atribución.")
+            _an_weeks = list(_ce_serie["semana_iso"])
+            _an_c1, _an_c2 = st.columns(2)
+            _an_a = _an_c1.selectbox("Comparar desde", _an_weeks[:-1],
+                                     index=len(_an_weeks) - 2, key="an_sem_a")
+            _an_b_opts = [w for w in _an_weeks if w > _an_a]
+            _an_b = _an_c2.selectbox("hasta", _an_b_opts,
+                                     index=len(_an_b_opts) - 1, key="an_sem_b")
+            _an_conc = analisis_estados.conclusiones(_an_a, _an_b, acciones_log.cargar())
+            if not _an_conc:
+                st.info("Sin movimientos materiales entre esas dos semanas (umbral S/ 100K).")
+            for _an_c in _an_conc:
+                _an_render = {"positivo": st.success, "atencion": st.warning,
+                              "critico": st.error}.get(_an_c["nivel"], st.info)
+                _an_render(f"**{_an_c['titulo']}** — {_an_c['detalle']}")
 
         # ── Registro de acciones (Gap G3: atribución) ──
         st.markdown("---")
