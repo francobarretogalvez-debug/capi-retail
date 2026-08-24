@@ -57,6 +57,8 @@ DEFAULT_PARAMS = {
     "umbral_alto":      16,    # 12–16 sem → ALTO  (>16 → SOBRESTOCK)
     "umbral_edad":      26,    # semanas de antigüedad para LIQUIDAR
     "margen_min":     0.15,    # margen mínimo al calcular precio sugerido
+    "costo_transf_unit":   3.5,   # S/ por unidad transferida (hoja Ripley 2026-08-24)
+    "horizonte_transf_sem": 8,    # semanas para proyectar venta en destino
     "uds_min_trans":     3,    # mínimo de unidades para generar transferencia
     "cob_target":       12,    # semanas objetivo post-reposición (centro del rango ÓPTIMO)
     # — Alertas para tiendas (reporte accionable por personal de piso) —
@@ -803,6 +805,35 @@ def build_reposiciones(df_cobertura, params):
 #  3. TRANSFERENCIAS (sin matriz logística)
 # ─────────────────────────────────────────────────────────────
 
+def evaluar_transferencia(uds, precio_vigente, costo, flete_unit,
+                          uds_vendibles=None):
+    """Criterio económico de transferencia (hoja Ripley "EVALUAR POSIBLE
+    TRANSFERENCIA", 2026-08-24):
+
+        contribución unitaria = precio_vigente/1.18 − costo   (sin IGV)
+        ganancia = unidades × contribución − flete_unit × unidades
+
+    `uds_vendibles` proyecta la ganancia ESPERADA (unidades que el destino
+    venderá en el horizonte); si es None se asume que todo se vende
+    (ganancia POTENCIAL, el supuesto de la hoja original).
+
+    Devuelve (contrib_unit, flete_total, ganancia_potencial, ganancia_esperada).
+    """
+    try:
+        pv = float(precio_vigente or 0)
+        c = float(costo) if costo is not None and not pd.isna(costo) else None
+    except (TypeError, ValueError):
+        return None, None, None, None
+    if pv <= 0 or c is None:
+        return None, None, None, None
+    contrib = pv / 1.18 - c
+    flete_total = float(flete_unit) * uds
+    pot = uds * contrib - flete_total
+    vend = uds if uds_vendibles is None else min(float(uds_vendibles), uds)
+    esp = vend * contrib - flete_total
+    return round(contrib, 4), round(flete_total, 2), round(pot, 2), round(esp, 2)
+
+
 def build_transferencias(df_cobertura, params):
     """
     Sugerencias de transferencia entre tiendas del mismo SKU.
@@ -818,6 +849,17 @@ def build_transferencias(df_cobertura, params):
     cob_target = params["cob_target"]
     uds_min    = params["uds_min_trans"]
     ua         = params["umbral_alto"]
+    flete_unit = params.get("costo_transf_unit", 3.5)
+    horizonte  = params.get("horizonte_transf_sem", 8)
+
+    # Proxies para velocidad esperada en destino (fallback cuando el destino
+    # está en quiebre y su velocidad SKU está subestimada por falta de stock):
+    # velocidad de la categoría en esa tienda × share cadena del SKU en su categoría.
+    _vel = df_cobertura[['sku', 'tienda', 'categoria', 'prom_vta_uds']].copy()
+    _vel['prom_vta_uds'] = _vel['prom_vta_uds'].clip(lower=0)
+    _vta_cat_tienda = _vel.groupby(['categoria', 'tienda'])['prom_vta_uds'].sum().to_dict()
+    _vta_sku_cadena = _vel.groupby('sku')['prom_vta_uds'].sum().to_dict()
+    _vta_cat_cadena = _vel.groupby('categoria')['prom_vta_uds'].sum().to_dict()
 
     rows = []
 
@@ -896,6 +938,26 @@ def build_transferencias(df_cobertura, params):
                     if avg_dst > 0 else None
                 )
 
+                # ── Economía de la transferencia (fórmula Ripley 2026-08-24) ──
+                _cat = src['categoria']
+                _v_sku = max(float(avg_dst or 0), 0.0)
+                _fuente_vel = 'SKU real'
+                if dst['estado'] in (Estado.QUIEBRE, Estado.PRE_QUIEBRE):
+                    _share = 0.0
+                    if _vta_cat_cadena.get(_cat, 0) > 0:
+                        _share = _vta_sku_cadena.get(sku, 0) / _vta_cat_cadena[_cat]
+                    _proxy = _vta_cat_tienda.get((_cat, dst['tienda']), 0.0) * _share
+                    if _proxy > _v_sku:
+                        _v_sku = _proxy
+                        _fuente_vel = 'proxy línea'
+                _uds_vendibles = min(int(uds_trans), _v_sku * horizonte)
+                _contrib, _flete_tot, _g_pot, _g_esp = evaluar_transferencia(
+                    int(uds_trans), src['precio_vigente'], src['costo'],
+                    flete_unit, uds_vendibles=_uds_vendibles)
+                _veredicto = ('✅ Rentable' if (_g_esp is not None and _g_esp > 0)
+                              else '❌ No rentable — evaluar liquidar en origen'
+                              if _g_esp is not None else '⚠️ Sin costo en base')
+
                 rows.append({
                     'sku':             sku,
                     'nombre':          src['nombre'],
@@ -903,6 +965,13 @@ def build_transferencias(df_cobertura, params):
                     'tienda_origen':   src['tienda'],
                     'tienda_destino':  dst['tienda'],
                     'uds_transferir':  int(uds_trans),
+                    'contrib_unit':    _contrib,
+                    'uds_vendibles_horizonte': round(_uds_vendibles, 1),
+                    'fuente_velocidad': _fuente_vel,
+                    'costo_flete':     _flete_tot,
+                    'ganancia_potencial': _g_pot,
+                    'ganancia_esperada':  _g_esp,
+                    'veredicto':       _veredicto,
                     'cob_origen_pre':  round(src['cobertura_sem'] or 0, 1),
                     'cob_destino_pre': round(dst['cobertura_sem'] or 0, 1),
                     'cob_origen_post': cob_src_post,

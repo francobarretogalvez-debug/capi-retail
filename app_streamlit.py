@@ -819,6 +819,11 @@ with st.sidebar:
         st.markdown("**Parámetros de cálculo**")
         cob_target    = st.slider("Cobertura objetivo (sem)",       min_value=4,  max_value=16, value=12,  step=1)
         uds_min_trans = st.slider("Uds. mínimas por transferencia", min_value=1,  max_value=20, value=3,  step=1)
+        costo_transf_unit = st.number_input(
+            "Costo transferencia (S/ por unidad)", min_value=0.0, max_value=20.0,
+            value=3.5, step=0.5,
+            help="Flete unitario del cálculo de rentabilidad (hoja Ripley 'Evaluar "
+                 "posible transferencia'). Ganancia = uds × contribución sin IGV − flete × uds.")
         margen_min    = st.slider("Margen mínimo para precio (%)",  min_value=5,  max_value=40, value=15, step=5) / 100
 
         st.markdown("**Alertas Sobrestock (Tiendas)**")
@@ -879,6 +884,7 @@ with st.sidebar:
         "umbral_edad":       umbral_edad,
         "cob_target":        cob_target,
         "uds_min_trans":  uds_min_trans,
+        "costo_transf_unit": costo_transf_unit,
         "margen_min":     margen_min,
         "alertas_tienda_cob_min":  alertas_tienda_cob_min,
         "alertas_tienda_edad_min": alertas_tienda_edad_min,
@@ -3955,15 +3961,26 @@ elif nav_page == "🔄 Transferencias Propias":
             st.info("No hay transferencias sugeridas para las marcas propias con la base actual.")
         else:
             st.caption(f"{len(_tp):,} movimientos en marcas propias · {int(_tp['uds_transferir'].sum()):,} unidades")
+            if 'ganancia_esperada' in _tp.columns and _tp['ganancia_esperada'].notna().any():
+                _rent = _tp[_tp['ganancia_esperada'] > 0]
+                _k1, _k2, _k3 = st.columns(3)
+                _k1.metric("Ganancia neta del plan (rentables)", f"S/ {_rent['ganancia_esperada'].sum():,.0f}")
+                _k2.metric("Movimientos rentables", f"{len(_rent):,} de {len(_tp):,}")
+                _k3.metric("Pérdida evitada (no rentables)",
+                           f"S/ {abs(_tp.loc[_tp['ganancia_esperada'] <= 0, 'ganancia_esperada'].sum()):,.0f}")
+                if st.toggle("Mostrar solo rentables", value=True, key="solo_rent_propias"):
+                    _tp = _rent
             _tp_cols = [c for c in ['_marca', 'sku', 'nombre', 'tienda_origen', 'tienda_destino', 'uds_transferir',
+                                    'ganancia_esperada', 'veredicto', 'fuente_velocidad',
                                     'cob_origen_pre', 'cob_destino_pre', 'cob_origen_post', 'cob_destino_post', 'motivo'] if c in _tp.columns]
             _tp_disp = _tp[_tp_cols].rename(columns={
                 '_marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'tienda_origen': 'Tienda Origen',
                 'tienda_destino': 'Tienda Destino', 'uds_transferir': 'Uds a Transferir',
                 'cob_origen_pre': 'Cob Origen (pre)', 'cob_destino_pre': 'Cob Destino (pre)',
                 'cob_origen_post': 'Cob Origen (post)', 'cob_destino_post': 'Cob Destino (post)', 'motivo': 'Motivo',
+                'ganancia_esperada': 'Ganancia S/', 'veredicto': 'Veredicto', 'fuente_velocidad': 'Velocidad',
             })
-            st.dataframe(_tp_disp.style.format({'Cob Origen (pre)': '{:.1f}', 'Cob Destino (pre)': '{:.1f}', 'Cob Origen (post)': '{:.1f}', 'Cob Destino (post)': '{:.1f}'}, na_rep="—"),
+            st.dataframe(_tp_disp.style.format({'Cob Origen (pre)': '{:.1f}', 'Cob Destino (pre)': '{:.1f}', 'Cob Origen (post)': '{:.1f}', 'Cob Destino (post)': '{:.1f}', 'Ganancia S/': 'S/ {:,.0f}'}, na_rep="—"),
                          use_container_width=True, hide_index=True, height=440)
             _tp_buf = io.BytesIO()
             with pd.ExcelWriter(_tp_buf, engine='openpyxl') as _w:
@@ -4127,8 +4144,18 @@ elif nav_page == "🔄 Transferencias Terceras":
             st.info("No hay transferencias sugeridas para las marcas terceras con la base actual.")
         else:
             st.caption(f"{len(_tt):,} movimientos en marcas terceras · {int(_tt['uds_transferir'].sum()):,} unidades")
+            if 'ganancia_esperada' in _tt.columns and _tt['ganancia_esperada'].notna().any():
+                _rent = _tt[_tt['ganancia_esperada'] > 0]
+                _k1, _k2, _k3 = st.columns(3)
+                _k1.metric("Ganancia neta del plan (rentables)", f"S/ {_rent['ganancia_esperada'].sum():,.0f}")
+                _k2.metric("Movimientos rentables", f"{len(_rent):,} de {len(_tt):,}")
+                _k3.metric("Pérdida evitada (no rentables)",
+                           f"S/ {abs(_tt.loc[_tt['ganancia_esperada'] <= 0, 'ganancia_esperada'].sum()):,.0f}")
+                if st.toggle("Mostrar solo rentables", value=True, key="solo_rent_terceras"):
+                    _tt = _rent
             _tt_cols = [c for c in ['_marca', 'sku', 'nombre', 'tienda_origen', 'tienda_destino',
-                                    'uds_transferir', 'cob_origen_pre', 'cob_destino_pre',
+                                    'uds_transferir', 'ganancia_esperada', 'veredicto',
+                                    'fuente_velocidad', 'cob_origen_pre', 'cob_destino_pre',
                                     'cob_origen_post', 'cob_destino_post', 'motivo'] if c in _tt.columns]
             _tt_disp = _tt[_tt_cols].rename(columns={
                 '_marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto',
@@ -4136,10 +4163,12 @@ elif nav_page == "🔄 Transferencias Terceras":
                 'uds_transferir': 'Uds a Transferir', 'cob_origen_pre': 'Cob Origen (pre)',
                 'cob_destino_pre': 'Cob Destino (pre)', 'cob_origen_post': 'Cob Origen (post)',
                 'cob_destino_post': 'Cob Destino (post)', 'motivo': 'Motivo',
+                'ganancia_esperada': 'Ganancia S/', 'veredicto': 'Veredicto', 'fuente_velocidad': 'Velocidad',
             })
             st.dataframe(_tt_disp.style.format({
                 'Cob Origen (pre)': '{:.1f}', 'Cob Destino (pre)': '{:.1f}',
                 'Cob Origen (post)': '{:.1f}', 'Cob Destino (post)': '{:.1f}',
+                'Ganancia S/': 'S/ {:,.0f}',
             }, na_rep="—"), use_container_width=True, hide_index=True, height=440)
             _tt_buf = io.BytesIO()
             with pd.ExcelWriter(_tt_buf, engine='openpyxl') as _w:

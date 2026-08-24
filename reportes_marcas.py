@@ -291,22 +291,35 @@ def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
             tr_m = df_trans[df_trans["sku"].isin(dfm["sku"])].copy()
             if not tr_m.empty:
                 tr_m["valor"] = tr_m["uds_transferir"] * tr_m["precio_vigente"]
-                tg = tr_m.groupby(["sku", "nombre"], as_index=False).agg(
-                    uds=("uds_transferir", "sum"), valor=("valor", "sum"),
-                    tiendas=("tienda_destino", "nunique"))
-                tg = tg[(tg["uds"] >= TRANSF_MIN_UDS) & (tg["valor"] >= TRANSF_MIN_VALOR)]
+                _tiene_ganancia = ("ganancia_esperada" in tr_m.columns
+                                   and tr_m["ganancia_esperada"].notna().any())
+                _agg = dict(uds=("uds_transferir", "sum"), valor=("valor", "sum"),
+                            tiendas=("tienda_destino", "nunique"))
+                if _tiene_ganancia:
+                    _agg["ganancia"] = ("ganancia_esperada", "sum")
+                tg = tr_m.groupby(["sku", "nombre"], as_index=False).agg(**_agg)
+                if _tiene_ganancia:
+                    # Criterio económico (fórmula Ripley 2026-08-24): solo modelos
+                    # cuya ganancia esperada supera el flete. Reemplaza al proxy
+                    # de valor-venta; el mínimo de unidades se mantiene.
+                    tg = tg[(tg["uds"] >= TRANSF_MIN_UDS) & (tg["ganancia"] > 0)]
+                else:
+                    tg = tg[(tg["uds"] >= TRANSF_MIN_UDS) & (tg["valor"] >= TRANSF_MIN_VALOR)]
                 if not tg.empty:
                     _temp_map = dfm.drop_duplicates("sku").set_index("sku").get("temporada")
                     if _temp_map is not None:
                         tg.insert(2, "temporada", tg["sku"].map(_temp_map))
-                    tg = tg.sort_values("valor", ascending=False)
+                    tg = tg.sort_values("ganancia" if _tiene_ganancia else "valor",
+                                        ascending=False)
                     tg.columns = (["SKU", "Modelo"] +
                                   (["Temporada"] if _temp_map is not None else []) +
-                                  ["Uds a mover", "Valor S/ (venta)", "Tiendas destino"])
+                                  ["Uds a mover", "Valor S/ (venta)", "Tiendas destino"] +
+                                  (["Ganancia neta S/"] if _tiene_ganancia else []))
                     _escribir_tabla(
                         w, "4. Transferir",
                         f"{marca} — Rebalanceo entre tiendas (solo movimientos ≥{TRANSF_MIN_UDS} uds y ≥S/{TRANSF_MIN_VALOR:,.0f}) · corte {corte}",
-                        tg, {"Uds a mover": _FMT_S, "Valor S/ (venta)": _FMT_S})
+                        tg, {"Uds a mover": _FMT_S, "Valor S/ (venta)": _FMT_S,
+                             "Ganancia neta S/": _FMT_S})
 
         # ── Tendencias (alertas del motor para la marca) ──
         if df_alertas is not None and not df_alertas.empty and "marca" in df_alertas.columns:
@@ -364,6 +377,9 @@ def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
         fila += 1
         ws.cell(row=fila, column=1,
                 value="P. Sugerido solo aparece cuando implica BAJAR el precio; si el dscto actual ya supera la pirámide o el piso no deja bajar más, la Acción es Mantener.").font = F_HEADER
+        fila += 1
+        ws.cell(row=fila, column=1,
+                value="Transferir: solo movimientos con ganancia neta positiva (contribución sin IGV × uds vendibles − flete por unidad) y ≥12 uds.").font = F_HEADER
         fila += 1
         ws.cell(row=fila, column=1, value=_SUPUESTOS).font = F_HEADER
         ws.column_dimensions["A"].width = 20
