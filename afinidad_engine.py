@@ -1053,3 +1053,86 @@ def build_afinidad(excel_path):
         'df_long': df_long,
         'config': config,
     }
+
+
+# ─────────────────────────────────────────────────────────────
+#  MAL MATCH → DESTINO FINAL (Fase B, plan Demo Chile 2026-08-25)
+#  Cruza las anomalías "no rota aquí / sí rota allá" con el plan de
+#  transferencias RENTABLES del motor: lo cubierto se linkea, lo que no
+#  tiene destino rentable se manda a LIQUIDACIÓN LOCALIZADA en tienda.
+# ─────────────────────────────────────────────────────────────
+
+def mal_match_destino(anomalias_df, df_trans, df_cob):
+    """
+    Args:
+        anomalias_df: output de find_anomalies (tipo_anomalia == mal_match_plaza)
+        df_trans: transferencias del motor (con ganancia_esperada si existe)
+        df_cob: cobertura SKU×tienda del motor (stock, capital, edad, dscto)
+
+    Returns:
+        dict con:
+          cubiertos: DataFrame sku → ganancia del plan de transferencias
+          huerfanos: DataFrame por SKU: tiendas muertas, stock/capital parado,
+                     edad, dscto actual/sugerido → liquidación localizada
+    """
+    vacio = {"cubiertos": pd.DataFrame(), "huerfanos": pd.DataFrame()}
+    if anomalias_df is None or anomalias_df.empty:
+        return vacio
+    mm = anomalias_df[anomalias_df.get("tipo_anomalia", "") == "mal_match_plaza"]
+    if mm.empty:
+        return vacio
+
+    skus_mm = set(mm["sku"])
+    tiene_ganancia = (df_trans is not None and not df_trans.empty
+                      and "ganancia_esperada" in df_trans.columns)
+    if tiene_ganancia:
+        tr = df_trans[(df_trans["sku"].isin(skus_mm))
+                      & (df_trans["ganancia_esperada"] > 0)]
+        cubiertos = (tr.groupby(["sku", "nombre"], as_index=False)
+                       .agg(movimientos=("tienda_destino", "count"),
+                            uds=("uds_transferir", "sum"),
+                            ganancia=("ganancia_esperada", "sum"))
+                       .sort_values("ganancia", ascending=False))
+        skus_cubiertos = set(cubiertos["sku"])
+    else:
+        cubiertos = pd.DataFrame()
+        skus_cubiertos = set()
+
+    huerfanos_skus = skus_mm - skus_cubiertos
+    if not huerfanos_skus or df_cob is None or df_cob.empty:
+        return {"cubiertos": cubiertos, "huerfanos": pd.DataFrame()}
+
+    # Stock parado: combos del SKU huérfano SIN venta (ahí vive el problema)
+    parado = df_cob[(df_cob["sku"].isin(huerfanos_skus))
+                    & (df_cob["prom_vta_uds"] <= 0)].copy()
+    if parado.empty:
+        return {"cubiertos": cubiertos, "huerfanos": pd.DataFrame()}
+
+    agg = {
+        "nombre": ("nombre", "first"), "marca": ("marca", "first"),
+        "n_tiendas_muertas": ("tienda", "nunique"),
+        "tiendas_muertas": ("tienda", lambda t: ", ".join(sorted(t)[:6])
+                            + ("…" if t.nunique() > 6 else "")),
+        "stock_parado": ("stock_total", "sum"),
+        "capital_parado": ("stock_valor_costo", "sum"),
+        "edad_semanas": ("edad_semanas", "max"),
+    }
+    if "pct_descuento" in parado.columns:
+        agg["dscto_actual"] = ("pct_descuento", "max")
+    hu = parado.groupby("sku", as_index=False).agg(**agg)
+
+    # Dscto sugerido por pirámide de edad (misma tabla oficial de Franco)
+    try:
+        import agente_terceras as _at
+        sug = hu["edad_semanas"].apply(lambda e: _at.descuento_sugerido(e))
+        hu["dscto_sugerido"] = sug.map(lambda t: t[0])
+    except Exception:
+        hu["dscto_sugerido"] = np.nan
+    # Acción por edad: producto en ventana de lanzamiento (<8 sem) no se
+    # liquida — se revisa exhibición/precio de entrada (la pirámide le da 0%).
+    hu["accion"] = np.where(
+        hu["edad_semanas"] < 8,
+        "🧐 Revisar exhibición/entrada (aún en lanzamiento)",
+        "🏷️ Liquidar EN tienda (markdown localizado)")
+    return {"cubiertos": cubiertos,
+            "huerfanos": hu.sort_values("capital_parado", ascending=False).reset_index(drop=True)}

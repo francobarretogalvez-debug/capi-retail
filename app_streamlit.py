@@ -725,10 +725,10 @@ with st.sidebar:
 
         if not _DEMO_MODE:
             # ── ANÁLISIS PREDICTIVO ──
-            st.markdown('<div class="sidebar-section-label">ANÁLISIS PREDICTIVO</div>', unsafe_allow_html=True)
+            st.markdown('<div class="sidebar-section-label">DISTRIBUCIÓN INTELIGENTE</div>', unsafe_allow_html=True)
 
             _NAV_PREDICTIVO = [
-                ("🏪", "Afinidad Producto×Plaza"),
+                ("🎯", "Match Producto-Plaza"),
             ]
 
             for _icon, _label in _NAV_PREDICTIVO:
@@ -5117,14 +5117,14 @@ elif nav_page == "💰 Acciones Precio":
 
 # ─── Afinidad Producto × Plaza ────────────────────────────────
 
-elif nav_page == "🏪 Afinidad Producto×Plaza":
+elif nav_page == "🎯 Match Producto-Plaza":
     import glob as _glob_mod
     import io as _io_af
     from afinidad_engine import build_afinidad
     from transformar_profundidad import STORE_NAMES as _STORE_NAMES_AF
 
-    st.markdown(f'<h2 style="color:{SLATE_900};margin-bottom:4px;">🏪 Afinidad Producto × Plaza</h2>', unsafe_allow_html=True)
-    st.caption("Qué productos funcionan en qué tiendas — empujes inteligentes, redistribución y señales de producción")
+    st.markdown(f'<h2 style="color:{SLATE_900};margin-bottom:4px;">🎯 Match Producto-Plaza</h2>', unsafe_allow_html=True)
+    st.caption("¿Qué producto pongo en qué tienda? Empujes blindados con 4 filtros + destino final del stock mal ubicado. Análisis avanzado al fondo.")
 
     # Detectar base más reciente — priorizar la última subida por el usuario
     # Fix B8 (2026-08-23): solo la base subida en esta sesión — el fallback a
@@ -5188,10 +5188,73 @@ elif nav_page == "🏪 Afinidad Producto×Plaza":
             st.markdown(_kpi_html_af, unsafe_allow_html=True)
 
             # Tabs
-            _tab_hm, _tab_cl, _tab_emp, _tab_red, _tab_an, _tab_prod = st.tabs([
-                "🗺️ Heatmap Rotación", "🔗 Clusters", "📦 Empujes CD→Tiendas",
-                "🔄 Redistribución", "⚠️ Anomalías", "🏭 Producción"
+            _tab_emp, _tab_mm, _tab_adv = st.tabs([
+                "🚀 Empujes CD → Tienda", "🏷️ Mal match → destino final",
+                "📚 Análisis avanzado"
             ])
+            with _tab_adv:
+                st.caption("Material de análisis estratégico — no requiere acción semanal.")
+                _tab_hm, _tab_cl, _tab_red, _tab_an, _tab_prod = st.tabs([
+                    "🗺️ Heatmap Rotación", "🔗 Clusters", "🔄 Redistribución",
+                    "⚠️ Anomalías", "🏭 Producción"
+                ])
+
+            # ── TAB: Mal match → destino final (Fase B, plan Demo Chile) ──
+            with _tab_mm:
+                _mm_res = None
+                try:
+                    from afinidad_engine import mal_match_destino as _mmd
+                    _mm_res = _mmd(_an, df_trans, df_cob)
+                except Exception as _e_mm:
+                    st.error(f"No se pudo cruzar mal match con transferencias: {_e_mm}")
+                if _mm_res:
+                    _mm_cu, _mm_hu = _mm_res["cubiertos"], _mm_res["huerfanos"]
+                    _mk1, _mk2, _mk3 = st.columns(3)
+                    _mk1.metric("SKUs mal ubicados", f"{len(_mm_cu) + len(_mm_hu):,}")
+                    _mk2.metric("✅ Cubiertos por transferencias",
+                                f"{len(_mm_cu):,}",
+                                help=f"Ganancia esperada del plan: S/ {_mm_cu['ganancia'].sum():,.0f}"
+                                if not _mm_cu.empty else None)
+                    _mk3.metric("🏷️ Sin destino rentable",
+                                f"S/ {_mm_hu['capital_parado'].sum():,.0f}"
+                                if not _mm_hu.empty else "S/ 0",
+                                help="Capital parado en tiendas donde el SKU no rota y "
+                                     "ninguna transferencia paga el flete → acción localizada")
+                    if not _mm_hu.empty:
+                        st.markdown("**El stock que nadie va a rescatar** — decisión EN la tienda, "
+                                    "no en la cadena:")
+                        _mm_disp = _mm_hu.rename(columns={
+                            "sku": "SKU", "nombre": "Producto", "marca": "Marca",
+                            "n_tiendas_muertas": "Tiendas muertas",
+                            "tiendas_muertas": "¿Dónde?", "stock_parado": "Stock (uds)",
+                            "capital_parado": "Capital S/", "edad_semanas": "Edad (sem)",
+                            "dscto_actual": "Dscto actual", "dscto_sugerido": "Dscto sugerido",
+                            "accion": "Acción"})
+                        _mm_fmt = {"Capital S/": "S/ {:,.0f}", "Stock (uds)": "{:,.0f}",
+                                   "Edad (sem)": "{:.0f}", "Dscto sugerido": "{:.0%}"}
+                        if "Dscto actual" in _mm_disp.columns:
+                            _mm_fmt["Dscto actual"] = "{:.0%}"
+                        st.dataframe(_mm_disp.style.format(_mm_fmt, na_rep="—"),
+                                     use_container_width=True, hide_index=True, height=380)
+                        _mm_buf = _io_af.BytesIO()
+                        with pd.ExcelWriter(_mm_buf, engine="openpyxl") as _wmm:
+                            _mm_disp.to_excel(_wmm, sheet_name="Liquidacion Localizada", index=False)
+                            if not _mm_cu.empty:
+                                _mm_cu.to_excel(_wmm, sheet_name="Cubiertos x Transferencia", index=False)
+                        _mm_buf.seek(0)
+                        st.download_button("📥 Descargar plan de destino final (.xlsx)",
+                                           _mm_buf.getvalue(),
+                                           file_name="Capi_Mal_Match_Destino_Final.xlsx",
+                                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                           key="dl_mal_match")
+                    if not _mm_cu.empty:
+                        with st.expander(f"Ver los {len(_mm_cu)} SKUs cubiertos por el plan de "
+                                         f"transferencias (S/ {_mm_cu['ganancia'].sum():,.0f})"):
+                            st.dataframe(_mm_cu.rename(columns={
+                                "sku": "SKU", "nombre": "Producto", "movimientos": "Movs",
+                                "uds": "Uds", "ganancia": "Ganancia S/"}).style.format(
+                                {"Ganancia S/": "S/ {:,.0f}"}),
+                                use_container_width=True, hide_index=True, height=250)
 
             # ── TAB 1: Heatmap ──
             with _tab_hm:
@@ -5356,6 +5419,28 @@ Se calcula por cada combo **SKU × tienda** candidato:
                     st.download_button("📥 Descargar empujes", _buf_emp.getvalue(),
                                        file_name="empujes_cd_tiendas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                        key="dl_empujes_af")
+
+                    # ── Marcar como ejecutado → alimenta la atribución del
+                    # Caso de Éxito (Fase B, plan Demo Chile 2026-08-25) ──
+                    st.markdown("---")
+                    _ej_ops = [f"{r['sku']} → {_STORE_NAMES_AF.get(r['tienda'], r['tienda'])} "
+                               f"({int(r['unidades_sugeridas'])} uds · {r['marca']})"
+                               for _, r in _emp.head(150).iterrows()]
+                    _ej_sel = st.multiselect(
+                        "✅ Marcar empujes como EJECUTADOS (se registran en el log de acciones)",
+                        _ej_ops, key="ej_empujes_sel")
+                    if st.button("Registrar en el log de acciones", key="ej_empujes_btn",
+                                 disabled=not _ej_sel):
+                        for _op in _ej_sel:
+                            _sku_op = _op.split(" → ")[0]
+                            _fila_op = _emp[_emp["sku"].astype(str) == _sku_op].iloc[0]
+                            acciones_log.agregar(
+                                "", "Reposición / Empuje", str(_fila_op["marca"]),
+                                f"Empuje ejecutado: {_op}",
+                                magnitud=f"{int(_fila_op['unidades_sugeridas'])} uds",
+                                sku=_sku_op, origen="Sugerida por Capi", estado="Ejecutada")
+                        st.success(f"{len(_ej_sel)} empujes registrados en el log ✅ "
+                                   "(descarga el CSV en Caso de Éxito al cerrar la semana)")
 
             # ── TAB 4: Redistribución ──
             with _tab_red:

@@ -38,3 +38,19 @@ if "dscto_destino_pct" in emp.columns:
     assert (_cd["dscto_destino_pct"] < 40).all(), \
         f"max dscto destino: {_cd['dscto_destino_pct'].max()}"
     print("✅ test_dscto OK: ningún empuje hacia línea×tienda con dscto realizado ≥40%")
+
+# ── Mal match → destino final (Fase B, 2026-08-25) ──
+import transformar_profundidad as _etl, motor_v2 as _mv
+from afinidad_engine import mal_match_destino
+_etl.transform(BASE, output_path="/tmp/pl_tc.xlsx")
+_rm = _mv.run_analysis("/tmp/pl_tc.xlsx")
+_res = mal_match_destino(r["anomalias_df"], _rm["transferencias"], _rm["cobertura"])
+_cu, _hu = _res["cubiertos"], _res["huerfanos"]
+assert not _hu.empty and _hu["capital_parado"].sum() > 1_000_000
+assert set(_cu["sku"]).isdisjoint(set(_hu["sku"]))  # partición limpia
+_jov = _hu[_hu["edad_semanas"] < 8]
+assert (_jov["accion"].str.contains("Revisar")).all()  # lanzamiento no se liquida
+_vie = _hu[_hu["edad_semanas"] >= 8]
+assert (_vie["accion"].str.contains("Liquidar")).all()
+print(f"✅ test_mal_match OK: {len(_cu)} cubiertos · {len(_hu)} huérfanos "
+      f"(S/ {_hu['capital_parado'].sum()/1e6:.2f}M) · acción por edad correcta")
