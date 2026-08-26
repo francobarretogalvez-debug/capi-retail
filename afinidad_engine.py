@@ -36,9 +36,16 @@ def _load_config():
         return json.load(f)
 
 def _load_calorico():
+    """Mapeo línea → categoría calórica (GRUESO/LIGERO/NEUTRO). Si el archivo
+    no existe, todo cae a NEUTRO — la vista degrada sin romperse (fix
+    2026-08-25: la eliminación de Fenómeno del Niño se llevó el json que
+    esta vista también usaba)."""
     path = os.path.join(_DIR, 'config_calorico.json')
-    with open(path, 'r') as f:
-        return json.load(f)['mapeo']
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)['mapeo']
+    except (OSError, KeyError, ValueError):
+        return {}
 
 
 # ─────────────────────────────────────────────────────────────
