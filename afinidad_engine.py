@@ -676,6 +676,22 @@ def build_empujes_cd(df_long, rotation_matrix, clusters_df, config=None):
                   f"({int(candidates.loc[_bloq, '_need'].sum())} uds evitadas)")
         candidates = candidates[~_bloq]
 
+    # ── Filtro descuento SKU (2026-08-25, regla Majo — espejo de reposición):
+    # dscto ≥40% es liquidación; no se empuja aunque el IMU haga que el margen
+    # aguante. El precio roto no se alimenta con más stock.
+    _dscto_max = emp_config.get('dscto_max_empuje', 40)
+    if _dscto_max and 'dscto_pct' in df_long.columns:
+        _dsc_sku = df_long.groupby('sku')['dscto_pct'].first()
+        if _dsc_sku.notna().any() and _dsc_sku.max() <= 1.5:
+            _dsc_sku = _dsc_sku * 100  # escala 0-1 → %
+        candidates['dscto_sku_pct'] = candidates['sku'].map(_dsc_sku)
+        _bloq_ds = (candidates['dscto_sku_pct'].notna()
+                    & (candidates['dscto_sku_pct'] >= _dscto_max))
+        if int(_bloq_ds.sum()):
+            print(f"  [Empujes] {int(_bloq_ds.sum())} empujes bloqueados por SKU en "
+                  f"liquidación (dscto ≥ {_dscto_max}%, regla Majo)")
+        candidates = candidates[~_bloq_ds]
+
     # ── Filtro margen destino (2026-08-25, pedido Franco): la rotación de una
     # línea en una tienda puede venir de vender REMATADO (mix de SKUs en
     # liquidación). Margen realizado línea×tienda = promedio del margen_pct de
@@ -686,21 +702,41 @@ def build_empujes_cd(df_long, rotation_matrix, clusters_df, config=None):
         _v = df_long[(df_long['vta'] > 0) & df_long['margen_pct'].notna()].copy()
         if not _v.empty:
             _v['_w'] = _v['vta'] * _v['margen_pct']
-            _g = _v.groupby(['linea', 'tienda']).agg(_ws=('_w', 'sum'), _vs=('vta', 'sum'))
+            if 'dscto_pct' in _v.columns:
+                _dsc_col = _v['dscto_pct']
+                if _dsc_col.notna().any() and _dsc_col.max() <= 1.5:
+                    _dsc_col = _dsc_col * 100
+                _v['_wd'] = _v['vta'] * _dsc_col.fillna(0)
+            else:
+                _v['_wd'] = np.nan
+            _g = _v.groupby(['linea', 'tienda']).agg(
+                _ws=('_w', 'sum'), _vs=('vta', 'sum'), _wd=('_wd', 'sum'))
             _mg_lt = (_g['_ws'] / _g['_vs']).to_dict()
+            _ds_lt = (_g['_wd'] / _g['_vs']).to_dict()
             candidates['margen_destino_pct'] = [
                 _mg_lt.get((l, t)) for l, t in zip(candidates['linea'], candidates['tienda'])
             ]
+            candidates['dscto_destino_pct'] = [
+                _ds_lt.get((l, t)) for l, t in zip(candidates['linea'], candidates['tienda'])
+            ]
+            _dscto_max2 = emp_config.get('dscto_max_empuje', 40)
             _bloq_mg = (candidates['margen_destino_pct'].notna()
                         & (candidates['margen_destino_pct'] < _mg_min))
+            _bloq_dd = (candidates['dscto_destino_pct'].notna()
+                        & (candidates['dscto_destino_pct'] >= _dscto_max2)) if _dscto_max2 else False
             if int(_bloq_mg.sum()):
                 print(f"  [Empujes] {int(_bloq_mg.sum())} empujes bloqueados por margen destino "
                       f"< {_mg_min}% (rotación de remate, no demanda sana)")
-            candidates = candidates[~_bloq_mg]
+            if int(pd.Series(_bloq_dd).sum()):
+                print(f"  [Empujes] {int(pd.Series(_bloq_dd).sum())} empujes bloqueados por dscto "
+                      f"realizado en destino ≥ {_dscto_max2}% (la línea rota rematada ahí)")
+            candidates = candidates[~(_bloq_mg | _bloq_dd)]
         else:
             candidates['margen_destino_pct'] = np.nan
+            candidates['dscto_destino_pct'] = np.nan
     else:
         candidates['margen_destino_pct'] = np.nan
+        candidates['dscto_destino_pct'] = np.nan
 
     # Prioridad
     candidates['es_marca_propia'] = candidates['marca'].isin(marcas_propias)
@@ -746,7 +782,7 @@ def build_empujes_cd(df_long, rotation_matrix, clusters_df, config=None):
     empujes_df = candidates[[
         'sku', 'descripcion', 'marca', 'linea', 'tienda',
         'stk', 'ume', 'stock_cd', 'rotacion_linea_tienda',
-        'vta_semanal_est', 'target_stock', 'margen_destino_pct',
+        'vta_semanal_est', 'target_stock', 'margen_destino_pct', 'dscto_destino_pct',
         'unidades_sugeridas', 'es_llenado_inicial', 'es_marca_propia', 'prioridad'
     ]].rename(columns={'stk': 'stk_actual_tienda'})
 

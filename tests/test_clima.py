@@ -31,3 +31,10 @@ if "margen_destino_pct" in emp.columns:
     assert (_con["margen_destino_pct"] >= 25).all(), \
         f"min margen destino: {_con['margen_destino_pct'].min()}"
     print("✅ test_margen_destino OK: ningún empuje a línea×tienda con margen < 25%")
+
+# ── Filtro descuento (2026-08-25, regla Majo 40%) ──
+if "dscto_destino_pct" in emp.columns:
+    _cd = emp[emp["dscto_destino_pct"].notna()]
+    assert (_cd["dscto_destino_pct"] < 40).all(), \
+        f"max dscto destino: {_cd['dscto_destino_pct'].max()}"
+    print("✅ test_dscto OK: ningún empuje hacia línea×tienda con dscto realizado ≥40%")

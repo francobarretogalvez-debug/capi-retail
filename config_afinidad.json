@@ -64,7 +64,9 @@
     "semanas_cobertura_target": 12,
     "priorizar_marcas_propias": true,
     "margen_min_empuje_destino": 25,
-    "_nota_margen": "2026-08-25 (Franco): no empujar a una tienda cuya rotación de la línea viene de vender rematado — margen realizado línea×tienda (mix ponderado por uds vendidas) debe ser ≥ este % para recibir empuje."
+    "_nota_margen": "2026-08-25 (Franco): no empujar a una tienda cuya rotación de la línea viene de vender rematado — margen realizado línea×tienda (mix ponderado por uds vendidas) debe ser ≥ este % para recibir empuje.",
+    "dscto_max_empuje": 40,
+    "_nota_dscto": "2026-08-25 (regla Majo, espejo de reposición): SKU con dscto ≥40% es liquidación — no se empuja aunque el margen aguante. Aplica también al dscto promedio ponderado de lo que la línea vendió en la tienda destino."
   },
   "marcas_propias": [
     "MARQUIS",
