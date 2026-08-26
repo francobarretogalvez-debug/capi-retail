@@ -5263,9 +5263,11 @@ elif nav_page == "🏪 Afinidad Producto×Plaza":
                     if _tienda_filt_emp != "Todas":
                         _emp_show = _emp_show[_emp_show['tienda'] == _tienda_filt_emp]
 
-                    st.caption("❄️ Filtro clima activo: líneas abrigadoras (GRUESO) no se "
-                               "sugieren hacia tiendas de calor (Iquitos, Pucallpa, Piura, "
-                               "Chiclayo) — editable en config_clima_tiendas.json.")
+                    st.caption("❄️ Filtro clima: líneas abrigadoras (GRUESO) no van a tiendas "
+                               "de calor (Iquitos, Pucallpa, Piura, Chiclayo). 💰 Filtro margen: "
+                               "no se empuja a tiendas cuya rotación de la línea viene de vender "
+                               "rematado (margen realizado línea×tienda < 25%). Ambos editables "
+                               "en config_clima_tiendas.json / config_afinidad.json.")
                     _emp_show['tienda_nombre'] = _emp_show['tienda'].map(lambda t: _STORE_NAMES_AF.get(t, t))
                     _emp_cols = ['marca', 'descripcion', 'tienda_nombre', 'stk_actual_tienda',
                                  'stock_cd', 'rotacion_linea_tienda']
@@ -5273,6 +5275,9 @@ elif nav_page == "🏪 Afinidad Producto×Plaza":
                     _has_cob = 'vta_semanal_est' in _emp_show.columns and 'target_stock' in _emp_show.columns
                     if _has_cob:
                         _emp_cols += ['vta_semanal_est', 'target_stock']
+                    _has_mg = 'margen_destino_pct' in _emp_show.columns
+                    if _has_mg:
+                        _emp_cols += ['margen_destino_pct']
                     _has_fill = 'es_llenado_inicial' in _emp_show.columns
                     _emp_cols += ['unidades_sugeridas']
                     if _has_fill:
@@ -5282,6 +5287,8 @@ elif nav_page == "🏪 Afinidad Producto×Plaza":
                     _emp_headers = ['Marca', 'Descripción', 'Tienda', 'Stk Tienda', 'Stk CD', 'Rot. %']
                     if _has_cob:
                         _emp_headers += ['Vta/Sem Est', 'Target 12s']
+                    if _has_mg:
+                        _emp_headers += ['Margen dest. %']
                     _emp_headers += ['Empujar']
                     if _has_fill:
                         _emp_headers += ['Llenado inicial']

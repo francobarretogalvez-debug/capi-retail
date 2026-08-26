@@ -23,3 +23,11 @@ for nombre, df, col in [("empujes", r["empujes_df"], "tienda"),
     viol = df[df["linea"].map(lambda l: cal.get(l, "NEUTRO") == "GRUESO") & df[col].isin(hot)]
     assert viol.empty, f"{nombre}: {len(viol)} GRUESO→calor"
 print("✅ test_clima OK: 0 sugerencias GRUESO hacia tiendas de calor")
+
+# ── Filtro margen destino (2026-08-25): rotación de remate no recibe empuje ──
+emp = r["empujes_df"]
+if "margen_destino_pct" in emp.columns:
+    _con = emp[emp["margen_destino_pct"].notna()]
+    assert (_con["margen_destino_pct"] >= 25).all(), \
+        f"min margen destino: {_con['margen_destino_pct'].min()}"
+    print("✅ test_margen_destino OK: ningún empuje a línea×tienda con margen < 25%")

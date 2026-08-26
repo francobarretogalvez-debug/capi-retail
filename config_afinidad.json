@@ -1,19 +1,35 @@
 {
   "tiendas_excluir": [
-    "TV PI", "FSF MAC LO", "ASIA", "VTAS CORP", "BTQ BBB",
-    "MAC LARCO", "MAC PLN", "EST CHI", "EST TRU", "EST VES",
-    "OPLN", "OSI", "TV"
+    "TV PI",
+    "FSF MAC LO",
+    "ASIA",
+    "VTAS CORP",
+    "BTQ BBB",
+    "MAC LARCO",
+    "MAC PLN",
+    "EST CHI",
+    "EST TRU",
+    "EST VES",
+    "OPLN",
+    "OSI",
+    "TV"
   ],
   "filtro_estacional": {
     "temporada_actual": "INVIERNO",
     "lineas_excluir_invierno": [
-      "CAMISAS M/C", "SHORTS", "TRAJES DE BANO"
+      "CAMISAS M/C",
+      "SHORTS",
+      "TRAJES DE BANO"
     ],
     "lineas_excluir_verano": [
-      "CASACAS", "POLERONES", "CHOMPAS", "POLOS M/L"
+      "CASACAS",
+      "POLERONES",
+      "CHOMPAS",
+      "POLOS M/L"
     ],
     "lineas_excluir_siempre": [
-      "OTROS", "REBATES"
+      "OTROS",
+      "REBATES"
     ],
     "nota_cortes": "Invierno=Mar-Ago. Verano=Sep-Feb. Verano->Invierno: líneas verano mueren desde 1-May. Invierno->Verano: líneas invierno venden avance Sep-Oct, mueren desde 1-Nov."
   },
@@ -46,10 +62,17 @@
     "min_stock_cd": 5,
     "max_empuje_por_tienda": 200,
     "semanas_cobertura_target": 12,
-    "priorizar_marcas_propias": true
+    "priorizar_marcas_propias": true,
+    "margen_min_empuje_destino": 25,
+    "_nota_margen": "2026-08-25 (Franco): no empujar a una tienda cuya rotación de la línea viene de vender rematado — margen realizado línea×tienda (mix ponderado por uds vendidas) debe ser ≥ este % para recibir empuje."
   },
   "marcas_propias": [
-    "MARQUIS", "NAVIGATA", "CACHAREL", "OSCAR DE LA RENTA",
-    "NAUTICA", "US POLO", "SPAVALDI"
+    "MARQUIS",
+    "NAVIGATA",
+    "CACHAREL",
+    "OSCAR DE LA RENTA",
+    "NAUTICA",
+    "US POLO",
+    "SPAVALDI"
   ]
 }

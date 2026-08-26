@@ -676,6 +676,32 @@ def build_empujes_cd(df_long, rotation_matrix, clusters_df, config=None):
                   f"({int(candidates.loc[_bloq, '_need'].sum())} uds evitadas)")
         candidates = candidates[~_bloq]
 
+    # ── Filtro margen destino (2026-08-25, pedido Franco): la rotación de una
+    # línea en una tienda puede venir de vender REMATADO (mix de SKUs en
+    # liquidación). Margen realizado línea×tienda = promedio del margen_pct de
+    # los SKUs, ponderado por unidades vendidas en ESA tienda. Si está por
+    # debajo del umbral, esa rotación no es demanda sana → no se empuja.
+    _mg_min = emp_config.get('margen_min_empuje_destino', 25)
+    if _mg_min and 'margen_pct' in df_long.columns:
+        _v = df_long[(df_long['vta'] > 0) & df_long['margen_pct'].notna()].copy()
+        if not _v.empty:
+            _v['_w'] = _v['vta'] * _v['margen_pct']
+            _g = _v.groupby(['linea', 'tienda']).agg(_ws=('_w', 'sum'), _vs=('vta', 'sum'))
+            _mg_lt = (_g['_ws'] / _g['_vs']).to_dict()
+            candidates['margen_destino_pct'] = [
+                _mg_lt.get((l, t)) for l, t in zip(candidates['linea'], candidates['tienda'])
+            ]
+            _bloq_mg = (candidates['margen_destino_pct'].notna()
+                        & (candidates['margen_destino_pct'] < _mg_min))
+            if int(_bloq_mg.sum()):
+                print(f"  [Empujes] {int(_bloq_mg.sum())} empujes bloqueados por margen destino "
+                      f"< {_mg_min}% (rotación de remate, no demanda sana)")
+            candidates = candidates[~_bloq_mg]
+        else:
+            candidates['margen_destino_pct'] = np.nan
+    else:
+        candidates['margen_destino_pct'] = np.nan
+
     # Prioridad
     candidates['es_marca_propia'] = candidates['marca'].isin(marcas_propias)
     candidates['prioridad'] = (
@@ -720,7 +746,7 @@ def build_empujes_cd(df_long, rotation_matrix, clusters_df, config=None):
     empujes_df = candidates[[
         'sku', 'descripcion', 'marca', 'linea', 'tienda',
         'stk', 'ume', 'stock_cd', 'rotacion_linea_tienda',
-        'vta_semanal_est', 'target_stock',
+        'vta_semanal_est', 'target_stock', 'margen_destino_pct',
         'unidades_sugeridas', 'es_llenado_inicial', 'es_marca_propia', 'prioridad'
     ]].rename(columns={'stk': 'stk_actual_tienda'})
 
