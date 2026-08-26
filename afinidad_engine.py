@@ -682,6 +682,8 @@ def build_empujes_cd(df_long, rotation_matrix, clusters_df, config=None):
     _dscto_max = emp_config.get('dscto_max_empuje', 40)
     if _dscto_max and 'dscto_pct' in df_long.columns:
         _dsc_sku = df_long.groupby('sku')['dscto_pct'].first()
+        # Dsctos negativos = devoluciones (Franco 2026-08-25): no se consideran
+        _dsc_sku = _dsc_sku.where(_dsc_sku >= 0)
         if _dsc_sku.notna().any() and _dsc_sku.max() <= 1.5:
             _dsc_sku = _dsc_sku * 100  # escala 0-1 → %
         candidates['dscto_sku_pct'] = candidates['sku'].map(_dsc_sku)
@@ -703,16 +705,23 @@ def build_empujes_cd(df_long, rotation_matrix, clusters_df, config=None):
         if not _v.empty:
             _v['_w'] = _v['vta'] * _v['margen_pct']
             if 'dscto_pct' in _v.columns:
-                _dsc_col = _v['dscto_pct']
+                # Dsctos negativos = devoluciones (Franco 2026-08-25): fuera del
+                # ponderado — ni al numerador ni al denominador (antes jalaban
+                # el promedio hacia abajo y una línea rematada se veía sana).
+                _dsc_col = _v['dscto_pct'].where(_v['dscto_pct'] >= 0)
                 if _dsc_col.notna().any() and _dsc_col.max() <= 1.5:
                     _dsc_col = _dsc_col * 100
-                _v['_wd'] = _v['vta'] * _dsc_col.fillna(0)
+                _v['_wd'] = _v['vta'] * _dsc_col
+                _v['_vd'] = _v['vta'].where(_dsc_col.notna())
             else:
                 _v['_wd'] = np.nan
+                _v['_vd'] = np.nan
             _g = _v.groupby(['linea', 'tienda']).agg(
-                _ws=('_w', 'sum'), _vs=('vta', 'sum'), _wd=('_wd', 'sum'))
+                _ws=('_w', 'sum'), _vs=('vta', 'sum'),
+                _wd=('_wd', 'sum'), _vd=('_vd', 'sum'))
             _mg_lt = (_g['_ws'] / _g['_vs']).to_dict()
-            _ds_lt = (_g['_wd'] / _g['_vs']).to_dict()
+            with np.errstate(divide='ignore', invalid='ignore'):
+                _ds_lt = (_g['_wd'] / _g['_vd']).to_dict()
             candidates['margen_destino_pct'] = [
                 _mg_lt.get((l, t)) for l, t in zip(candidates['linea'], candidates['tienda'])
             ]
