@@ -35,6 +35,21 @@ def _load_config():
     with open(path, 'r') as f:
         return json.load(f)
 
+def _load_tiendas_calor():
+    """Códigos de tienda clasificadas como CALOR (config_clima_tiendas.json,
+    en nombres completos → se traducen a códigos del Micro vía STORE_NAMES).
+    Si el config falta, set vacío = sin filtro (degrada sin romper)."""
+    path = os.path.join(_DIR, 'config_clima_tiendas.json')
+    try:
+        with open(path, 'r') as f:
+            nombres = set(json.load(f).get('tiendas_calor', []))
+        from transformar_profundidad import STORE_NAMES
+        codigos = {c for c, n in STORE_NAMES.items() if n in nombres}
+        return codigos | nombres  # acepta ambas formas por robustez
+    except (OSError, ValueError, ImportError):
+        return set()
+
+
 def _load_calorico():
     """Mapeo línea → categoría calórica (GRUESO/LIGERO/NEUTRO). Si el archivo
     no existe, todo cae a NEUTRO — la vista degrada sin romperse (fix
@@ -648,6 +663,19 @@ def build_empujes_cd(df_long, rotation_matrix, clusters_df, config=None):
     )
     candidates = candidates[candidates['_need'] > 0]
 
+    # ── Filtro clima (2026-08-25, pedido Franco): mercadería abrigadora
+    # (GRUESO en config_calorico) NO se empuja a tiendas de calor — el caso
+    # casacas→Iquitos que el llenado inicial generaba sin filtro.
+    _cal_map = _load_calorico()
+    _t_calor = _load_tiendas_calor()
+    if _t_calor and _cal_map:
+        _es_grueso = candidates['linea'].map(lambda l: _cal_map.get(l, 'NEUTRO') == 'GRUESO')
+        _bloq = _es_grueso & candidates['tienda'].isin(_t_calor)
+        if int(_bloq.sum()):
+            print(f"  [Empujes] {int(_bloq.sum())} empujes GRUESO bloqueados a tiendas de calor "
+                  f"({int(candidates.loc[_bloq, '_need'].sum())} uds evitadas)")
+        candidates = candidates[~_bloq]
+
     # Prioridad
     candidates['es_marca_propia'] = candidates['marca'].isin(marcas_propias)
     candidates['prioridad'] = (
@@ -766,6 +794,16 @@ def find_redistribution(df_long, rotation_matrix, clusters_df, config=None):
         columns={'tienda': 'tienda_destino', 'stk': 'stk_destino'}
     )
     candidates = candidates.merge(dest_stk, on=['sku', 'tienda_destino'], how='left')
+
+    # ── Filtro clima (2026-08-25): GRUESO tampoco se redistribuye a tiendas de calor ──
+    _cal_map_r = _load_calorico()
+    _t_calor_r = _load_tiendas_calor()
+    if _t_calor_r and _cal_map_r and 'linea' in candidates.columns:
+        _bloq_r = (candidates['linea'].map(lambda l: _cal_map_r.get(l, 'NEUTRO') == 'GRUESO')
+                   & candidates['tienda_destino'].isin(_t_calor_r))
+        if int(_bloq_r.sum()):
+            print(f"  [Redistribución] {int(_bloq_r.sum())} movimientos GRUESO bloqueados a tiendas de calor")
+        candidates = candidates[~_bloq_r]
     candidates['stk_destino'] = candidates['stk_destino'].fillna(0).astype(int)
 
     # Solo donde destino tiene poco stock

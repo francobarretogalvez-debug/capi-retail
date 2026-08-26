@@ -1,0 +1,6 @@
+{
+  "_descripcion": "Clima por tienda para filtrar sugerencias: las líneas GRUESO (config_calorico.json) NO se empujan ni redistribuyen hacia tiendas de calor.",
+  "_origen": "Pedido Franco 2026-08-25 tras detectar empujes de casacas a Iquitos (llenado inicial sin filtro de clima).",
+  "_nota_calibracion": "Lista inicial: selva (Iquitos, Pucallpa) + costa norte cálida (Piura, Chiclayo, Chiclayo 2). Franco valida/ajusta — editar aquí, nombres completos como en la UI.",
+  "tiendas_calor": ["Iquitos", "Pucallpa", "Piura", "Chiclayo", "Chiclayo 2"]
+}

@@ -5263,6 +5263,9 @@ elif nav_page == "🏪 Afinidad Producto×Plaza":
                     if _tienda_filt_emp != "Todas":
                         _emp_show = _emp_show[_emp_show['tienda'] == _tienda_filt_emp]
 
+                    st.caption("❄️ Filtro clima activo: líneas abrigadoras (GRUESO) no se "
+                               "sugieren hacia tiendas de calor (Iquitos, Pucallpa, Piura, "
+                               "Chiclayo) — editable en config_clima_tiendas.json.")
                     _emp_show['tienda_nombre'] = _emp_show['tienda'].map(lambda t: _STORE_NAMES_AF.get(t, t))
                     _emp_cols = ['marca', 'descripcion', 'tienda_nombre', 'stk_actual_tienda',
                                  'stock_cd', 'rotacion_linea_tienda']
