@@ -96,9 +96,9 @@ st.set_page_config(
 )
 
 # ── Paleta de colores Capi (Clean Corporate: navy + light) ──
-TEAL_600 = "#1B4F72"     # Navy-600 — primary accent
-TEAL_700 = "#154360"     # Navy-700 — hover/active
-TEAL_50  = "#EBF2FA"     # Navy-50  — light accent bg
+TEAL_600 = "#6D3B8E"     # Morado Ripley — primary accent (Franco 2026-08-26)
+TEAL_700 = "#572E73"     # Morado oscuro — hover/active
+TEAL_50  = "#F3EEF8"     # Morado-50 — light accent bg
 SLATE_900 = "#1F2937"    # Gray-800 — headings, strong text
 SLATE_800 = "#374151"    # Gray-700 — secondary strong
 SLATE_700 = "#4B5563"    # Gray-600 — medium text
