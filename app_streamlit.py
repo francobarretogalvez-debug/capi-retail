@@ -2303,6 +2303,10 @@ elif nav_page == "🩺 Salud del Stock":
                             'capital_total': 0.0, 'score_cobertura': 0.0,
                             'score_quiebre': 0.0, 'score_sobrestock': 0.0,
                             'score_eficiencia': 0.0, 'score_margen': 0.0,
+                            'pct_optimo_alto': 0.0, 'pct_quiebre': 0.0,
+                            'pct_exceso': 0.0, 'capital_parado': 0.0,
+                            'margen_pct': 0.0, 'n_con_stock': 0,
+                            'venta_en_riesgo': 0.0, 'rotacion': 0.0,
                         }])
                     _g = _hs_global.iloc[0]
                     _hs_score = float(_g['health_score'])
@@ -6086,8 +6090,14 @@ if nav_page == "📲 Productos Venta Cero":
                                 ascending=[True, False]).copy()
         _vp80['pct_acum_tienda'] = (_vp80.groupby('tienda')['stock_valor_costo']
                                     .transform(lambda x: x.cumsum() / x.sum()))
+        # TOP 80% = el acumulado ANTES de este SKU no llegaba a 80% (así el
+        # primer SKU de cada tienda SIEMPRE es TOP aunque él solo pese >80% —
+        # bug cazado en auditoría C1 2026-08-26)
+        _vp80['_share'] = (_vp80.groupby('tienda')['stock_valor_costo']
+                           .transform(lambda x: x / x.sum()))
         _vp80['top_80'] = np.where(
-            _vp80['pct_acum_tienda'] <= 0.80 + 1e-9, '⭐ TOP 80%', '')
+            (_vp80['pct_acum_tienda'] - _vp80['_share']) < 0.80, '⭐ TOP 80%', '')
+        _vp80 = _vp80.drop(columns='_share')
         _vp80_cols = [c for c in ['tienda', 'marca', 'sku', 'nombre', 'categoria',
                                   'stock_total', 'stock_valor_costo', 'pct_acum_tienda',
                                   'top_80', 'pct_descuento', 'tipo_evento', 'accion']
