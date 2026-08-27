@@ -678,37 +678,18 @@ with st.sidebar:
 
         # ── GESTIÓN DE MARCAS PROPIAS ──
         # Mismo cluster que terceras, filtrado a las 7 marcas propias.
+        # ── GESTIÓN DE MARCAS (fusión C2 2026-08-26: 8 vistas → 4 con
+        #    selector de universo Propias/Terceras/Todas — decisión Franco) ──
         if not _DEMO_MODE:
-            st.markdown('<div class="sidebar-section-label">GESTIÓN DE MARCAS PROPIAS</div>', unsafe_allow_html=True)
-            _NAV_PROPIAS = [
-                ("📦", "Reposición Propias"),
-                ("🔄", "Transferencias Propias"),
-                ("💰", "Gestión de Precios Propias"),
-                ("🚚", "Predistribución Propias"),
-            ]
-            for _icon, _label in _NAV_PROPIAS:
-                _full = f"{_icon} {_label}"
-                _is_active = st.session_state["nav_page"] == _full
-                if st.button(
-                    _full, key=f"nav_{_label}",
-                    use_container_width=True,
-                    type="primary" if _is_active else "secondary",
-                ):
-                    st.session_state["nav_page"] = _full
-                    st.rerun()
-
-        # ── GESTIÓN DE MARCAS TERCERAS ──
-        # Cluster end-to-end de terceras: detectar (Agente) → reponer/transferir
-        # (filtrado a las 10 marcas) → pricing por pirámide de antigüedad.
-        if not _DEMO_MODE:
-            st.markdown('<div class="sidebar-section-label">GESTIÓN DE MARCAS TERCERAS</div>', unsafe_allow_html=True)
-            _NAV_TERCERAS = [
+            st.markdown('<div class="sidebar-section-label">GESTIÓN DE MARCAS</div>', unsafe_allow_html=True)
+            _NAV_MARCAS = [
+                ("📦", "Reposición"),
+                ("🔄", "Transferencias"),
+                ("💰", "Gestión de Precios"),
+                ("🚚", "Predistribución"),
                 ("🤝", "Agente Terceras"),
-                ("📦", "Reposición Terceras"),
-                ("🔄", "Transferencias Terceras"),
-                ("💰", "Gestión de Precios Terceras"),
             ]
-            for _icon, _label in _NAV_TERCERAS:
+            for _icon, _label in _NAV_MARCAS:
                 _full = f"{_icon} {_label}"
                 _is_active = st.session_state["nav_page"] == _full
                 if st.button(
@@ -2796,7 +2777,7 @@ elif nav_page == "🩺 Salud del Stock":
 #  KPIs: % SKUs críticos, # tiendas cob baja, capital atrapado
 # ═══════════════════════════════════════════════════════════════
 
-elif nav_page == "📦 Reposición":
+elif nav_page == "📦 Reposición (clásica)":
 
     # ── KPIs específicos de la vista ──
     _n_critico = s.get('n_critico', 0)
@@ -3941,31 +3922,34 @@ elif nav_page == "📈 Cobertura x Tienda":
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                            use_container_width=True, key="dl_cob_tienda",
                            help=f"2 hojas: resumen por tienda + detalle de SKUs por tienda ordenados por cobertura ({_cbt_extremo}) para identificar qué atacar")
-
-
 # ═══════════════════════════════════════════════════════════════
-#  GESTIÓN DE MARCAS PROPIAS — reposición / transferencias / precios /
-#  predistribución filtrados a las 7 marcas propias.
+#  🤝 AGENTE TERCERAS — primer agente de Capi
+#  Detecta oportunidades con marcas terceras y genera BORRADORES de
+#  correo a proveedores. Nunca envía solo: Franco aprueba y envía.
 # ═══════════════════════════════════════════════════════════════
 
-elif nav_page == "📦 Reposición Propias":
-    st.markdown(f'<div class="section-header"><h3>📦 Reposición Propias</h3><span class="live-badge">MARCAS PROPIAS</span></div>', unsafe_allow_html=True)
 
-    # Paquete de trabajo: todo el análisis de propias en un Excel
-    st.download_button(
-        "📦 Descargar TODO el análisis de Marcas Propias (.xlsx)",
-        data=_build_excel_propias(df_cob, df_rep, df_trans, df_gaps_dist, df_retenidos_cd),
-        file_name="Capi_Analisis_Marcas_Propias.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True, key="dl_pack_propias",
-        help="5 pestañas: Reposición · Transferencias · Precios · Predist Gaps · Retenidos CD",
-    )
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    _MARCAS_P = agente_terceras.MARCAS_PROPIAS_SET
-    _rp = df_rep[df_rep['marca'].str.upper().str.strip().isin(_MARCAS_P)].copy() if not df_rep.empty and 'marca' in df_rep.columns else pd.DataFrame()
+# ─── GESTIÓN DE MARCAS: vistas unificadas con selector de universo ────
+# (fusión C2 2026-08-26, decisión Franco: 8 vistas eran 4 pares idénticos)
+
+elif nav_page == "📦 Reposición":
+    st.markdown(f'<div class="section-header"><h3>📦 Reposición</h3><span class="live-badge">POR MARCA</span></div>', unsafe_allow_html=True)
+    _uni_rp = st.radio("Universo", ["Propias", "Terceras", "Todas"], horizontal=True, key="uni_repo")
+    _SET_P = {m.upper() for m in agente_terceras.MARCAS_PROPIAS_SET}
+    _SET_T = {m.upper() for m in agente_terceras.MARCAS_AGENTE}
+    _set_rp = _SET_P if _uni_rp == "Propias" else _SET_T if _uni_rp == "Terceras" else (_SET_P | _SET_T)
+    if _uni_rp == "Propias":
+        st.download_button(
+            "📦 Descargar TODO el análisis de Marcas Propias (.xlsx)",
+            data=_build_excel_propias(df_cob, df_rep, df_trans, df_gaps_dist, df_retenidos_cd),
+            file_name="Capi_Analisis_Marcas_Propias.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True, key="dl_pack_propias",
+            help="5 pestañas: Reposición · Transferencias · Precios · Predist Gaps · Retenidos CD")
+    _rp = df_rep[df_rep['marca'].str.upper().str.strip().isin(_set_rp)].copy() if not df_rep.empty and 'marca' in df_rep.columns else pd.DataFrame()
     if _rp.empty:
-        st.info("No hay reposiciones sugeridas para las marcas propias con la base actual.")
+        st.info(f"No hay reposiciones sugeridas para marcas {_uni_rp.lower()} con la base actual.")
     else:
         _rp = _rp[_rp['a_reponer'] > 0] if 'a_reponer' in _rp.columns else _rp
         if 'sku' in df_cob.columns:
@@ -3974,7 +3958,7 @@ elif nav_page == "📦 Reposición Propias":
                 _rp['margen_efectivo'] = (_rp['sku'].map(_mgp).fillna(0) * 100).round(1)
             if 'edad_semanas' in df_cob.columns:
                 _rp['edad'] = _rp['sku'].map(df_cob.groupby('sku')['edad_semanas'].max())
-        st.caption(f"{len(_rp):,} líneas en {_rp['marca'].nunique()} marcas propias · {int(_rp['a_reponer'].sum()):,} uds a reponer")
+        st.caption(f"{len(_rp):,} líneas en {_rp['marca'].nunique()} marcas · {int(_rp['a_reponer'].sum()):,} uds a reponer")
         _rp_sel = st.selectbox("Marca", ["Todas"] + sorted(_rp['marca'].unique().tolist()), key="rp_marca")
         _rp_v = _rp if _rp_sel == "Todas" else _rp[_rp['marca'] == _rp_sel]
         _rp_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'tienda', 'edad', 'stock_actual',
@@ -3984,33 +3968,35 @@ elif nav_page == "📦 Reposición Propias":
             'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea', 'edad': 'Edad (sem)',
             'tienda': 'Tienda', 'stock_actual': 'Stock', 'prom_vta_sem': 'Vta/sem', 'cobertura_actual': 'Cob (sem)',
             'a_reponer': 'A reponer (uds)', 'cob_post_rep': 'Cob post', 'stock_cd': 'Stock CD',
-            'pct_descuento': 'Dscto', 'margen_efectivo': 'Margen efect. %', 'urgencia': 'Urgencia',
-        })
+            'pct_descuento': 'Dscto', 'margen_efectivo': 'Margen efect. %', 'urgencia': 'Urgencia'})
         st.dataframe(_rp_disp.style.format({'Vta/sem': '{:.1f}', 'Cob (sem)': '{:.1f}', 'Cob post': '{:.1f}', 'Dscto': '{:.0%}'}, na_rep="—"),
                      use_container_width=True, hide_index=True, height=440)
         _rp_buf = io.BytesIO()
         with pd.ExcelWriter(_rp_buf, engine='openpyxl') as _w:
-            _rp_v[_rp_cols].to_excel(_w, sheet_name='Reposicion Propias', index=False)
+            _rp_v[_rp_cols].to_excel(_w, sheet_name=f'Reposicion {_uni_rp}', index=False)
         _rp_buf.seek(0)
-        st.download_button("📥 Descargar reposición propias (.xlsx)", data=_rp_buf.getvalue(),
-                           file_name="Capi_Reposicion_Propias.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_repo_propias")
+        st.download_button(f"📥 Descargar reposición {_uni_rp.lower()} (.xlsx)", data=_rp_buf.getvalue(),
+                           file_name=f"Capi_Reposicion_{_uni_rp}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_repo_uni")
 
 
-elif nav_page == "🔄 Transferencias Propias":
-    st.markdown(f'<div class="section-header"><h3>🔄 Transferencias Propias</h3><span class="live-badge">MARCAS PROPIAS</span></div>', unsafe_allow_html=True)
-    _MARCAS_P = agente_terceras.MARCAS_PROPIAS_SET
+elif nav_page == "🔄 Transferencias":
+    st.markdown(f'<div class="section-header"><h3>🔄 Transferencias</h3><span class="live-badge">POR MARCA</span></div>', unsafe_allow_html=True)
+    _uni_tr = st.radio("Universo", ["Propias", "Terceras", "Todas"], horizontal=True, key="uni_trans")
+    _SET_P = {m.upper() for m in agente_terceras.MARCAS_PROPIAS_SET}
+    _SET_T = {m.upper() for m in agente_terceras.MARCAS_AGENTE}
+    _set_tr = _SET_P if _uni_tr == "Propias" else _SET_T if _uni_tr == "Terceras" else (_SET_P | _SET_T)
     if df_trans.empty or 'sku' not in df_trans.columns:
         st.info("No hay transferencias sugeridas con la base actual.")
     else:
-        _s2m_p = dict(zip(df_cob['sku'], df_cob['marca'].str.upper().str.strip())) if 'sku' in df_cob.columns and 'marca' in df_cob.columns else {}
+        _s2m = dict(zip(df_cob['sku'], df_cob['marca'].str.upper().str.strip())) if 'sku' in df_cob.columns and 'marca' in df_cob.columns else {}
         _tp = df_trans.copy()
-        _tp['_marca'] = _tp['sku'].map(_s2m_p)
-        _tp = _tp[_tp['_marca'].isin(_MARCAS_P)]
+        _tp['_marca'] = _tp['sku'].map(_s2m)
+        _tp = _tp[_tp['_marca'].isin(_set_tr)]
         if _tp.empty:
-            st.info("No hay transferencias sugeridas para las marcas propias con la base actual.")
+            st.info(f"No hay transferencias sugeridas para marcas {_uni_tr.lower()} con la base actual.")
         else:
-            st.caption(f"{len(_tp):,} movimientos en marcas propias · {int(_tp['uds_transferir'].sum()):,} unidades")
+            st.caption(f"{len(_tp):,} movimientos · {int(_tp['uds_transferir'].sum()):,} unidades")
             if 'ganancia_esperada' in _tp.columns and _tp['ganancia_esperada'].notna().any():
                 _rent = _tp[_tp['ganancia_esperada'] > 0]
                 _k1, _k2, _k3 = st.columns(3)
@@ -4018,7 +4004,7 @@ elif nav_page == "🔄 Transferencias Propias":
                 _k2.metric("Movimientos rentables", f"{len(_rent):,} de {len(_tp):,}")
                 _k3.metric("Pérdida evitada (no rentables)",
                            f"S/ {abs(_tp.loc[_tp['ganancia_esperada'] <= 0, 'ganancia_esperada'].sum()):,.0f}")
-                if st.toggle("Mostrar solo rentables", value=True, key="solo_rent_propias"):
+                if st.toggle("Mostrar solo rentables", value=True, key="solo_rent_uni"):
                     _tp = _rent
             _tp_cols = [c for c in ['_marca', 'sku', 'nombre', 'tienda_origen', 'tienda_destino', 'uds_transferir',
                                     'ganancia_esperada', 'veredicto', 'fuente_velocidad',
@@ -4028,25 +4014,28 @@ elif nav_page == "🔄 Transferencias Propias":
                 'tienda_destino': 'Tienda Destino', 'uds_transferir': 'Uds a Transferir',
                 'cob_origen_pre': 'Cob Origen (pre)', 'cob_destino_pre': 'Cob Destino (pre)',
                 'cob_origen_post': 'Cob Origen (post)', 'cob_destino_post': 'Cob Destino (post)', 'motivo': 'Motivo',
-                'ganancia_esperada': 'Ganancia S/', 'veredicto': 'Veredicto', 'fuente_velocidad': 'Velocidad',
-            })
+                'ganancia_esperada': 'Ganancia S/', 'veredicto': 'Veredicto', 'fuente_velocidad': 'Velocidad'})
             st.dataframe(_tp_disp.style.format({'Cob Origen (pre)': '{:.1f}', 'Cob Destino (pre)': '{:.1f}', 'Cob Origen (post)': '{:.1f}', 'Cob Destino (post)': '{:.1f}', 'Ganancia S/': 'S/ {:,.0f}'}, na_rep="—"),
                          use_container_width=True, hide_index=True, height=440)
             _tp_buf = io.BytesIO()
             with pd.ExcelWriter(_tp_buf, engine='openpyxl') as _w:
-                _tp[_tp_cols].to_excel(_w, sheet_name='Transferencias Propias', index=False)
+                _tp[_tp_cols].to_excel(_w, sheet_name=f'Transferencias {_uni_tr}', index=False)
             _tp_buf.seek(0)
-            st.download_button("📥 Descargar transferencias propias (.xlsx)", data=_tp_buf.getvalue(),
-                               file_name="Capi_Transferencias_Propias.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_trans_propias")
+            st.download_button(f"📥 Descargar transferencias {_uni_tr.lower()} (.xlsx)", data=_tp_buf.getvalue(),
+                               file_name=f"Capi_Transferencias_{_uni_tr}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_trans_uni")
 
 
-elif nav_page == "💰 Gestión de Precios Propias":
-    st.markdown(f'<div class="section-header"><h3>💰 Gestión de Precios Propias</h3><span class="live-badge">MARCAS PROPIAS</span></div>', unsafe_allow_html=True)
-    st.caption("Descuento sugerido por antigüedad (misma pirámide), aplicado a las 7 marcas propias.")
-    _gpp = agente_terceras.sugerencias_precio_terceras(df_cob, marcas=agente_terceras.MARCAS_PROPIAS_SET)
+elif nav_page == "💰 Gestión de Precios":
+    st.markdown(f'<div class="section-header"><h3>💰 Gestión de Precios</h3><span class="live-badge">POR MARCA</span></div>', unsafe_allow_html=True)
+    st.caption("Descuento sugerido por antigüedad (pirámide oficial), con gap vs el descuento vigente.")
+    _uni_gp = st.radio("Universo", ["Propias", "Terceras", "Todas"], horizontal=True, key="uni_precios")
+    _SET_P = {m.upper() for m in agente_terceras.MARCAS_PROPIAS_SET}
+    _SET_T = {m.upper() for m in agente_terceras.MARCAS_AGENTE}
+    _set_gp = _SET_P if _uni_gp == "Propias" else _SET_T if _uni_gp == "Terceras" else (_SET_P | _SET_T)
+    _gpp = agente_terceras.sugerencias_precio_terceras(df_cob, marcas=_set_gp)
     if _gpp.empty:
-        st.info("No hay SKUs de marcas propias para analizar con la base actual.")
+        st.info(f"No hay SKUs de marcas {_uni_gp.lower()} para analizar con la base actual.")
     else:
         _gpp_subir = int((_gpp['gap'] >= 0.05).sum())
         _gpp_sobre = int((_gpp['gap'] <= -0.05).sum())
@@ -4062,243 +4051,34 @@ elif nav_page == "💰 Gestión de Precios Propias":
             <div style="font-size:0.75rem; color:var(--capi-text2);">Alineados</div>
             <div style="font-size:1.5rem; font-weight:700; color:#059669;">{_gpp_ok:,}</div></div>""", unsafe_allow_html=True)
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-        _gpp_filtro = st.radio("Ver", ["Solo a subir descuento", "Todos"], horizontal=True, key="gpp_filtro")
+        _gpp_filtro = st.radio("Ver", ["Solo a subir descuento", "Todos"], horizontal=True, key="gpp_filtro_uni")
         _gpp_v = _gpp[_gpp['gap'] >= 0.05] if _gpp_filtro.startswith("Solo") else _gpp
-        _gpp_sel = st.selectbox("Marca", ["Todas"] + sorted(_gpp_v['marca'].unique().tolist()), key="gpp_marca")
+        _gpp_sel = st.selectbox("Marca", ["Todas"] + sorted(_gpp_v['marca'].unique().tolist()), key="gpp_marca_uni")
         if _gpp_sel != "Todas":
             _gpp_v = _gpp_v[_gpp_v['marca'] == _gpp_sel]
         _gpp_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'edad', 'dscto_actual', 'dscto_sugerido', 'tipo', 'accion', 'capital'] if c in _gpp_v.columns]
         _gpp_disp = _gpp_v[_gpp_cols].rename(columns={
             'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea', 'edad': 'Edad (sem)',
-            'dscto_actual': 'Dscto actual', 'dscto_sugerido': 'Dscto sugerido', 'tipo': 'Tipo', 'accion': 'Acción', 'capital': 'Capital S/',
-        })
+            'dscto_actual': 'Dscto actual', 'dscto_sugerido': 'Dscto sugerido', 'tipo': 'Tipo', 'accion': 'Acción', 'capital': 'Capital S/'})
         st.dataframe(_gpp_disp.head(300).style.format({'Dscto actual': '{:.0%}', 'Dscto sugerido': '{:.0%}', 'Capital S/': 'S/ {:,.0f}'}, na_rep="—"),
                      use_container_width=True, hide_index=True, height=440)
         _gpp_buf = io.BytesIO()
         with pd.ExcelWriter(_gpp_buf, engine='openpyxl') as _w:
-            _gpp_v[_gpp_cols].to_excel(_w, sheet_name='Precios Propias', index=False)
+            _gpp_v[_gpp_cols].to_excel(_w, sheet_name=f'Precios {_uni_gp}', index=False)
         _gpp_buf.seek(0)
-        st.download_button("📥 Descargar sugerencias de precio propias (.xlsx)", data=_gpp_buf.getvalue(),
-                           file_name="Capi_Precios_Propias.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_precios_propias")
+        st.download_button(f"📥 Descargar sugerencias de precio {_uni_gp.lower()} (.xlsx)", data=_gpp_buf.getvalue(),
+                           file_name=f"Capi_Precios_{_uni_gp}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_precios_uni")
 
-
-elif nav_page == "🚚 Predistribución Propias":
-    st.markdown(f'<div class="section-header"><h3>🚚 Predistribución Propias</h3><span class="live-badge">MARCAS PROPIAS</span></div>', unsafe_allow_html=True)
-    st.caption("Gaps de distribución (tiendas faltantes) y stock retenido en CD, filtrado a marcas propias.")
-    _MARCAS_P = agente_terceras.MARCAS_PROPIAS_SET
-    _pp_gaps = df_gaps_dist[df_gaps_dist['marca'].str.upper().str.strip().isin(_MARCAS_P)].copy() if not df_gaps_dist.empty and 'marca' in df_gaps_dist.columns else pd.DataFrame()
-    # Limpieza (Franco): un gap solo es accionable si hay stock en CD para enviar
-    # y el producto es reciente (≤8 sem); lo demás es ruido / ya pasó su momento.
-    if not _pp_gaps.empty:
-        if 'stock_cd' in _pp_gaps.columns:
-            _pp_gaps = _pp_gaps[_pp_gaps['stock_cd'] > 0]
-        if 'edad_semanas' in _pp_gaps.columns:
-            _pp_gaps = _pp_gaps[_pp_gaps['edad_semanas'].fillna(999) <= 8]
-    _pp_ret = df_retenidos_cd[df_retenidos_cd['marca'].str.upper().str.strip().isin(_MARCAS_P)].copy() if not df_retenidos_cd.empty and 'marca' in df_retenidos_cd.columns else pd.DataFrame()
-    if _pp_gaps.empty and _pp_ret.empty:
-        st.info("No hay datos de predistribución para marcas propias con la base actual.")
-    else:
-        if not _pp_gaps.empty:
-            st.markdown("##### Gaps de distribución — SKUs que faltan en tiendas")
-            _ppg_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'edad_semanas', 'stock_cd',
-                                     'n_tiendas_esperadas', 'n_tiendas_presentes', 'n_tiendas_faltantes', 'pct_cobertura_dist'] if c in _pp_gaps.columns]
-            st.dataframe(_pp_gaps[_ppg_cols].rename(columns={
-                'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea', 'edad_semanas': 'Edad (sem)',
-                'stock_cd': 'Stock CD', 'n_tiendas_esperadas': 'Tiendas esperadas', 'n_tiendas_presentes': 'Tiendas presentes',
-                'n_tiendas_faltantes': 'Tiendas faltantes', 'pct_cobertura_dist': '% cobertura dist',
-            }).style.format({'% cobertura dist': '{:.0%}'}, na_rep="—"), use_container_width=True, hide_index=True, height=400)
-        if not _pp_ret.empty:
-            st.markdown("##### Stock retenido en CD")
-            st.dataframe(_pp_ret.rename(columns={'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto'}),
-                         use_container_width=True, hide_index=True, height=300)
-        _pp_buf = io.BytesIO()
-        with pd.ExcelWriter(_pp_buf, engine='openpyxl') as _w:
-            if not _pp_gaps.empty: _pp_gaps.to_excel(_w, sheet_name='Gaps Distribucion', index=False)
-            if not _pp_ret.empty: _pp_ret.to_excel(_w, sheet_name='Retenidos CD', index=False)
-        _pp_buf.seek(0)
-        st.download_button("📥 Descargar predistribución propias (.xlsx)", data=_pp_buf.getvalue(),
-                           file_name="Capi_Predistribucion_Propias.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_predist_propias")
-
-
-# ═══════════════════════════════════════════════════════════════
-#  📦 REPOSICIÓN TERCERAS — plan de reposición filtrado a las 10 marcas
-# ═══════════════════════════════════════════════════════════════
-
-elif nav_page == "📦 Reposición Terceras":
-    st.markdown(f'<div class="section-header"><h3>📦 Reposición Terceras</h3><span class="live-badge">MARCAS TERCERAS</span></div>', unsafe_allow_html=True)
-    _MARCAS_T = agente_terceras.MARCAS_AGENTE
-    _rt = df_rep[df_rep['marca'].str.upper().str.strip().isin(_MARCAS_T)].copy() if not df_rep.empty and 'marca' in df_rep.columns else pd.DataFrame()
-    if _rt.empty:
-        st.info("No hay reposiciones sugeridas para las marcas terceras con la base actual.")
-    else:
-        _rt = _rt[_rt['a_reponer'] > 0] if 'a_reponer' in _rt.columns else _rt
-        # Cruzar margen efectivo y antigüedad por SKU (desde df_cob) — para que el
-        # proveedor pueda filtrar qué reponer según rentabilidad y edad del producto.
-        if 'sku' in df_cob.columns:
-            if 'margen_efectivo' in df_cob.columns:
-                _mg = df_cob.drop_duplicates('sku').set_index('sku')['margen_efectivo']
-                _rt['margen_efectivo'] = (_rt['sku'].map(_mg).fillna(0) * 100).round(1)
-            if 'edad_semanas' in df_cob.columns:
-                _ed = df_cob.groupby('sku')['edad_semanas'].max()
-                _rt['edad'] = _rt['sku'].map(_ed)
-        st.caption(f"{len(_rt):,} líneas de reposición en {_rt['marca'].nunique()} marcas terceras · "
-                   f"{int(_rt['a_reponer'].sum()):,} unidades a reponer")
-        _rt_marca = ["Todas"] + sorted(_rt['marca'].unique().tolist())
-        _rt_sel = st.selectbox("Marca", _rt_marca, key="rt_marca")
-        _rt_v = _rt if _rt_sel == "Todas" else _rt[_rt['marca'] == _rt_sel]
-        _rt_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'tienda', 'edad',
-                                'stock_actual', 'prom_vta_sem', 'cobertura_actual', 'a_reponer',
-                                'cob_post_rep', 'stock_cd', 'pct_descuento', 'margen_efectivo',
-                                'urgencia', 'requiere_proveedor'] if c in _rt_v.columns]
-        _rt_disp = _rt_v[_rt_cols].rename(columns={
-            'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea',
-            'edad': 'Edad (sem)', 'tienda': 'Tienda', 'stock_actual': 'Stock', 'prom_vta_sem': 'Vta/sem',
-            'cobertura_actual': 'Cob (sem)', 'a_reponer': 'A reponer (uds)',
-            'cob_post_rep': 'Cob post', 'stock_cd': 'Stock CD', 'pct_descuento': 'Dscto',
-            'margen_efectivo': 'Margen efect. %', 'urgencia': 'Urgencia',
-            'requiere_proveedor': 'Req. proveedor',
-        })
-        st.dataframe(_rt_disp.style.format({
-            'Vta/sem': '{:.1f}', 'Cob (sem)': '{:.1f}', 'Cob post': '{:.1f}', 'Dscto': '{:.0%}',
-        }, na_rep="—"), use_container_width=True, hide_index=True, height=440)
-        _rt_buf = io.BytesIO()
-        with pd.ExcelWriter(_rt_buf, engine='openpyxl') as _w:
-            _rt_v[_rt_cols].to_excel(_w, sheet_name='Reposicion Terceras', index=False)
-        _rt_buf.seek(0)
-        st.download_button("📥 Descargar reposición terceras (.xlsx)", data=_rt_buf.getvalue(),
-                           file_name="Capi_Reposicion_Terceras.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           key="dl_repo_terceras")
-
-
-# ═══════════════════════════════════════════════════════════════
-#  🔄 TRANSFERENCIAS TERCERAS — transferencias filtradas a las 10 marcas
-# ═══════════════════════════════════════════════════════════════
-
-elif nav_page == "🔄 Transferencias Terceras":
-    st.markdown(f'<div class="section-header"><h3>🔄 Transferencias Terceras</h3><span class="live-badge">MARCAS TERCERAS</span></div>', unsafe_allow_html=True)
-    _MARCAS_T = agente_terceras.MARCAS_AGENTE
-    # df_trans no trae 'marca' → cruzar por sku con df_cob
-    if df_trans.empty or 'sku' not in df_trans.columns:
-        st.info("No hay transferencias sugeridas con la base actual.")
-    else:
-        _sku2marca = {}
-        if 'sku' in df_cob.columns and 'marca' in df_cob.columns:
-            _sku2marca = dict(zip(df_cob['sku'], df_cob['marca'].str.upper().str.strip()))
-        _tt = df_trans.copy()
-        _tt['_marca'] = _tt['sku'].map(_sku2marca)
-        _tt = _tt[_tt['_marca'].isin(_MARCAS_T)]
-        if _tt.empty:
-            st.info("No hay transferencias sugeridas para las marcas terceras con la base actual.")
-        else:
-            st.caption(f"{len(_tt):,} movimientos en marcas terceras · {int(_tt['uds_transferir'].sum()):,} unidades")
-            if 'ganancia_esperada' in _tt.columns and _tt['ganancia_esperada'].notna().any():
-                _rent = _tt[_tt['ganancia_esperada'] > 0]
-                _k1, _k2, _k3 = st.columns(3)
-                _k1.metric("Ganancia neta del plan (rentables)", f"S/ {_rent['ganancia_esperada'].sum():,.0f}")
-                _k2.metric("Movimientos rentables", f"{len(_rent):,} de {len(_tt):,}")
-                _k3.metric("Pérdida evitada (no rentables)",
-                           f"S/ {abs(_tt.loc[_tt['ganancia_esperada'] <= 0, 'ganancia_esperada'].sum()):,.0f}")
-                if st.toggle("Mostrar solo rentables", value=True, key="solo_rent_terceras"):
-                    _tt = _rent
-            _tt_cols = [c for c in ['_marca', 'sku', 'nombre', 'tienda_origen', 'tienda_destino',
-                                    'uds_transferir', 'ganancia_esperada', 'veredicto',
-                                    'fuente_velocidad', 'cob_origen_pre', 'cob_destino_pre',
-                                    'cob_origen_post', 'cob_destino_post', 'motivo'] if c in _tt.columns]
-            _tt_disp = _tt[_tt_cols].rename(columns={
-                '_marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto',
-                'tienda_origen': 'Tienda Origen', 'tienda_destino': 'Tienda Destino',
-                'uds_transferir': 'Uds a Transferir', 'cob_origen_pre': 'Cob Origen (pre)',
-                'cob_destino_pre': 'Cob Destino (pre)', 'cob_origen_post': 'Cob Origen (post)',
-                'cob_destino_post': 'Cob Destino (post)', 'motivo': 'Motivo',
-                'ganancia_esperada': 'Ganancia S/', 'veredicto': 'Veredicto', 'fuente_velocidad': 'Velocidad',
-            })
-            st.dataframe(_tt_disp.style.format({
-                'Cob Origen (pre)': '{:.1f}', 'Cob Destino (pre)': '{:.1f}',
-                'Cob Origen (post)': '{:.1f}', 'Cob Destino (post)': '{:.1f}',
-                'Ganancia S/': 'S/ {:,.0f}',
-            }, na_rep="—"), use_container_width=True, hide_index=True, height=440)
-            _tt_buf = io.BytesIO()
-            with pd.ExcelWriter(_tt_buf, engine='openpyxl') as _w:
-                _tt[_tt_cols].to_excel(_w, sheet_name='Transferencias Terceras', index=False)
-            _tt_buf.seek(0)
-            st.download_button("📥 Descargar transferencias terceras (.xlsx)", data=_tt_buf.getvalue(),
-                               file_name="Capi_Transferencias_Terceras.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                               key="dl_trans_terceras")
-
-
-# ═══════════════════════════════════════════════════════════════
-#  💰 GESTIÓN DE PRECIOS TERCERAS — pirámide de descuentos por antigüedad
-# ═══════════════════════════════════════════════════════════════
-
-elif nav_page == "💰 Gestión de Precios Terceras":
-    st.markdown(f'<div class="section-header"><h3>💰 Gestión de Precios Terceras</h3><span class="live-badge">MARCAS TERCERAS</span></div>', unsafe_allow_html=True)
-    st.caption("Descuento sugerido por antigüedad (pirámide), igual para las 10 marcas terceras. "
-               "Compara el descuento actual de cada SKU con el que le tocaría por su edad.")
-    _gp = agente_terceras.sugerencias_precio_terceras(df_cob)
-    if _gp.empty:
-        st.info("No hay SKUs de marcas terceras para analizar con la base actual.")
-    else:
-        _gp_subir = int((_gp['gap'] >= 0.05).sum())
-        _gp_sobre = int((_gp['gap'] <= -0.05).sum())
-        _gp_ok = int(len(_gp) - _gp_subir - _gp_sobre)
-        _gpc1, _gpc2, _gpc3 = st.columns(3)
-        _gpc1.markdown(f"""<div style="background:#FEF2F2; border-radius:12px; padding:14px 18px; border-left:4px solid #DC2626;">
-            <div style="font-size:0.75rem; color:var(--capi-text2);">SKUs a subir descuento</div>
-            <div style="font-size:1.5rem; font-weight:700; color:#DC2626;">{_gp_subir:,}</div>
-            <div style="font-size:0.7rem; color:var(--capi-text2);">por debajo de la pirámide</div></div>""", unsafe_allow_html=True)
-        _gpc2.markdown(f"""<div style="background:#FFFBEB; border-radius:12px; padding:14px 18px; border-left:4px solid #D97706;">
-            <div style="font-size:0.75rem; color:var(--capi-text2);">Sobre-descontados</div>
-            <div style="font-size:1.5rem; font-weight:700; color:#D97706;">{_gp_sobre:,}</div>
-            <div style="font-size:0.7rem; color:var(--capi-text2);">más descuento del sugerido</div></div>""", unsafe_allow_html=True)
-        _gpc3.markdown(f"""<div style="background:var(--capi-bg-surface); border-radius:12px; padding:14px 18px; border-left:4px solid #059669;">
-            <div style="font-size:0.75rem; color:var(--capi-text2);">Alineados</div>
-            <div style="font-size:1.5rem; font-weight:700; color:#059669;">{_gp_ok:,}</div>
-            <div style="font-size:0.7rem; color:var(--capi-text2);">descuento correcto</div></div>""", unsafe_allow_html=True)
-
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-        _gp_filtro = st.radio("Ver", ["Solo a subir descuento", "Todos"], horizontal=True, key="gp_filtro")
-        _gp_v = _gp[_gp['gap'] >= 0.05] if _gp_filtro.startswith("Solo") else _gp
-        _gp_marca = ["Todas"] + sorted(_gp_v['marca'].unique().tolist())
-        _gp_sel = st.selectbox("Marca", _gp_marca, key="gp_marca")
-        if _gp_sel != "Todas":
-            _gp_v = _gp_v[_gp_v['marca'] == _gp_sel]
-
-        _gp_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'edad', 'dscto_actual',
-                                'dscto_sugerido', 'tipo', 'accion', 'capital'] if c in _gp_v.columns]
-        _gp_disp = _gp_v[_gp_cols].rename(columns={
-            'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea',
-            'edad': 'Edad (sem)', 'dscto_actual': 'Dscto actual', 'dscto_sugerido': 'Dscto sugerido',
-            'tipo': 'Tipo', 'accion': 'Acción', 'capital': 'Capital S/',
-        })
-        st.dataframe(_gp_disp.head(300).style.format({
-            'Dscto actual': '{:.0%}', 'Dscto sugerido': '{:.0%}', 'Capital S/': 'S/ {:,.0f}',
-        }, na_rep="—"), use_container_width=True, hide_index=True, height=440)
-        st.caption("Tipo: 'Eventual' = descuento de evento temporal (sem 8-18) · 'Fijo' = markdown permanente (sem 19+).")
-
-        _gp_buf = io.BytesIO()
-        with pd.ExcelWriter(_gp_buf, engine='openpyxl') as _w:
-            _gp_v[_gp_cols].to_excel(_w, sheet_name='Precios Terceras', index=False)
-        _gp_buf.seek(0)
-        st.download_button("📥 Descargar sugerencias de precio (.xlsx)", data=_gp_buf.getvalue(),
-                           file_name="Capi_Precios_Terceras.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           key="dl_precios_terceras")
-
-
-# ═══════════════════════════════════════════════════════════════
-#  🤝 AGENTE TERCERAS — primer agente de Capi
-#  Detecta oportunidades con marcas terceras y genera BORRADORES de
-#  correo a proveedores. Nunca envía solo: Franco aprueba y envía.
-# ═══════════════════════════════════════════════════════════════
 
 elif nav_page == "🤝 Agente Terceras":
     st.markdown(f'<div class="section-header"><h3>🤝 Agente Terceras</h3><span class="live-badge">AGENTE</span></div>', unsafe_allow_html=True)
     st.caption("Detecta oportunidades con marcas terceras y redacta el correo al proveedor. "
                "El agente genera un BORRADOR — tú lo revisas y lo envías. Nunca manda nada solo.")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        st.warning("🔑 Falta configurar la API key de Anthropic (secrets del deploy o archivo "
+                   ".env). Las tablas de oportunidades funcionan igual; solo la redacción "
+                   "del correo con IA está deshabilitada.")
 
     # Paquete de trabajo: todo el análisis de terceras en un Excel
     st.download_button(
@@ -4388,7 +4168,15 @@ elif nav_page == "🤝 Agente Terceras":
         st.text_area("Cuerpo", value=_at_bor.get("cuerpo", ""), height=320, key="at_cuerpo")
         st.caption("Revisa y ajusta el texto, luego cópialo a tu correo de Ripley para enviarlo al proveedor. "
                    "El agente solo redacta — el envío lo haces tú.")
-        if st.button("🗑️ Descartar", key="at_descartar"):
+        _atb1, _atb2 = st.columns(2)
+        if _atb1.button("📨 Ya lo envié → registrar acción", key="at_enviado", type="primary"):
+            acciones_log.agregar(
+                "", "Negociación Terceras", str(_at_bor.get("marca", "")).upper(),
+                f"Correo al proveedor enviado: {_at_bor.get('asunto', '')[:120]}",
+                origen="Sugerida por Capi", estado="Ejecutada")
+            del st.session_state["at_borrador"]
+            st.success("Acción registrada en el log ✅ — cuenta para el Caso de Éxito.")
+        if _atb2.button("🗑️ Descartar", key="at_descartar"):
             del st.session_state["at_borrador"]
             st.rerun()
 
@@ -5037,7 +4825,7 @@ elif nav_page == "📊 Gestión por Antigüedad":
 
 # ─── TAB 3: Transferencias ────────────────────────────────────
 
-elif nav_page == "🔄 Transferencias":
+elif nav_page == "🔄 Transferencias (clásica)":
     if df_trans.empty:
         st.info("ℹ️ No hay transferencias sugeridas. Esto ocurre cuando no hay simultáneamente tiendas en SOBRESTOCK y QUIEBRE del mismo SKU.")
     else:
