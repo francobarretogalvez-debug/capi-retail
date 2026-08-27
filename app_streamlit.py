@@ -1150,8 +1150,23 @@ def _filtrar_marcas(df, col="marca"):
 # On Order, UME, Precio Prom). La plantilla transformada ya las perdió, así que
 # se relee el archivo original que quedó guardado al correr el análisis.
 @st.cache_data(show_spinner=False)
-def _rt_cargar_micro(_path, marca):
-    return rend_t.desde_micro(pd.read_excel(_path), marcas=marca)
+def _rt_cargar_micro(_path, marca, semanas=4):
+    """Ventana de N semanas apilando los Micros del mismo directorio.
+
+    Majo pidio la rentabilidad por m2 sobre las ultimas 4 semanas, no sobre una.
+    El Micro trae venta por tienda de una sola semana, asi que hay que apilar
+    varios cortes. Si no hay suficientes, cae a la semana del archivo cargado y
+    lo declara.
+    """
+    import glob as _glob
+    hermanos = sorted(_glob.glob(os.path.join(os.path.dirname(_path), "Base al *.xlsx")))
+    if len(hermanos) >= 2:
+        try:
+            largo = rend_t.acumular_micros(hermanos, marcas=marca, semanas=semanas)
+            return largo, largo.attrs.get("semanas", 1), largo.attrs.get("cortes", [])
+        except (ValueError, rend_t.FormatoMicroError):
+            pass  # cortes con huecos o formato viejo: se usa solo el actual
+    return rend_t.desde_micro(pd.read_excel(_path), marcas=marca), 1, []
 
 
 # ── Helper: agregar columnas de precio + fórmula Nuevo Margen a Excel ──
@@ -1967,8 +1982,10 @@ if nav_page == "🏠 Dashboard":
         _vta_marca["vta_costo"] = (_vta_marca["_vta_soles"] - _vta_marca["_contrib_soles"]).clip(lower=0)
         capital_grp = capital_grp.merge(_vta_marca[[group_label, "vta_costo"]], on=group_label, how="left")
         capital_grp["vta_costo"] = capital_grp["vta_costo"].fillna(0)
+        # En SEMANAS (decisión Franco C1 2026-08-26): vta_costo es de 4 semanas
+        # → semanal = vta_costo/4; cobertura = capital / semanal
         capital_grp["cobertura_meses"] = capital_grp.apply(
-            lambda r: round(r["stock_valor_costo"] / r["vta_costo"], 1) if r["vta_costo"] > 0 else None, axis=1
+            lambda r: round(r["stock_valor_costo"] / (r["vta_costo"] / 4), 1) if r["vta_costo"] > 0 else None, axis=1
         )
     else:
         capital_grp["vta_costo"] = 0
@@ -1984,7 +2001,7 @@ if nav_page == "🏠 Dashboard":
     <div style="display:flex; gap:16px; font-size:12px; color:var(--capi-text2); margin-bottom:12px;">
         <span style="display:flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; border-radius:2px; background:{TEAL_700}; display:inline-block;"></span>Capital a costo</span>
         <span style="display:flex; align-items:center; gap:4px;"><span style="width:10px; height:10px; border-radius:2px; background:#5DCAA5; display:inline-block;"></span>Venta a costo (4 sem)</span>
-        <span style="display:flex; align-items:center; gap:4px;"><span style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:4px; padding:0 5px; font-size:10px; color:var(--capi-text);">5.2</span>Cobertura (meses)</span>
+        <span style="display:flex; align-items:center; gap:4px;"><span style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:4px; padding:0 5px; font-size:10px; color:var(--capi-text);">12.5</span>Cobertura (semanas)</span>
     </div>
     </div>""", unsafe_allow_html=True)
 
@@ -2004,11 +2021,11 @@ if nav_page == "🏠 Dashboard":
         _cap_txt = f"S/ {_cap/1e6:.1f}M" if _cap >= 1e6 else f"S/ {_cap:,.0f}"
         _vta_txt = f"S/ {_vta/1e6:.1f}M" if _vta >= 1e6 else f"S/ {_vta:,.0f}"
 
-        # Semáforo cobertura: verde <3m, neutro 3-5m, rojo >5m
+        # Semáforo cobertura en SEMANAS: verde ≤12, neutro ≤20, rojo >20
         if _cob is not None:
-            if _cob <= 3:
+            if _cob <= 12:
                 _cob_bg, _cob_color, _cob_border = "#ECFDF5", "#059669", "#A7F3D0"
-            elif _cob <= 5:
+            elif _cob <= 20:
                 _cob_bg, _cob_color, _cob_border = SLATE_100, SLATE_700, SLATE_200
             else:
                 _cob_bg, _cob_color, _cob_border = "#FEF2F2", "#DC2626", "#FECACA"
@@ -2247,7 +2264,9 @@ elif nav_page == "🩺 Salud del Stock":
             if _hs_df is None or _hs_df.empty:
                 st.warning(f"Snapshot de semana {_hs_sem} esta vacio.")
             else:
-                st.caption(f"Semana: {_hs_sem} | {len(_hs_df):,} SKUs analizados (marcas con presencia)")
+                st.info(f"📸 Calculado sobre el SNAPSHOT {analisis_estados.etiqueta_semana(_hs_sem)} "
+                        f"— {len(_hs_df):,} SKUs (marcas con presencia). Si acabas de subir una base "
+                        f"más nueva, este score aún corresponde al corte anterior.")
 
                 # Calcular scores
                 _hs_global = motor_v2.build_health_score(_hs_df)
@@ -2275,8 +2294,16 @@ elif nav_page == "🩺 Salud del Stock":
                 # ── Tab 1: Diagnostico Rapido ──
                 with _hs_tabs[0]:
                     if _hs_global is None or _hs_global.empty:
+                        # Fix C1 2026-08-26: antes un st.stop() mataba TODA la
+                        # página. Placeholder neutro: el tab muestra ceros con
+                        # el warning visible y el resto de la app sigue vivo.
                         st.warning("No se pudo calcular el Health Score con los datos actuales.")
-                        st.stop()
+                        _hs_global = pd.DataFrame([{
+                            'health_score': 0.0, 'semaforo': '—', 'n_skus': 0,
+                            'capital_total': 0.0, 'score_cobertura': 0.0,
+                            'score_quiebre': 0.0, 'score_sobrestock': 0.0,
+                            'score_eficiencia': 0.0, 'score_margen': 0.0,
+                        }])
                     _g = _hs_global.iloc[0]
                     _hs_score = float(_g['health_score'])
                     _hs_semaforo = str(_g['semaforo'])
@@ -2345,6 +2372,27 @@ elif nav_page == "🩺 Salud del Stock":
                     _kc4.metric("Venta en Riesgo", f"S/{float(_g['venta_en_riesgo']):,.0f}")
 
                 # ── Tab 2: Ranking Marcas ──
+                    # ── 💊 Qué hacer por marca (Franco C1: el score debe
+                    # recomendar acción, no solo señalar) ──
+                    st.markdown("---")
+                    st.markdown("##### 💊 Qué hacer por marca — el componente que castiga su score")
+                    try:
+                        _hs_rec = motor_v2.recomendaciones_salud(_hs_marca)
+                    except Exception:
+                        _hs_rec = None
+                    if _hs_rec is not None and not _hs_rec.empty:
+                        _n_inflados = int(_hs_rec["score_inflado"].sum())
+                        if _n_inflados:
+                            st.caption(f"⚠️ {_n_inflados} marcas con score INFLADO: no quiebran "
+                                       "porque casi no venden (el caso Spavaldi) — su acción lo indica.")
+                        _hs_rec_disp = _hs_rec.drop(columns=["score_inflado"]).rename(columns={
+                            "marca": "Marca", "health_score": "Score", "n_skus": "SKUs",
+                            "problema": "Problema principal", "peor_score": "Score del problema",
+                            "accion": "Acción recomendada"})
+                        st.dataframe(_hs_rec_disp.style.format(
+                            {"Score": "{:.0f}", "Score del problema": "{:.0f}"}),
+                            use_container_width=True, hide_index=True, height=380)
+
                 with _hs_tabs[1]:
                     st.markdown("##### Ranking de marcas por Health Score")
 
@@ -4349,6 +4397,21 @@ elif nav_page == "📊 Gestión por Antigüedad":
     st.markdown(f'<div class="section-header"><h3>📊 Gestión por Antigüedad</h3><span class="live-badge">MERCADERÍA</span></div>', unsafe_allow_html=True)
     st.caption("Análisis completo del envejecimiento del inventario — Ventana de Mercadería + Obsoletos detallados")
 
+    # ── Resumen de 1 pantalla ANTES del detalle (Franco C1 2026-08-26:
+    # "avisar rápido el problema" — el drill queda en los tabs) ──
+    _ag_obs = df_cob[df_cob["rango_antiguedad"].isin({"RANGO 6_9", "RANGO 9_12", "RANGO 12_99"})] if "rango_antiguedad" in df_cob.columns else pd.DataFrame()
+    if not _ag_obs.empty:
+        _ag_cap = _ag_obs["stock_valor_costo"].sum()
+        _ag_tot = df_cob["stock_valor_costo"].sum()
+        _ag_top = _ag_obs.groupby("marca")["stock_valor_costo"].sum().sort_values(ascending=False)
+        _agk1, _agk2, _agk3 = st.columns(3)
+        _agk1.metric("Capital >6 meses", f"S/ {_ag_cap/1e6:,.2f}M",
+                     delta=f"{_ag_cap/_ag_tot*100:.1f}% del total", delta_color="off")
+        _agk2.metric("Marca más cargada", _ag_top.index[0],
+                     delta=f"S/ {_ag_top.iloc[0]/1e6:,.2f}M", delta_color="off")
+        _agk3.metric("SKUs >6 meses", f"{_ag_obs['sku'].nunique():,}")
+        st.caption("👇 El detalle (ventana de mercadería y obsolescencia por marca/modelo) vive en los tabs.")
+
     _aging_tab1, _aging_tab2 = st.tabs(["🪟 Ventana de Mercadería", "⏳ Obsolescencia Detallada"])
 
     # ══════════════════════════════════════════════════════════
@@ -5537,8 +5600,9 @@ elif nav_page == "📐 Rendimiento por Tienda":
         with _rt_c1:
             _rt_marca = st.selectbox("Marca", _rt_marcas, index=_rt_default, key="rend_t_marca")
 
+        _rt_sem, _rt_cortes = 1, []
         try:
-            _rt_largo = _rt_cargar_micro(_rt_path, _rt_marca)
+            _rt_largo, _rt_sem, _rt_cortes = _rt_cargar_micro(_rt_path, _rt_marca)
         except rend_t.FormatoMicroError as _e:
             _rt_largo = None
             st.warning(f"⚠️ {_e}")
@@ -5550,15 +5614,23 @@ elif nav_page == "📐 Rendimiento por Tienda":
             st.info(f"Sin datos de {_rt_marca} en el Micro cargado.")
         else:
             _rt_largo = rend_t.clasificar_liquidacion(_rt_largo)
-            _rt_m = rend_t.metricas_por_tienda(_rt_largo, marca=_rt_marca)
+            _rt_m = rend_t.metricas_por_tienda(_rt_largo, marca=_rt_marca, semanas=_rt_sem)
             _rt_vivas = _rt_m[_rt_m["unidades"] > 0]
+            # Las pestañas de análisis van solo sobre tiendas con metraje: son
+            # locales que venden a precio y ocupan espacio. Ecommerce, outlets y
+            # liquidadoras tienen su propio bloque — mezclarlos ensucia la
+            # comparación y, de paso, mejora el margen sin decirlo.
+            _rt_con = _rt_vivas[_rt_vivas["m2"].notna()]
+            _rt_sin = _rt_vivas[_rt_vivas["m2"].isna()]
 
             _rt_und = _rt_m["unidades"].sum()
             _rt_vta = _rt_m["venta_soles"].sum()
             _rt_con = _rt_m["contribucion"].sum()
             _rt_liq = _rt_m["venta_liq"].sum()
             _k = st.columns(5)
-            _k[0].markdown(_kpi_html(f"S/ {_rt_vta:,.0f}", "Venta neta (semana)"), unsafe_allow_html=True)
+            _k[0].markdown(_kpi_html(f"S/ {_rt_vta:,.0f}",
+                                     f"Venta neta ({_rt_sem} sem)" if _rt_sem > 1 else "Venta neta (semana)"),
+                           unsafe_allow_html=True)
             _k[1].markdown(_kpi_html(f"{_rt_und:,.0f}", "Unidades"), unsafe_allow_html=True)
             _k[2].markdown(_kpi_html(f"S/ {_rt_con:,.0f}", "Contribución",
                                      "green" if _rt_con >= 0 else "red"), unsafe_allow_html=True)
@@ -5566,9 +5638,17 @@ elif nav_page == "📐 Rendimiento por Tienda":
                            unsafe_allow_html=True)
             _k[4].markdown(_kpi_html(f"{(_rt_liq/_rt_vta if _rt_vta else 0):.0%}", "Venta en liquidación",
                                      "yellow"), unsafe_allow_html=True)
-            st.caption(f"{len(_rt_vivas)} tiendas con venta · datos de la última semana cerrada del Micro · "
-                       f"venta neta ex-IGV · liquidación = mercadería con más de "
-                       f"{rend_t.EDAD_LIQUIDACION:.0f} semanas (mismo umbral que la taxonomía de Capi)")
+            _rt_vent = (f"ventana de {_rt_sem} semanas ({_rt_cortes[0]} a {_rt_cortes[-1]})"
+                        if _rt_sem > 1 else "última semana cerrada del Micro")
+            _rt_pv = (_rt_sin["venta_soles"].sum() / _rt_vta) if _rt_vta else 0
+            st.caption(f"{len(_rt_vivas)} tiendas con venta · {_rt_vent} · venta neta ex-IGV · "
+                       f"liquidación = mercadería con más de {rend_t.EDAD_LIQUIDACION:.0f} semanas "
+                       f"(mismo umbral que la taxonomía de Capi)")
+            if len(_rt_sin):
+                st.caption(f"⚠️ Los indicadores de arriba son de la marca completa. **Los cuadros muestran "
+                           f"solo las {len(_rt_con)} tiendas con m² asignado** — el {_rt_pv:.0%} restante "
+                           f"de la venta ({', '.join(_rt_sin['tienda'].head(4))}) va al final, porque no "
+                           f"tiene metraje contra el cual medirse.")
 
             _t1, _t2, _t3, _t4, _t5 = st.tabs(
                 ["📋 Resumen", "📐 Rendimiento m²", "📦 Cobertura", "📅 Evolución", "⚖️ Comparar marcas"])
@@ -5579,8 +5659,8 @@ elif nav_page == "📐 Rendimiento por Tienda":
                            "La columna que manda es **margen de temporada**.")
                 _c = ["tienda", "canal", "unidades", "venta_soles", "contribucion", "margen",
                       "margen_temporada", "pct_venta_liquidacion", "edad_mediana", "n_skus"]
-                _c = [x for x in _c if x in _rt_vivas.columns]
-                _d = _rt_vivas[_c].rename(columns={
+                _c = [x for x in _c if x in _rt_con.columns]
+                _d = _rt_con[_c].rename(columns={
                     "tienda": "Tienda", "canal": "Canal", "unidades": "Und",
                     "venta_soles": "Venta S/", "contribucion": "Contribución S/",
                     "margen": "Margen", "margen_temporada": "Margen temporada",
@@ -5591,6 +5671,18 @@ elif nav_page == "📐 Rendimiento por Tienda":
                     "Margen": "{:.1%}", "Margen temporada": "{:.1%}", "% liquidación": "{:.0%}",
                     "Edad mediana (sem)": "{:.0f}"}, na_rep="—"),
                     use_container_width=True, hide_index=True, height=420)
+
+                if len(_rt_sin):
+                    st.markdown("**Sin m² asignado — ecommerce, outlets y liquidación**")
+                    _cs = [x for x in ("tienda", "canal", "unidades", "venta_soles", "contribucion",
+                                       "margen", "pct_venta_liquidacion") if x in _rt_sin.columns]
+                    st.dataframe(_rt_sin[_cs].rename(columns={
+                        "tienda": "Tienda", "canal": "Canal", "unidades": "Und",
+                        "venta_soles": "Venta S/", "contribucion": "Contribución S/",
+                        "margen": "Margen", "pct_venta_liquidacion": "% liquidación"}
+                    ).style.format({"Venta S/": "{:,.0f}", "Contribución S/": "{:,.0f}",
+                                    "Und": "{:,.0f}", "Margen": "{:.1%}", "% liquidación": "{:.0%}"},
+                                   na_rep="—"), use_container_width=True, hide_index=True)
 
                 _perd = rend_t.tiendas_en_perdida(_rt_vivas)
                 if not _perd.empty:
@@ -5606,14 +5698,14 @@ elif nav_page == "📐 Rendimiento por Tienda":
 
             # ── Rendimiento m² ──
             with _t2:
-                _sin_m2 = _rt_vivas["m2"].isna().all()
+                _sin_m2 = _rt_con.empty
                 if _sin_m2:
                     st.warning("Falta cargar los m² de corner en `config_tiendas.json`. "
                                "Sin ese dato la métrica queda vacía a propósito — un cero se leería "
                                "como «no rinde». Outlets y tiendas liquidadoras van sin m² por diseño.")
                 _c = [x for x in ["tienda", "canal", "m2", "contribucion", "contrib_x_m2",
-                                  "contrib_temporada_x_m2", "venta_x_m2"] if x in _rt_vivas.columns]
-                st.dataframe(_rt_vivas[_c].rename(columns={
+                                  "contrib_temporada_x_m2", "venta_x_m2"] if x in _rt_con.columns]
+                st.dataframe(_rt_con[_c].rename(columns={
                     "tienda": "Tienda", "canal": "Canal", "m2": "m² corner",
                     "contribucion": "Contribución S/", "contrib_x_m2": "Contrib/m²",
                     "contrib_temporada_x_m2": "Contrib temporada/m²", "venta_x_m2": "Venta/m²"}
@@ -5624,9 +5716,9 @@ elif nav_page == "📐 Rendimiento por Tienda":
 
             # ── Cobertura ──
             with _t3:
-                _c = [x for x in ["tienda", "canal", "stock_uds", "unidades", "cobertura_sem", "n_skus"]
-                      if x in _rt_vivas.columns]
-                _cob = _rt_vivas[_c].copy()
+                _c = [x for x in ["tienda", "canal", "stock_uds", "unidades", "cobertura_sem",
+                                  "und_ult_sem", "cobertura_1sem", "n_skus"] if x in _rt_con.columns]
+                _cob = _rt_con[_c].copy()
                 _tot_stk = _rt_m["stock_uds"].sum() if "stock_uds" in _rt_m.columns else 0
                 _cob_cadena = _tot_stk / _rt_und if _rt_und else float("nan")
                 st.markdown(_kpi_html(f"{_cob_cadena:,.1f}", "Cobertura cadena (semanas)"),
@@ -5636,9 +5728,12 @@ elif nav_page == "📐 Rendimiento por Tienda":
                            "sustituto del comparativo LY.")
                 st.dataframe(_cob.rename(columns={
                     "tienda": "Tienda", "canal": "Canal", "stock_uds": "Stock und",
-                    "unidades": "Venta sem", "cobertura_sem": "Cobertura (sem)", "n_skus": "SKUs"}
-                ).style.format({"Stock und": "{:,.0f}", "Venta sem": "{:,.0f}",
-                                "Cobertura (sem)": "{:,.1f}"}, na_rep="—"),
+                    "unidades": "Venta ventana", "cobertura_sem": "Cobertura ventana",
+                    "und_ult_sem": "Vta última sem", "cobertura_1sem": "Cobertura última sem",
+                    "n_skus": "SKUs"}
+                ).style.format({"Stock und": "{:,.0f}", "Venta ventana": "{:,.0f}",
+                                "Vta última sem": "{:,.0f}", "Cobertura ventana": "{:,.1f}",
+                                "Cobertura última sem": "{:,.1f}"}, na_rep="—"),
                     use_container_width=True, hide_index=True, height=420)
 
             # ── Evolución ──
@@ -5660,6 +5755,7 @@ elif nav_page == "📐 Rendimiento por Tienda":
                 else:
                     _todas = rend_t.desde_micro(pd.read_excel(_rt_path), marcas=[_rt_marca] + _vs)
                     _cmp = rend_t.comparar_marcas(_todas, [_rt_marca] + _vs, por=("tienda",))
+                    _cmp = _cmp[_cmp["tienda"].isin(_rt_con["tienda"])]
                     st.caption("Participación calculada solo sobre tiendas donde alguna de las marcas "
                                "vende. Dos marcas no están en las mismas tiendas, así que el total "
                                "global no es comparable sin esta salvedad.")
@@ -5978,6 +6074,56 @@ if nav_page == "📲 Productos Venta Cero":
         st.dataframe(_vc_disp.head(500).style.format({'Capital S/': 'S/ {:,.0f}', 'Precio': 'S/ {:,.2f}', 'Dscto': '{:.0%}'}, na_rep="—"),
                      use_container_width=True, hide_index=True, height=460)
         st.caption("Acción: MD1 = mercadería ya etiquetada (verificar etiqueta) · PTR = colocar cartel de precio · sin evento = revisar exhibición.")
+        if not _vc_tev:
+            st.warning("⚠️ Esta sesión no tiene la Base Profundidad original cargada: sin tipo de "
+                       "evento, todas las acciones caen a 'Revisar exhibición'. Sube tu base "
+                       "original (no la plantilla) para el detalle MD1/PTR.")
+
+        # ── Excel para tiendas: Pareto 80% (decisión Franco C1 2026-08-26) ──
+        # La gente de tienda filtra SU tienda y ve de un porrazo los SKUs que
+        # concentran el 80% del capital sin venta.
+        _vp80 = _vc.sort_values(['tienda', 'stock_valor_costo'],
+                                ascending=[True, False]).copy()
+        _vp80['pct_acum_tienda'] = (_vp80.groupby('tienda')['stock_valor_costo']
+                                    .transform(lambda x: x.cumsum() / x.sum()))
+        _vp80['top_80'] = np.where(
+            _vp80['pct_acum_tienda'] <= 0.80 + 1e-9, '⭐ TOP 80%', '')
+        _vp80_cols = [c for c in ['tienda', 'marca', 'sku', 'nombre', 'categoria',
+                                  'stock_total', 'stock_valor_costo', 'pct_acum_tienda',
+                                  'top_80', 'pct_descuento', 'tipo_evento', 'accion']
+                      if c in _vp80.columns]
+        _vp80_out = _vp80[_vp80_cols].rename(columns={
+            'tienda': 'Tienda', 'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto',
+            'categoria': 'Línea', 'stock_total': 'Stock (uds)',
+            'stock_valor_costo': 'Capital S/', 'pct_acum_tienda': '% acum. en tienda',
+            'top_80': 'Prioridad', 'pct_descuento': 'Dscto',
+            'tipo_evento': 'Tipo evento', 'accion': 'Acción'})
+        _vp80_buf = io.BytesIO()
+        with pd.ExcelWriter(_vp80_buf, engine='openpyxl') as _wvp:
+            _vp80_out.to_excel(_wvp, sheet_name='Venta Cero x Tienda', index=False, startrow=1)
+            _wsvp = _wvp.sheets['Venta Cero x Tienda']
+            _wsvp['A1'] = ("REVISIÓN DE PISO — filtra TU tienda y ataca primero los ⭐ TOP 80% "
+                           "(concentran el 80% del capital sin venta de tu tienda)")
+            _wsvp['A1'].font = vistas_excel.F_TITULO
+            _wsvp['A1'].fill = vistas_excel.FILL_ACCENT_SOFT
+            vistas_excel._estilo_header(_wsvp, fila=2)
+            from openpyxl.utils import get_column_letter as _gcl_vp
+            _hd_vp = [c.value for c in _wsvp[2]]
+            for _nm, _ft in [('Capital S/', '#,##0'), ('Stock (uds)', '#,##0'),
+                             ('% acum. en tienda', '0%'), ('Dscto', '0%')]:
+                if _nm in _hd_vp:
+                    _lt = _gcl_vp(_hd_vp.index(_nm) + 1)
+                    for _rw in range(3, _wsvp.max_row + 1):
+                        _wsvp[f'{_lt}{_rw}'].number_format = _ft
+            _wsvp.auto_filter.ref = f"A2:{_gcl_vp(_wsvp.max_column)}{_wsvp.max_row}"
+            _wsvp.freeze_panes = "A3"
+            _wsvp.column_dimensions['D'].width = 34
+        _vp80_buf.seek(0)
+        st.download_button(
+            "📥 Excel para tiendas — Pareto 80% del capital sin venta",
+            _vp80_buf.getvalue(), file_name="Capi_Venta_Cero_Tiendas_Pareto.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_vc_pareto", use_container_width=True)
 
         # Excel: una hoja por tienda (para repartir a cada una)
         _vc_buf = io.BytesIO()

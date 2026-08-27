@@ -4190,3 +4190,48 @@ if __name__ == "__main__":
     print("── COBERTURA DETALLE ──")
     print(results['cobertura'][['sku', 'tienda', 'stock_total', 'prom_vta_uds',
                                  'cobertura_sem', 'estado']].to_string(index=False))
+
+
+# ─────────────────────────────────────────────────────────────
+#  RECOMENDACIONES DE SALUD POR MARCA (Franco, sesión C1 2026-08-26:
+#  el score solo no basta — debe decir QUÉ hacer y avisar cuando el
+#  score está inflado porque la marca no vende)
+# ─────────────────────────────────────────────────────────────
+
+_ACCION_COMPONENTE = {
+    'score_sobrestock': ("Exceso de stock vs venta", "Frenar reposición de los modelos con exceso y rebalancear/markdown antes de que envejezca"),
+    'score_quiebre':    ("Quiebres de stock", "Reponer/transferir los modelos con venta confirmada — hay venta perdida en curso"),
+    'score_eficiencia': ("Mercadería parada sin venta", "Activar precio/exhibición del dormido YA — es la antesala del obsoleto"),
+    'score_cobertura':  ("Mix de cobertura fuera de rango", "Revisar profundidad de compra: demasiado capital fuera de la zona 8-16 sem"),
+    'score_margen':     ("Margen efectivo deteriorado", "Revisar descuentos vigentes: la marca está vendiendo con margen bajo el umbral"),
+}
+
+
+def recomendaciones_salud(hs_df):
+    """Por marca: el componente que MÁS castiga su score + acción práctica +
+    flag de score inflado (no quiebra porque no vende — caso Spavaldi).
+
+    hs_df: output de build_health_score(grupo_cols=['marca']).
+    """
+    if hs_df is None or hs_df.empty:
+        return pd.DataFrame()
+    comp_cols = [c for c in _ACCION_COMPONENTE if c in hs_df.columns]
+    if not comp_cols:
+        return pd.DataFrame()
+    out = hs_df.copy()
+    out['peor_componente'] = out[comp_cols].idxmin(axis=1)
+    out['problema'] = out['peor_componente'].map(lambda c: _ACCION_COMPONENTE[c][0])
+    out['accion'] = out['peor_componente'].map(lambda c: _ACCION_COMPONENTE[c][1])
+    out['peor_score'] = out[comp_cols].min(axis=1).round(0)
+    # Score inflado: "no quiebro porque no vendo" — quiebre alto + eficiencia baja
+    if {'score_quiebre', 'score_eficiencia'} <= set(out.columns):
+        out['score_inflado'] = ((out['score_quiebre'] >= 65)
+                                & (out['score_eficiencia'] <= 40))
+        out.loc[out['score_inflado'], 'accion'] = (
+            "⚠️ OJO: el score se infla porque casi no vende (no quiebra lo que no rota). "
+            + out.loc[out['score_inflado'], 'accion'])
+    else:
+        out['score_inflado'] = False
+    keep = [c for c in ['marca', 'health_score', 'n_skus', 'problema', 'peor_score',
+                        'accion', 'score_inflado'] if c in out.columns]
+    return out[keep].sort_values('health_score').reset_index(drop=True)
