@@ -30,6 +30,7 @@ from math import ceil, floor
 from collections import defaultdict
 
 # Sistema unificado de clasificación (introducido Sprint 1 Capi — Prompt A1)
+import pricing
 from taxonomia import Estado, classify_coverage as _taxonomia_classify
 from config import COLOR_MAP as _NEW_COLOR_MAP, ESTADO_ORDEN as _NEW_ESTADO_ORDEN
 
@@ -1006,7 +1007,6 @@ def build_acciones_precio(df_cobertura, df_transferencias, df_maestro, params):
     Retorna DataFrame.
     """
     ua         = params["umbral_alto"]
-    ue         = params["umbral_edad"]
     margen_min = params["margen_min"]
 
     # Unidades ya asignadas a transferencia por (sku, tienda_origen)
@@ -1058,47 +1058,23 @@ def build_acciones_precio(df_cobertura, df_transferencias, df_maestro, params):
         else:
             motivos.append(f"SOBRESTOCK — {cob} sem de cobertura")
 
-        # Descuento base según severidad
-        if estado in _estados_sin_venta:
-            dscto_base = 0.30 if estado == Estado.DORMIDO else 0.40  # MUERTO más agresivo
-        elif estado == Estado.LIQUIDAR:
-            dscto_base = 0.40
-        elif estado == Estado.ESTANCADO:
-            dscto_base = 0.35  # entre SOBRESTOCK y LIQUIDAR
-        elif cob is not None and cob > ua * 2:
-            dscto_base = 0.30  # sobrestock severo
-        else:
-            dscto_base = 0.20  # sobrestock moderado
-
-        # Amplificar por edad
-        if edad > ue * 1.5:
-            dscto_base = max(dscto_base, 0.50)
-            motivos.append(f"Antigüedad crítica ({edad} sem) — liquidación urgente")
-        elif edad > ue:
-            dscto_base = max(dscto_base, 0.35)
-            motivos.append(f"Producto viejo ({edad} sem)")
-
-        # Precio mínimo que respeta margen mínimo
-        # NOTA: precios incluyen IGV (18%), costo viene sin IGV
-        # precio_min debe estar en la misma base (con IGV) para comparar correctamente
-        IGV = 1.18
+        # Descuento objetivo: pirámide oficial por antigüedad (pricing.py,
+        # unificación 19c 2026-08-26 — reemplaza la tabla ad-hoc por estado).
+        # Piso por margen mínimo y regla nunca-subir viven en pricing.sugerir_precio.
         precio_vigente = r['precio_vigente']
         costo          = r['costo']
-        precio_min_exigv = costo / (1 - margen_min) if (1 - margen_min) > 0 else costo * 1.01
-        precio_min       = round(precio_min_exigv * IGV, 2)  # llevar a base con IGV
-
-        # Precio sugerido (no baja de precio_min, ambos con IGV)
-        precio_sug  = max(round(precio_vigente * (1 - dscto_base), 2), precio_min)
-        # Regla de negocio (fix 2026-08-17): NUNCA sugerir subir el precio.
-        # Si el clamp al piso deja el sugerido ≥ vigente, el precio actual ya
-        # está en/bajo el piso de margen mínimo → la acción es mantener.
-        if precio_sug >= precio_vigente:
-            precio_sug = precio_vigente
+        _p = pricing.sugerir_precio(precio_vigente, costo, edad, margen_min)
+        if _p['dscto_piramide'] <= 0:
+            # Pirámide: <8 semanas de vida → no se toca precio todavía
+            # (aunque el estado sea SOBRESTOCK/ESTANCADO; primero empujar/transferir)
+            continue
+        motivos.append(f"Pirámide: {int(edad)} sem → {_p['dscto_piramide']:.0%} {_p['tipo']}")
+        if _p['en_piso']:
             motivos.append("Precio vigente ya en/bajo piso de margen mínimo — mantener, no descontar más")
-        dscto_real  = round(1 - precio_sug / precio_vigente, 3) if precio_vigente > 0 else 0
-        # Margen real: ex-IGV para que sea comparable con IMU y margen_vigente
-        pv_sug_exigv = precio_sug / IGV
-        margen_post  = round((pv_sug_exigv - costo) / pv_sug_exigv, 3) if pv_sug_exigv > 0 else 0
+        precio_min  = _p['precio_minimo']
+        precio_sug  = _p['precio_sugerido']
+        dscto_real  = _p['dscto_real']
+        margen_post = _p['margen_post']
 
         rows.append({
             'sku':              sku,
@@ -1117,6 +1093,7 @@ def build_acciones_precio(df_cobertura, df_transferencias, df_maestro, params):
             'precio_sugerido':  precio_sug,
             'precio_minimo':    round(precio_min, 2),
             'dscto_sugerido':   dscto_real,
+            'tipo_dscto':       _p['tipo'],
             'margen_post':      margen_post,
             'motivo':           ' | '.join(motivos),
         })

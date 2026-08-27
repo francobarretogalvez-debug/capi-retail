@@ -240,20 +240,9 @@ def top5_por_marca_linea(df_cob: pd.DataFrame, top_n: int = 5,
     return g.reset_index(drop=True)
 
 
-def descuento_sugerido(edad_sem: float) -> tuple:
-    """Pirámide de descuentos por antigüedad (tabla de Franco, igual para todas
-    las terceras). Devuelve (descuento_fraccion, tipo). 'Eventual' = evento de
-    precio temporal (sem 8-18); 'Fijo' = markdown permanente (sem 19+)."""
-    e = edad_sem or 0
-    if e < 8:    return 0.0, ""
-    if e < 12:   return 0.20, "Eventual"
-    if e < 19:   return 0.30, "Eventual"
-    if e < 30:   return 0.30, "Fijo"
-    if e < 35:   return 0.40, "Fijo"
-    if e < 39:   return 0.50, "Fijo"
-    if e < 44:   return 0.60, "Fijo"
-    if e < 48:   return 0.70, "Fijo"
-    return 0.80, "Fijo"
+# Pirámide movida a pricing.py (unificación 19c, 2026-08-26). Re-export para
+# los consumidores existentes (afinidad_engine, reportes_marcas, vistas).
+from pricing import descuento_sugerido
 
 
 def sugerencias_precio_terceras(df_cob: pd.DataFrame, marcas: set = None) -> pd.DataFrame:
