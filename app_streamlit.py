@@ -84,6 +84,7 @@ import vistas_excel
 import reportes_marcas
 import acciones_log
 import analisis_estados
+import comparativo_semanal
 import rendimiento_tienda as rend_t
 import reporte_semanal as rep_sem
 import agente_reporte as ag_rep
@@ -2109,6 +2110,86 @@ if nav_page == "🏠 Dashboard":
 if nav_page == "🏠 Dashboard":
 
     # ══════════════════════════════════════════════════════════
+    #  SEMANA vs 4 ANTERIORES — tracking de KPIs (S4, pedido Franco 2026-09-05)
+    #  Fuente: snapshots semanales (nivel cadena). Venta = vta_u_sem_1ant, nunca acumulado.
+    # ══════════════════════════════════════════════════════════
+    if _HAS_SNAPSHOTS and not _DEMO_MODE:
+        try:
+            _cs = comparativo_semanal.panel_4_semanas()
+        except Exception as _e_cs:
+            _cs = {"semanas": [], "tabla": pd.DataFrame(), "deltas": pd.DataFrame()}
+            st.caption(f"Comparativo semanal no disponible: {_e_cs}")
+        if len(_cs.get("semanas", [])) >= 2:
+            st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
+            st.markdown(f'<div class="section-header"><h3>📈 Semana vs 4 anteriores</h3><span class="live-badge">TRACKING</span></div>', unsafe_allow_html=True)
+            _cs_sems = _cs["semanas"]
+            _cs_et = {w: analisis_estados.etiqueta_semana(w, corta=True) for w in _cs_sems}
+            st.caption("Cortes: " + " → ".join(f"{w} ({_cs_et[w]})" for w in _cs_sems)
+                       + ("" if _cs.get("consecutivas") else "  ·  ⚠️ los cortes no son consecutivos, los Δ cubren más de una semana"))
+
+            # Tarjetas: KPI actual + Δ vs W−1 (flecha) — 6 KPIs de titular
+            _cs_k = _cs["kpis"]; _cs_act = _cs_sems[-1]; _cs_prev = _cs_sems[-2]
+            _cs_cards = [
+                ("Venta S/ semana", "venta_soles", "soles", True),
+                ("Contribución S/", "contribucion_soles", "soles", True),
+                ("Margen %", "margen_pct", "pct", True),
+                ("Capital inmovilizado", "capital_inmovilizado", "soles", False),
+                ("Cobertura (sem)", "cobertura_sem", "num1", False),
+                ("SKUs en quiebre", "skus_quiebre", "int", False),
+            ]
+            _cs_cols = st.columns(len(_cs_cards))
+            for _col, (_lab, _key, _fmt, _better) in zip(_cs_cols, _cs_cards):
+                _a, _b = _cs_k[_cs_prev].get(_key), _cs_k[_cs_act].get(_key)
+                if _fmt == "soles": _txt = f"S/ {_b:,.0f}"
+                elif _fmt == "pct": _txt = f"{_b*100:.1f}%"
+                elif _fmt == "num1": _txt = f"{_b:.1f}"
+                else: _txt = f"{_b:,.0f}"
+                if _fmt == "pct" and pd.notna(_a) and pd.notna(_b):
+                    _d = (_b - _a) * 100; _dtxt = f"{_d:+.1f} pp"
+                elif pd.notna(_a) and _a and pd.notna(_b):
+                    _d = (_b - _a) / _a * 100; _dtxt = f"{_d:+.1f}%"
+                else:
+                    _d = None; _dtxt = "—"
+                _col.metric(_lab, _txt, _dtxt, delta_color=("normal" if _better else "inverse") if _better is not None else "off",
+                            help=f"vs {_cs_prev}")
+
+            with st.expander("Ver los 11 KPIs contra W−1 · W−2 · W−3 · W−4", expanded=False):
+                _t = _cs["tabla"].copy()
+                _fmt_map = {l: f for _, l, f, _ in comparativo_semanal.KPIS}
+                def _fmt_row(row):
+                    f = _fmt_map.get(row.name, "num1")
+                    out = []
+                    for v in row:
+                        if pd.isna(v): out.append("—")
+                        elif f == "soles": out.append(f"S/ {v:,.0f}")
+                        elif f == "soles2": out.append(f"S/ {v:,.2f}")
+                        elif f == "pct": out.append(f"{v*100:.1f}%")
+                        elif f == "int": out.append(f"{v:,.0f}")
+                        else: out.append(f"{v:.1f}")
+                    return pd.Series(out, index=row.index)
+                _t_disp = _t.apply(_fmt_row, axis=1)
+                _t_disp.columns = [f"{w}" + ("  ◀ actual" if w == _cs_act else "") for w in _t_disp.columns]
+                _d = _cs["deltas"].copy()
+                _d_disp = _d.apply(lambda r: pd.Series([("—" if pd.isna(v) else (f"{v:+.1f} pp" if _fmt_map.get(r.name) == "pct" else f"{v:+.1f}%")) for v in r], index=r.index), axis=1)
+                st.dataframe(pd.concat([_t_disp, _d_disp], axis=1), use_container_width=True, height=440)
+                st.caption("Δ en % sobre la semana comparada (en puntos porcentuales para los KPIs en %). "
+                           "Capital inmovilizado = DORMIDO + ESTANCADO + SOBRESTOCK + LIQUIDAR + MUERTO. "
+                           "Obsoleto = MUERTO por taxonomía (definición provisional). Nivel cadena: el snapshot no tiene tienda.")
+                try:
+                    _rp = comparativo_semanal.resumen_pareto(_cs_act)
+                    if _rp:
+                        st.markdown(f"**Pareto del capital inmovilizado ({_cs_act}):** {_rp['n_skus_top80']:,} SKUs "
+                                    f"({_rp['pct_skus_top80']*100:.0f}% de los {_rp['n_skus_exceso']:,} en exceso) concentran "
+                                    f"S/ {_rp['capital_top80']:,.0f} de S/ {_rp['capital_exceso']:,.0f}.")
+                        _pdf = comparativo_semanal.pareto_inmovilizado(_cs_act)
+                        _pdf = _pdf[_pdf["top_80"] != ""].head(300)
+                        st.dataframe(_pdf.style.format({"capital": "S/ {:,.0f}", "share": "{:.1%}", "pct_acum": "{:.0%}",
+                                                        "cobertura_sem": "{:.1f}"}, na_rep="—"),
+                                     use_container_width=True, hide_index=True, height=300)
+                except Exception as _e_p:
+                    st.caption(f"Pareto no disponible: {_e_p}")
+
+    # ══════════════════════════════════════════════════════════
     #  MARGEN EFECTIVO — Contribución / VtasMF (4 semanas)
     # ══════════════════════════════════════════════════════════
     if _margen_global is not None and _vta_soles_total > 0:
@@ -3477,6 +3558,102 @@ elif nav_page == "📊 Gestión por Antigüedad":
                 if _obs_marca_sel != "Todas":
                     df_obs = df_obs[df_obs["marca"] == _obs_marca_sel]
 
+                # ══════════════════════════════════════════════════════
+                #  S5 (2026-09-05, pedido Franco FR8): ranking por tienda,
+                #  alerta "por entrar a obsoleto" y delta vs semana anterior
+                # ══════════════════════════════════════════════════════
+                import obsoletos as _obsm
+                _df_cob_obs = df_cob if _obs_marca_sel == "Todas" else df_cob[df_cob["marca"] == _obs_marca_sel]
+                _terc_set = {m.upper() for m in agente_terceras.MARCAS_AGENTE}
+                _def_sel = st.radio("Definición de obsoleto", ["Más de 6 meses en tienda (rango)", "Sin venta más de 26 semanas (MUERTO)"],
+                                    horizontal=True, key="obs_def",
+                                    help="Conviven dos definiciones en Capi y dan números distintos. Franco elige la oficial; "
+                                         "mientras tanto se muestran las dos.")
+                _def_key = "rango" if _def_sel.startswith("Más") else "taxonomia"
+                _rk = _obsm.ranking_por_tienda(_df_cob_obs, definicion=_def_key, marcas_terceras=_terc_set)
+                _rk_otra = _obsm.ranking_por_tienda(_df_cob_obs, definicion=("taxonomia" if _def_key == "rango" else "rango"))
+                _tot_def = float(_rk["capital_obsoleto"].sum()) if not _rk.empty else 0.0
+                _tot_otra = float(_rk_otra["capital_obsoleto"].sum()) if not _rk_otra.empty else 0.0
+                st.markdown(f"<h5 style='margin:8px 0 2px 0;'>🏬 Capital obsoleto por tienda</h5>", unsafe_allow_html=True)
+                st.caption(f"Con esta definición: **S/ {_tot_def:,.0f}** · con la otra: S/ {_tot_otra:,.0f}"
+                           + (f" (difieren {abs(_tot_def - _tot_otra) / max(_tot_def, _tot_otra) * 100:.0f}%)" if max(_tot_def, _tot_otra) else "")
+                           + ". Para terceras se muestra también el capital a costo implícito (precio sin IGV × (1 − margen contable)), "
+                             "porque el campo Costo de Ripley subestima su margen ~11.7 pp.")
+                if not _rk.empty:
+                    _rk_disp = _rk.rename(columns={"tienda": "Tienda", "capital_obsoleto": "Capital obsoleto S/",
+                                                   "uds_obsoletas": "Uds", "skus_obsoletos": "SKUs",
+                                                   "capital_tienda": "Capital tienda S/", "pct_stock_tienda": "% del stock de la tienda",
+                                                   "capital_implicito": "Capital implícito terceras S/", "marca_top": "Marca que más pesa"})
+                    st.dataframe(_rk_disp.style.format({"Capital obsoleto S/": "S/ {:,.0f}", "Uds": "{:,.0f}", "SKUs": "{:,.0f}",
+                                                        "Capital tienda S/": "S/ {:,.0f}", "% del stock de la tienda": "{:.1%}",
+                                                        "Capital implícito terceras S/": "S/ {:,.0f}"}, na_rep="—")
+                                 .background_gradient(subset=["% del stock de la tienda"], cmap="Reds"),
+                                 use_container_width=True, hide_index=True, height=min(60 + 35 * len(_rk_disp), 460))
+
+                # ── Alerta: lo que cruza a obsoleto en N semanas ──
+                st.markdown(f"<h5 style='margin:14px 0 2px 0;'>⏳ Por entrar a obsoleto</h5>", unsafe_allow_html=True)
+                _n_sem = st.select_slider("Horizonte", options=[2, 3, 4, 6, 8], value=2, key="obs_horizonte",
+                                          format_func=lambda x: f"{x} semanas")
+                _pe = _obsm.por_entrar(_df_cob_obs, semanas=_n_sem, definicion=_def_key)
+                if _pe.empty:
+                    st.success(f"Nada cruza a obsoleto en las próximas {_n_sem} semanas con esta definición.")
+                else:
+                    _pe_res = _obsm.resumen_por_entrar(_pe)
+                    _pe_tot = float(_pe["capital"].sum()); _pe_sin = float(_pe_res["capital_sin_dscto"].sum())
+                    st.markdown(f"""<div style="background:#FFF7ED; border-left:4px solid #EA580C; padding:10px 14px; border-radius:10px; margin-bottom:8px;">
+                    <strong style="color:#EA580C;">S/ {_pe_tot:,.0f}</strong> <span style="color:var(--capi-text2); font-size:0.85em;">a costo cruzan a obsoleto en {_n_sem} semanas
+                    ({len(_pe):,} combos · {int(_pe['stock_total'].sum()):,} uds). De eso, <strong>S/ {_pe_sin:,.0f}</strong> todavía no tiene el descuento de la pirámide: atacarlo ahora, no cuando ya esté congelado.</span></div>""",
+                                unsafe_allow_html=True)
+                    _pe_c1, _pe_c2 = st.columns([1, 2])
+                    with _pe_c1:
+                        st.dataframe(_pe_res.rename(columns={"marca": "Marca", "capital": "Capital S/", "uds": "Uds", "skus": "SKUs",
+                                                             "capital_sin_dscto": "Sin dscto S/"})
+                                     .style.format({"Capital S/": "S/ {:,.0f}", "Sin dscto S/": "S/ {:,.0f}", "Uds": "{:,.0f}", "SKUs": "{:,.0f}"}),
+                                     use_container_width=True, hide_index=True, height=min(60 + 35 * len(_pe_res), 320))
+                    with _pe_c2:
+                        _pe_disp = _pe.rename(columns={"tienda": "Tienda", "marca": "Marca", "sku": "SKU", "nombre": "Producto",
+                                                       "edad_semanas": "Edad", "semanas_para_obsoleto": "Cruza en (sem)",
+                                                       "stock_total": "Stock", "capital": "Capital S/", "prom_vta_uds": "Vta sem",
+                                                       "precio_vigente": "Precio", "pct_descuento": "Dscto actual",
+                                                       "dscto_sugerido": "Dscto sugerido", "precio_sugerido": "Precio sugerido", "accion": "Acción"})
+                        _pe_cols = [c for c in ["Tienda", "Marca", "SKU", "Producto", "Edad", "Cruza en (sem)", "Stock", "Capital S/",
+                                                "Vta sem", "Precio", "Dscto actual", "Dscto sugerido", "Precio sugerido", "Acción"] if c in _pe_disp.columns]
+                        st.dataframe(_pe_disp[_pe_cols].head(300).style.format({"Capital S/": "S/ {:,.0f}", "Precio": "S/ {:,.2f}",
+                                                                                 "Precio sugerido": "S/ {:,.2f}", "Dscto actual": "{:.0%}",
+                                                                                 "Dscto sugerido": "{:.0%}", "Vta sem": "{:.1f}", "Edad": "{:.0f}",
+                                                                                 "Cruza en (sem)": "{:.0f}"}, na_rep="—"),
+                                     use_container_width=True, hide_index=True, height=320)
+                    _pe_buf = io.BytesIO()
+                    with pd.ExcelWriter(_pe_buf, engine="openpyxl") as _wpe:
+                        vistas_excel._tabla_con_titulo(_wpe, "Por entrar a obsoleto",
+                                                       f"Mercadería que cruza a obsoleto en {_n_sem} semanas — atacar con descuento ANTES del cruce",
+                                                       _pe_disp[_pe_cols], {"Capital S/": "#,##0", "Precio": "#,##0.00", "Precio sugerido": "#,##0.00",
+                                                                            "Dscto actual": "0%", "Dscto sugerido": "0%"})
+                        if not _rk.empty:
+                            vistas_excel._tabla_con_titulo(_wpe, "Obsoleto por tienda", "Capital obsoleto por tienda (mayor a menor)",
+                                                           _rk_disp, {"Capital obsoleto S/": "#,##0", "Capital tienda S/": "#,##0",
+                                                                      "% del stock de la tienda": "0.0%", "Capital implícito terceras S/": "#,##0"})
+                    _pe_buf.seek(0)
+                    st.download_button("📥 Excel — por entrar a obsoleto + ranking por tienda", _pe_buf.getvalue(),
+                                       file_name=f"Capi_Obsoletos_por_entrar_{_n_sem}sem.xlsx",
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_obs_pe")
+
+                # ── Delta vs semana anterior (snapshots, nivel cadena, MUERTO por marca) ──
+                if _HAS_SNAPSHOTS:
+                    try:
+                        _wk = snapshots_engine.list_available_weeks()
+                        if len(_wk) >= 2:
+                            _dm = _obsm.delta_marca(_wk[-2], _wk[-1])
+                            if not _dm.empty:
+                                with st.expander(f"📉 Capital MUERTO por marca: {_wk[-1]} vs {_wk[-2]} (¿bajó o subió?)", expanded=False):
+                                    st.dataframe(_dm.rename(columns={"marca": "Marca", "delta": "Δ S/", "delta_pct": "Δ %"})
+                                                 .style.format({_wk[-2]: "S/ {:,.0f}", _wk[-1]: "S/ {:,.0f}", "Δ S/": "S/ {:+,.0f}", "Δ %": "{:+.1f}%"}, na_rep="—"),
+                                                 use_container_width=True, hide_index=True, height=min(60 + 35 * len(_dm), 400))
+                                    st.caption("Nivel cadena (el snapshot semanal aún no tiene tienda). El delta por tienda llega con el snapshot liviano SKU×tienda.")
+                    except Exception as _e_dm:
+                        st.caption(f"Delta semanal no disponible: {_e_dm}")
+
+                st.markdown("---")
                 obs_c1, obs_c2 = st.columns(2)
 
                 # ── DONUT: % de inventario obsoleto por rango ──
