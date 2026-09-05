@@ -226,6 +226,11 @@ def cargar_transaccional(path, corte=None, division="HOMBRE", cfg: dict | None =
     out = pd.DataFrame({
         "sku": df.get("CodVariacion", df.get("Cód. Prod.")),
         "descripcion": df.get("Modelo", df.get("Descripción")),
+        # Lo que el Micro NO tiene: el transaccional es la única fuente con
+        # color y talla. El Micro llega hasta estilo (Cód. Prod.) y ahí se acaba.
+        "estilo": df.get("Modelo"), "cod_estilo": df.get("CodModelo"),
+        "color": df.get("Color"), "talla": df.get("Talla"),
+        "opcion": df.get("CodOpcion"),
         "marca": df["Marca"], "linea": df["Linea"],
         "departamento": df.get("Dpto"), "temporada": df.get("Temporada"),
         "fecha": df["Fecha"], "periodo": df.get("Periodo"),
@@ -296,9 +301,19 @@ def metricas_por_tienda(base: pd.DataFrame, marca=None, cfg: dict | None = None,
         unidades=("unidades", "sum"),
         venta_soles=("venta_soles", "sum"),
         contribucion=("contribucion", "sum"),
-        stock_uds=("stock_uds", "sum") if "stock_uds" in df.columns else ("unidades", "size"),
         n_skus=("sku", "nunique"),
     ).reset_index()
+
+    # El stock es una FOTO, no un flujo: si la ventana apila varios cortes, sumarlo
+    # multiplica el inventario por el número de semanas y la cobertura sale inflada
+    # en la misma proporción. Se toma solo el corte más reciente.
+    ult = df[df["semana_idx"] == df["semana_idx"].max()] if "semana_idx" in df.columns else df
+    if "stock_uds" in df.columns:
+        m = m.join(ult.groupby("cod_tienda")["stock_uds"].sum().rename("stock_uds"), on="cod_tienda")
+        m["stock_uds"] = m["stock_uds"].fillna(0)
+    # Venta del último corte, para la cobertura "foto de hoy" (ver más abajo).
+    m = m.join(ult.groupby("cod_tienda")["unidades"].sum().rename("und_ult_sem"), on="cod_tienda")
+    m["und_ult_sem"] = m["und_ult_sem"].fillna(0)
 
     liq = df[df["tipo_venta"] == "liquidacion"].groupby("cod_tienda").agg(
         und_liq=("unidades", "sum"), venta_liq=("venta_soles", "sum"),
@@ -321,7 +336,14 @@ def metricas_por_tienda(base: pd.DataFrame, marca=None, cfg: dict | None = None,
                    on="cod_tienda")
 
     if "stock_uds" in df.columns:
+        # Dos lecturas a propósito, porque responden preguntas distintas:
+        #   · promedio de la ventana → estable, pero arrastra semanas viejas. Castiga
+        #     a los corners recién abiertos, cuyas primeras semanas siempre son flojas.
+        #   · último corte → la foto de hoy, reacciona rápido, pero una semana rara
+        #     (feriado, quiebre, campaña) la distorsiona entera.
+        # Si las dos difieren mucho, la tienda cambió de ritmo y eso es la señal.
         m["cobertura_sem"] = _ratio(m["stock_uds"], m["unidades"] / max(semanas, 1e-9))
+        m["cobertura_1sem"] = _ratio(m["stock_uds"], m["und_ult_sem"])
 
     # ── contribución / m² ────────────────────────────────────────────
     marca_key = _norm(marca) if marca else None
@@ -413,3 +435,168 @@ def apertura_real(trans: pd.DataFrame, corners: dict | None = None) -> pd.DataFr
         out.loc[hit.notna(), "origen"] = "fin de obra del corner"
         out["apertura"] = hit.fillna(out["apertura"])
     return out
+
+
+# ──────────────────────────────────────────────────────────────
+#  7. Ventana multi-semana: apilar varios Micros
+# ──────────────────────────────────────────────────────────────
+
+def _fecha_de_nombre(path):
+    """`Base al 23.08.xlsx` → Timestamp. El Micro no trae fecha de corte adentro."""
+    m = re.search(r"(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?", Path(path).stem)
+    if not m:
+        return None
+    d, mes, anio = int(m.group(1)), int(m.group(2)), m.group(3)
+    anio = int(anio) + (2000 if anio and len(anio) == 2 else 0) if anio else 2026
+    try:
+        return pd.Timestamp(year=anio, month=mes, day=d)
+    except ValueError:
+        return None
+
+
+def acumular_micros(paths, marcas=None, cfg=None, semanas=4):
+    """Apila los últimos N Micros semanales en una ventana por tienda.
+
+    El Micro trae venta por tienda de UNA sola semana (las columnas
+    `Sem. 1ant..4ant` son a nivel SKU cadena, no por tienda). Para la ventana
+    de 4 semanas que pidió Majo hay que apilar 4 archivos.
+
+    Dos trampas que este código cubre porque ya aparecieron en la práctica:
+
+    1. **Micros duplicados.** El mismo corte bajado dos veces con nombre distinto
+       (`Base al 02.08` y `Base al 03.08` traían cifras idénticas). Apilarlos
+       duplica esa semana en silencio. Se deduplica por huella de la venta.
+
+    2. **Huecos entre semanas.** Se verifica el encadenamiento: la `Sem. 2ant`
+       de un archivo debe coincidir con la `Sem. 1ant` del anterior. Si no
+       encadena, se ABORTA — una ventana con huecos subestima sin avisar.
+
+    Devuelve el formato largo de `desde_micro` más `fecha_corte` y `semana_idx`.
+    """
+    cfg = cfg or cargar_config()
+    fichas = []
+    for p in paths:
+        f = _fecha_de_nombre(p)
+        if f is None:
+            raise ValueError(f"No pude leer la fecha de corte de '{Path(p).name}'. "
+                             f"Se espera un nombre tipo 'Base al 23.08.xlsx'.")
+        fichas.append({"path": p, "fecha": f})
+    fichas.sort(key=lambda f: f["fecha"])
+
+    # Deduplicar: una redescarga del mismo corte cae a 1-2 días (pasó con
+    # 02.08/03.08 y 09.08/11.08). Un corte semanal legítimo está a 6-8 días
+    # —el día de corte de Ripley se ha movido—, así que el umbral va en 3.
+    unicos, dupes = [], []
+    for f in fichas:
+        if unicos and (f["fecha"] - unicos[-1]["fecha"]).days <= 3:
+            dupes.append((Path(f["path"]).name, Path(unicos[-1]["path"]).name))
+            continue
+        unicos.append(f)
+
+    usar_prev = unicos[-semanas:]
+    # El encadenamiento se valida por FECHA, no por la data. Comparar los totales
+    # de la semana anterior entre cortes no sirve: Ripley reexpresa esa semana, y
+    # el drift medido va de 0.21% a 11.08% entre cortes que SÍ son consecutivos
+    # (la semana de Fiestas Patrias es la peor), mientras que un salto real de una
+    # semana puede drifear solo 1.88%. Los rangos se solapan: ningún umbral separa.
+    # 5-9 días = cadencia semanal con holgura (el día de corte se mueve).
+    # Fuera de esa banda hay una semana perdida en el medio.
+    huecos = [(Path(usar_prev[i]["path"]).name, Path(usar_prev[i - 1]["path"]).name,
+               (usar_prev[i]["fecha"] - usar_prev[i - 1]["fecha"]).days)
+              for i in range(1, len(usar_prev))
+              if not 5 <= (usar_prev[i]["fecha"] - usar_prev[i - 1]["fecha"]).days <= 9]
+    if huecos:
+        raise ValueError(
+            "Los cortes no son semanas consecutivas: "
+            + "; ".join(f"{b} → {a} hay {d} días" for a, b, d in huecos)
+            + ". Con huecos la ventana subestima la venta — consigue el corte faltante."
+        )
+
+    usar = usar_prev
+    partes = []
+    for i, f in enumerate(usar):
+        largo = desde_micro(pd.read_excel(f["path"]), marcas=marcas, cfg=cfg)
+        largo["fecha_corte"] = f["fecha"]
+        largo["semana_idx"] = i + 1
+        partes.append(largo)
+
+    out = pd.concat(partes, ignore_index=True)
+    out.attrs["semanas"] = len(usar)
+    out.attrs["cortes"] = [str(f["fecha"].date()) if f["fecha"] else Path(f["path"]).name for f in usar]
+    out.attrs["duplicados_ignorados"] = dupes
+    return out
+
+
+# ──────────────────────────────────────────────────────────────
+#  8. Best sellers
+# ──────────────────────────────────────────────────────────────
+
+def bestsellers(base: pd.DataFrame, top: int | None = None, por="venta_soles") -> pd.DataFrame:
+    """Ranking de SKUs de la ventana, con su rotación y su stock.
+
+    El grano es el SKU del Micro (`Cód. Prod.`), que es producto×color. No hay
+    agrupación por estilo: eso solo existe en el archivo de compra, que este
+    módulo no lee.
+
+    El stock sale del último corte, no de la suma de la ventana — es una foto.
+    """
+    df = base if "tipo_venta" in base.columns else clasificar_liquidacion(base)
+    ult = df[df["semana_idx"] == df["semana_idx"].max()] if "semana_idx" in df.columns else df
+
+    g = df.groupby(["sku", "descripcion"], dropna=False).agg(
+        linea=("linea", "first"), temporada=("temporada", "first"),
+        unidades=("unidades", "sum"), venta_soles=("venta_soles", "sum"),
+        contribucion=("contribucion", "sum"),
+        edad_semanas=("edad_semanas", "max"), tiendas=("cod_tienda", "nunique"),
+    ).reset_index()
+
+    g = g.join(ult.groupby("sku")["stock_uds"].sum().rename("stock_uds"), on="sku")
+    g["stock_uds"] = g["stock_uds"].fillna(0)
+
+    semanas = int(df["semana_idx"].max()) if "semana_idx" in df.columns else 1
+    g["margen"] = _ratio(g["contribucion"], g["venta_soles"])
+    g["precio_real"] = _ratio(g["venta_soles"], g["unidades"])
+    g["vta_semanal"] = g["unidades"] / max(semanas, 1)
+    g["cobertura_sem"] = _ratio(g["stock_uds"], g["vta_semanal"])
+    g["es_liquidacion"] = np.where(g["edad_semanas"] > EDAD_LIQUIDACION, "liquidación", "temporada")
+
+    liq = df[df["tipo_venta"] == "liquidacion"].groupby("sku")["venta_soles"].sum().rename("_vliq")
+    g = g.join(liq, on="sku")
+    g["pct_liquidacion"] = _ratio(g["_vliq"].fillna(0), g["venta_soles"])
+    g = g.drop(columns=["_vliq"])
+
+    g = g[g["unidades"] != 0].sort_values(por, ascending=False).reset_index(drop=True)
+    g.insert(0, "rk", range(1, len(g) + 1))
+    return g.head(top) if top else g
+
+
+def bestsellers_color(trans: pd.DataFrame, top: int | None = None,
+                      por="venta_soles", nivel="color") -> pd.DataFrame:
+    """Ranking a nivel color (o talla), que el Micro no puede dar.
+
+    El Micro llega hasta el estilo: 103 códigos para Spavaldi, sin una sola
+    columna de color. El transaccional trae 150 opciones (estilo×color) y 639
+    SKUs con talla, así que para la pregunta "qué colores se venden" esta es la
+    única fuente.
+
+    OJO con la ventana: el transaccional y el Micro cubren periodos distintos.
+    Acá se agrega lo que venga en `trans` — filtra por fecha ANTES de llamar si
+    quieres que calce con la ventana del Micro.
+    """
+    ejes = {"color": ["estilo", "color"], "talla": ["estilo", "color", "talla"],
+            "solo_color": ["color"]}[nivel]
+    ejes = [e for e in ejes if e in trans.columns]
+    if not ejes:
+        raise ValueError("El transaccional no trae columnas de color/talla.")
+
+    g = trans.groupby(ejes, dropna=False).agg(
+        linea=("linea", "first"),
+        unidades=("unidades", "sum"), venta_soles=("venta_soles", "sum"),
+        contribucion=("contribucion", "sum"),
+        tiendas=("cod_tienda", "nunique"),
+    ).reset_index()
+    g["margen"] = _ratio(g["contribucion"], g["venta_soles"])
+    g["precio_real"] = _ratio(g["venta_soles"] * IGV, g["unidades"])
+    g = g[g["unidades"] != 0].sort_values(por, ascending=False).reset_index(drop=True)
+    g.insert(0, "rk", range(1, len(g) + 1))
+    return g.head(top) if top else g

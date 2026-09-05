@@ -123,6 +123,50 @@ Después de cualquier cambio >50 líneas o reestructuración, correr auditoría 
 5. Constantes y colores (py_compile NO detecta NameError en f-strings)
 6. Reporte final
 
+### Regla de los cuadres (Franco, 2026-09-02)
+Todo test que valide el código contra una **referencia externa** (el Excel de
+Planificación, un reporte oficial, una fórmula de negocio) debe **invocar el
+motor y comparar su salida** contra esa referencia. Verificar que la referencia
+es consistente consigo misma no prueba nada del código.
+
+Origen: la primera versión de `tests/test_cuadre_fl.py` pasaba sus 4 asserts y
+el reporte decía "el motor reproduce la hoja FL", pero 3 de los 4 tests no
+ejecutaban una línea de `flujo_engine` — verificaban celdas del Excel entre sí.
+
+- La regla está **como código** en `tests/test_meta_cuadres.py`: recorre el AST
+  de todo archivo `*cuadre*.py` y falla si una función de test no invoca el
+  motor. Correrlo junto con el resto de la suite.
+- Las tolerancias se fijan **sobre el desvío medido**, no se suben de a una
+  hasta que el test pase. Medir la distribución completa primero y documentar
+  cada tolerancia con su máximo observado y su causa.
+- Agregar además una **guarda de materialidad relativa** (ej. desvío anual
+  < 0,01%): detecta desalineamientos reales aunque cada periodo quede bajo su
+  umbral absoluto.
+
+### Integridad de inventario (Franco, 2026-09-02)
+La identidad `stock(t) = stock(t-1) + compra(t) - venta_a_costo(t)` es
+**recursiva**, así que un mes descuadrado envenena todo lo que se calcule desde
+ahí. Es la revisión crítica del módulo de planificación y corre sola:
+
+- **En cada carga**: `flujo_ingesta.cargar_bd_fl()` audita todas las series del
+  año vigente y emite un warning con marca, línea y soles desviados.
+- **En cada proyección**: `flujo_engine.proyectar()` valida por defecto y
+  levanta `SerieNoConfiable` si el año base tiene periodos rotos. El escape
+  (`validar=False`) es explícito y queda en el código de quien lo pide.
+- **En la suite**: `tests/test_integridad_inventario.py` corre sobre TODAS las
+  series, no sobre la marca que uno mira.
+
+Dos matices que definieron el diseño:
+1. **Histórico vs proyección.** En el histórico cada periodo trae su stock
+   MEDIDO, así que un mes roto es un error local (captura mal imputada) y no
+   invalida un mes posterior que sí cuadra. En la proyección el stock se
+   calcula encadenado y el error sí se arrastra. Por eso la contaminación se
+   evalúa en **ventana móvil** (`VENTANA_CONFIANZA`), no sin límite: la primera
+   versión propagaba para siempre y bloqueaba 99 de 102 series, incluidas
+   algunas con desvío exactamente cero. Una guarda que bloquea todo se apaga.
+2. **Stock cercano a cero.** El desvío relativo explota (un caso real dio
+   6e18%). Bajo `STOCK_MINIMO_PARA_PCT` se juzga por desvío absoluto.
+
 ### Debugging
 Trazar dato de inicio a fin. Poner debug al FINAL del flujo, no al inicio. No asumir que la detección es el problema — leer funciones COMPLETAS.
 

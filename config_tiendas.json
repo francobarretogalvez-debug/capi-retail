@@ -9,35 +9,95 @@
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 49.0,
+        "DOCKERS": 24.0,
+        "JOHN HOLDEN": 23.0,
+        "LACOSTE": 27.0,
+        "MARQUIS": 92.0,
+        "NAUTICA": 31.0,
+        "NAVIGATA": 47.0,
+        "OSCAR DE LA RENTA": 18.0,
+        "PIERRE CARDIN": 38.0,
+        "SELECTED": 27.0,
+        "SILBON": 30.0,
+        "SPAVALDI": 32.0,
+        "US POLO": 26.0
+      }
     },
     "SM": {
       "nombre": "San Miguel",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 52.0,
+        "DOCKERS": 31.0,
+        "JOHN HOLDEN": 34.0,
+        "LACOSTE": 35.0,
+        "MARQUIS": 48.0,
+        "NAUTICA": 16.0,
+        "NAVIGATA": 62.0,
+        "OSCAR DE LA RENTA": 39.0,
+        "PIERRE CARDIN": 29.0,
+        "SELECTED": 28.0,
+        "SPAVALDI": 32.0,
+        "US POLO": 37.0
+      }
     },
     "MIRAF": {
       "nombre": "Miraflores",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 34.0,
+        "DOCKERS": 32.0,
+        "LACOSTE": 29.0,
+        "MARQUIS": 68.0,
+        "NAUTICA": 22.0,
+        "NAVIGATA": 52.0,
+        "OSCAR DE LA RENTA": 32.0,
+        "PIERRE CARDIN": 23.0,
+        "SELECTED": 22.0,
+        "SILBON": 16.0,
+        "SPAVALDI": 36.0,
+        "US POLO": 34.0
+      }
     },
     "SI": {
       "nombre": "San Isidro",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 33.0,
+        "DOCKERS": 21.0,
+        "JOHN HOLDEN": 25.0,
+        "LACOSTE": 26.0,
+        "MARQUIS": 59.0,
+        "NAVIGATA": 45.0,
+        "SELECTED": 20.0,
+        "US POLO": 32.0
+      }
     },
     "PRIM": {
       "nombre": "Primavera",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 40.0,
+        "DOCKERS": 25.0,
+        "JOHN HOLDEN": 43.0,
+        "LACOSTE": 3.0,
+        "MARQUIS": 65.0,
+        "NAVIGATA": 60.0,
+        "OSCAR DE LA RENTA": 21.0,
+        "SELECTED": 35.0,
+        "SPAVALDI": 37.0,
+        "US POLO": 37.0
+      }
     },
     "LO": {
       "nombre": "Los Olivos",
@@ -46,35 +106,75 @@
       "alias_transaccional": [
         "Los Olivos"
       ],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 37.0,
+        "MARQUIS": 72.0,
+        "NAVIGATA": 68.0,
+        "PIERRE CARDIN": 18.0,
+        "US POLO": 17.0
+      }
     },
     "AQP": {
       "nombre": "Arequipa",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 27.0,
+        "DOCKERS": 29.0,
+        "JOHN HOLDEN": 37.0,
+        "LACOSTE": 17.0,
+        "MARQUIS": 57.0,
+        "NAVIGATA": 50.0,
+        "OSCAR DE LA RENTA": 16.0,
+        "PIERRE CARDIN": 29.0,
+        "SELECTED": 18.0,
+        "US POLO": 20.0
+      }
     },
     "CHIC": {
       "nombre": "Chiclayo",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 15.0,
+        "DOCKERS": 15.0,
+        "JOHN HOLDEN": 44.0,
+        "MARQUIS": 51.0,
+        "NAVIGATA": 45.0,
+        "PIERRE CARDIN": 19.0
+      }
     },
     "CHO": {
       "nombre": "Chorrillos",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 53.0,
+        "DOCKERS": 42.0,
+        "JOHN HOLDEN": 52.0,
+        "MARQUIS": 74.0,
+        "NAUTICA": 1.0,
+        "NAVIGATA": 53.0,
+        "OSCAR DE LA RENTA": 28.0,
+        "SELECTED": 19.0,
+        "US POLO": 30.0
+      }
     },
     "Breña": {
       "nombre": "Breña",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 22.0,
+        "JOHN HOLDEN": 18.0,
+        "MARQUIS": 36.0,
+        "NAVIGATA": 31.0,
+        "NORTON": 11.0
+      }
     },
     "PLN": {
       "nombre": "Plaza Norte",
@@ -83,21 +183,54 @@
       "alias_transaccional": [
         "PLAZA LIMA NORTE"
       ],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 33.0,
+        "DOCKERS": 12.0,
+        "JOHN HOLDEN": 13.0,
+        "MARQUIS": 43.0,
+        "NAVIGATA": 47.0,
+        "PIERRE CARDIN": 21.0,
+        "SPAVALDI": 23.0,
+        "US POLO": 13.0
+      }
     },
     "SLVR": {
       "nombre": "Salaverry",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 34.0,
+        "DOCKERS": 20.0,
+        "JOHN HOLDEN": 14.0,
+        "LACOSTE": 19.0,
+        "MARQUIS": 64.0,
+        "NAUTICA": 19.0,
+        "NAVIGATA": 37.0,
+        "OSCAR DE LA RENTA": 24.0,
+        "PIERRE CARDIN": 19.0,
+        "SELECTED": 16.0,
+        "SPAVALDI": 20.0
+      }
     },
     "SB": {
       "nombre": "San Borja",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 46.0,
+        "DOCKERS": 29.0,
+        "JOHN HOLDEN": 20.0,
+        "LACOSTE": 25.0,
+        "MARQUIS": 84.0,
+        "NAVIGATA": 63.0,
+        "OSCAR DE LA RENTA": 24.0,
+        "PIERRE CARDIN": 25.0,
+        "SELECTED": 34.0,
+        "SPAVALDI": 25.0,
+        "US POLO": 19.0
+      }
     },
     "STA ANITA": {
       "nombre": "Santa Anita",
@@ -106,49 +239,91 @@
       "alias_transaccional": [
         "Santa Anita"
       ],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 20.0,
+        "JOHN HOLDEN": 20.0,
+        "MARQUIS": 76.0,
+        "NAVIGATA": 48.0,
+        "SELECTED": 20.0,
+        "US POLO": 19.0
+      }
     },
     "TRUJ": {
       "nombre": "Trujillo",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 16.0,
+        "DOCKERS": 20.0,
+        "JOHN HOLDEN": 16.0,
+        "LACOSTE": 19.0,
+        "MARQUIS": 43.0,
+        "NAVIGATA": 36.0,
+        "OSCAR DE LA RENTA": 16.0,
+        "SPAVALDI": 16.0,
+        "US POLO": 16.0
+      }
     },
     "CAJ": {
       "nombre": "Cajamarca",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 1.0,
+        "JOHN HOLDEN": 24.0,
+        "MARQUIS": 35.0,
+        "NAVIGATA": 36.0
+      }
     },
     "CBT": {
       "nombre": "Chimbote",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 25.0,
+        "MARQUIS": 35.0,
+        "NAVIGATA": 37.0
+      }
     },
     "HYO": {
       "nombre": "Huancayo",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 10.0,
+        "JOHN HOLDEN": 31.0,
+        "LACOSTE": 1.0,
+        "MARQUIS": 28.0,
+        "NAVIGATA": 27.0,
+        "US POLO": 20.0
+      }
     },
     "ICA": {
       "nombre": "Ica",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 17.0,
+        "JOHN HOLDEN": 18.0,
+        "MARQUIS": 47.0,
+        "NAVIGATA": 35.0,
+        "PIERRE CARDIN": 19.0
+      }
     },
     "JULIACA": {
       "nombre": "Juliaca",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "MARQUIS": 32.0,
+        "NAVIGATA": 29.0
+      }
     },
     "PIU2": {
       "nombre": "Piura",
@@ -157,7 +332,19 @@
       "alias_transaccional": [
         "PIURAII"
       ],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 9.0,
+        "DOCKERS": 20.0,
+        "JOHN HOLDEN": 21.0,
+        "LACOSTE": 24.0,
+        "MARQUIS": 42.0,
+        "NAUTICA": 24.0,
+        "NAVIGATA": 30.0,
+        "OSCAR DE LA RENTA": 11.0,
+        "PIERRE CARDIN": 21.0,
+        "SPAVALDI": 38.0,
+        "US POLO": 16.0
+      }
     },
     "MAC LARCO": {
       "nombre": "Mac Larco",
@@ -173,7 +360,12 @@
       "alias_transaccional": [
         "Ripley Callao"
       ],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 27.0,
+        "MARQUIS": 63.0,
+        "NAVIGATA": 52.0,
+        "NORTON": 27.0
+      }
     },
     "TV PI": {
       "nombre": "Tienda Virtual PI",
@@ -215,21 +407,48 @@
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 68.0,
+        "DOCKERS": 18.0,
+        "JOHN HOLDEN": 53.0,
+        "MARQUIS": 52.0,
+        "NAVIGATA": 47.0,
+        "OSCAR DE LA RENTA": 23.0,
+        "PIERRE CARDIN": 33.0,
+        "SELECTED": 28.0,
+        "SPAVALDI": 37.0,
+        "US POLO": 16.0
+      }
     },
     "CAY": {
       "nombre": "Cayma",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 31.0,
+        "DOCKERS": 25.0,
+        "JOHN HOLDEN": 26.0,
+        "LACOSTE": 24.0,
+        "MARQUIS": 46.0,
+        "NAVIGATA": 43.0,
+        "OSCAR DE LA RENTA": 20.0,
+        "PIERRE CARDIN": 23.0,
+        "SPAVALDI": 31.0,
+        "US POLO": 5.0
+      }
     },
     "PUCALPA I": {
       "nombre": "Pucallpa",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 23.0,
+        "JOHN HOLDEN": 15.0,
+        "MARQUIS": 38.0,
+        "NAVIGATA": 39.0
+      }
     },
     "MAC PLN": {
       "nombre": "Mac Plaza Norte",
@@ -257,7 +476,15 @@
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 36.0,
+        "DOCKERS": 35.0,
+        "JOHN HOLDEN": 44.0,
+        "MARQUIS": 69.0,
+        "NAVIGATA": 56.0,
+        "OSCAR DE LA RENTA": 4.0,
+        "SELECTED": 15.0
+      }
     },
     "EST TRU": {
       "nombre": "Estacional Trujillo",
@@ -280,7 +507,13 @@
       "alias_transaccional": [
         "CHICLAYO II"
       ],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 20.0,
+        "JOHN HOLDEN": 25.0,
+        "MARQUIS": 80.0,
+        "NAVIGATA": 43.0,
+        "SPAVALDI": 25.0
+      }
     },
     "CO": {
       "nombre": "Comas",
@@ -289,14 +522,26 @@
       "alias_transaccional": [
         "COMAS"
       ],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 50.0,
+        "JOHN HOLDEN": 27.0,
+        "MARQUIS": 103.0,
+        "NAVIGATA": 50.0,
+        "OSCAR DE LA RENTA": 25.0,
+        "US POLO": 9.0
+      }
     },
     "IQT": {
       "nombre": "Iquitos",
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 21.0,
+        "JOHN HOLDEN": 18.0,
+        "MARQUIS": 41.0,
+        "NAVIGATA": 31.0
+      }
     },
     "OPLN": {
       "nombre": "Outlet Plaza Lima Norte",
@@ -317,7 +562,16 @@
       "canal": "tienda",
       "activa": true,
       "alias_transaccional": [],
-      "m2_corner": {}
+      "m2_corner": {
+        "CACHAREL": 22.0,
+        "JOHN HOLDEN": 18.0,
+        "MARQUIS": 40.0,
+        "NAVIGATA": 22.0,
+        "OSCAR DE LA RENTA": 18.0,
+        "US POLO": 13.0
+      }
     }
-  }
+  },
+  "_fuente_m2": "Reporte de Venta y Margen Comercial (Power BI), capturas jun/jul 2026, más 5 corners Spavaldi entregados por Franco el 2026-08-26. Los m2 son layout: no varían mes a mes, por eso la mezcla de capturas no afecta este maestro. Cargado 2026-08-26.",
+  "_regla_m2": "m2 ausente = dato faltante, NO metraje cero. Las métricas por m2 salen vacías para esas tiendas; nunca se imputa ni se divide por cero."
 }

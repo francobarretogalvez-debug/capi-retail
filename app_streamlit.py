@@ -32,6 +32,8 @@ import renderers_alertas_tienda as R_at
 importlib.reload(R_at)
 import transformar_profundidad as etl_profundidad
 importlib.reload(etl_profundidad)
+import vista_planificacion as vista_plan
+importlib.reload(vista_plan)
 
 # Snapshots Engine — histórico semanal (Prompt B)
 try:
@@ -83,6 +85,9 @@ import reportes_marcas
 import acciones_log
 import analisis_estados
 import rendimiento_tienda as rend_t
+import reporte_semanal as rep_sem
+import agente_reporte as ag_rep
+import calendario_ripley as cal_rip
 
 # ══════════════════════════════════════════════════════════════
 #  CONFIG DE PÁGINA
@@ -700,9 +705,12 @@ with st.sidebar:
                     st.session_state["nav_page"] = _full
                     st.rerun()
 
-        # (Gestión de Stock y Gestión Comercial eliminadas del menú: Cobertura
-        #  pasó a Visión General como "Cobertura x Tienda" y Acciones Precio se
-        #  quitó. Sus cálculos siguen en el motor.)
+        # (Gestión de Stock y Gestión Comercial se quitaron del menú; sus cálculos
+        #  siguen en el motor. La vista de cobertura por tienda se eliminó el
+        #  2026-09-04: su ETL filtraba como "mercadería inactiva" todo lo PV con
+        #  más de 40 semanas, así que escondía justo el stock viejo — Iquitos
+        #  mostraba 6 unidades cuando tenía 806. La cobertura ahora vive en
+        #  Rendimiento de Marca, que lee el stock directo del micro.)
 
         if not _DEMO_MODE:
             # ── ANÁLISIS PREDICTIVO ──
@@ -710,6 +718,7 @@ with st.sidebar:
 
             _NAV_PREDICTIVO = [
                 ("🎯", "Match Producto-Plaza"),
+                ("📊", "Planificación"),
             ]
 
             for _icon, _label in _NAV_PREDICTIVO:
@@ -728,7 +737,6 @@ with st.sidebar:
         # venta cero y antigüedad. Separadas de Visión General (solo Dashboard).
         _NAV_ESTADO = [
             ("🩺", "Salud del Stock"),
-            ("📈", "Cobertura x Tienda"),
             ("📲", "Productos Venta Cero"),
             ("📊", "Gestión por Antigüedad"),
             ("🏆", "Caso de Éxito"),
@@ -757,8 +765,8 @@ with st.sidebar:
         # Sección propia: cruza marcas propias y terceras, así que no encaja en
         # ninguno de los dos clusters de gestión. Responde contribución/m², que
         # junto con EBITDA es lo que mira el dueño para área comercial.
-        _NAV_RENDIMIENTO = [("📐", "Rendimiento por Tienda")]
-        st.markdown('<div class="sidebar-section-label">RENDIMIENTO POR TIENDA</div>', unsafe_allow_html=True)
+        _NAV_RENDIMIENTO = [("📐", "Rendimiento de Marca")]
+        st.markdown('<div class="sidebar-section-label">RENDIMIENTO DE MARCA</div>', unsafe_allow_html=True)
         for _icon, _label in _NAV_RENDIMIENTO:
             _full = f"{_icon} {_label}"
             _is_active = st.session_state["nav_page"] == _full
@@ -1147,6 +1155,17 @@ def _rt_cargar_micro(_path, marca, semanas=4):
         except (ValueError, rend_t.FormatoMicroError):
             pass  # cortes con huecos o formato viejo: se usa solo el actual
     return rend_t.desde_micro(pd.read_excel(_path), marcas=marca), 1, []
+
+
+# ── Rendimiento de Marca: base transaccional (color y talla) ──
+# El Micro llega hasta el estilo. Para "qué colores se venden" hace falta la
+# base de ventas a nivel línea de ticket, que es la única con color y talla.
+@st.cache_data(show_spinner=False)
+def _rt_cargar_trans(_bytes, marca):
+    import io as _io
+    df = pd.read_excel(_io.BytesIO(_bytes))
+    t = rend_t.cargar_transaccional(df)
+    return t[t["marca"].map(rend_t._norm) == rend_t._norm(marca)] if marca else t
 
 
 # ── Helper: agregar columnas de precio + fórmula Nuevo Margen a Excel ──
@@ -2775,91 +2794,11 @@ elif nav_page == "🩺 Salud del Stock":
                                        file_name="Capi_Ranking_Componentes.xlsx",
                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                        key="hs_dl_componentes")
+
+
 # ═══════════════════════════════════════════════════════════════
 #  DETALLE — Vistas de análisis granular
 # ═══════════════════════════════════════════════════════════════
-
-# ─── TAB 1: Cobertura ─────────────────────────────────────────
-#  Resumen por MARCA con desplegable por TIENDA
-
-elif nav_page == "📈 Cobertura x Tienda":
-    st.markdown(f'<div class="section-header"><h3>📈 Cobertura x Tienda</h3><span class="live-badge">POR TIENDA</span></div>', unsafe_allow_html=True)
-    st.caption("Cobertura por tienda (Stock Total / Venta Semanal). Filtra por marca para revisar marca por marca, "
-               "y ordena de mayor a menor o viceversa.")
-
-    _cbt_c1, _cbt_c2 = st.columns([2, 1])
-    with _cbt_c1:
-        _cbt_marcas = ["Todas las marcas"] + (sorted(df_cob["marca"].dropna().unique().tolist()) if "marca" in df_cob.columns else [])
-        _cbt_marca = st.selectbox("Marca", _cbt_marcas, key="cbt_marca")
-    with _cbt_c2:
-        _cbt_orden = st.radio("Orden", ["Mayor cobertura", "Menor cobertura"], key="cbt_orden")
-
-    _cbt = df_cob.copy()
-    if _cbt_marca != "Todas las marcas" and "marca" in _cbt.columns:
-        _cbt = _cbt[_cbt["marca"] == _cbt_marca]
-
-    if _cbt.empty or "tienda" not in _cbt.columns:
-        st.info("No hay datos de cobertura para la selección actual.")
-    else:
-        _cbt_t = _cbt.groupby("tienda").agg(
-            stock_uds=("stock_total", "sum"),
-            vta_sem=("prom_vta_uds", "sum"),
-            capital=("stock_valor_costo", "sum"),
-            n_skus=("sku", "nunique"),
-        ).reset_index()
-        _cbt_t["cobertura"] = _cbt_t.apply(
-            lambda r: round(r["stock_uds"] / r["vta_sem"], 1) if r["vta_sem"] > 0 else None, axis=1
-        )
-        _cbt_t = _cbt_t.sort_values("cobertura", ascending=(_cbt_orden == "Menor cobertura"), na_position="last")
-
-        _ctx = _cbt_marca if _cbt_marca != "Todas las marcas" else "todas las marcas"
-        st.caption(f"{len(_cbt_t)} tiendas · {_ctx} · capital S/ {_cbt_t['capital'].sum():,.0f}")
-
-        _cbt_disp = _cbt_t[["tienda", "cobertura", "capital", "stock_uds", "vta_sem", "n_skus"]].rename(columns={
-            "tienda": "Tienda", "cobertura": "Cobertura (sem)", "capital": "Capital S/",
-            "stock_uds": "Stock (uds)", "vta_sem": "Vta/sem (uds)", "n_skus": "SKUs",
-        })
-        st.dataframe(_cbt_disp.style.format({
-            "Cobertura (sem)": "{:.1f}", "Capital S/": "S/ {:,.0f}", "Stock (uds)": "{:,.0f}", "Vta/sem (uds)": "{:,.0f}",
-        }, na_rep="—"), use_container_width=True, hide_index=True, height=560)
-
-        # Detalle SKU×tienda: qué SKUs generan la cobertura extrema (para atacar)
-        _cbt_asc = (_cbt_orden == "Menor cobertura")
-        _ot = {t: i for i, t in enumerate(_cbt_t["tienda"])}
-        _det = _cbt.copy()
-        _det["_ot"] = _det["tienda"].map(_ot)
-        _det = _det.sort_values(["_ot", "cobertura_sem"], ascending=[True, _cbt_asc], na_position="last")
-        _det_cols = [c for c in ["tienda", "marca", "sku", "nombre", "categoria", "cobertura_sem",
-                                 "estado", "stock_total", "stock_valor_costo", "prom_vta_uds",
-                                 "pct_descuento", "edad_semanas"] if c in _det.columns]
-        _det_out = _det[_det_cols].rename(columns={
-            "tienda": "Tienda", "marca": "Marca", "sku": "SKU", "nombre": "Producto", "categoria": "Línea",
-            "cobertura_sem": "Cobertura (sem)", "estado": "Estado", "stock_total": "Stock (uds)",
-            "stock_valor_costo": "Capital S/", "prom_vta_uds": "Vta/sem", "pct_descuento": "Dscto",
-            "edad_semanas": "Edad (sem)",
-        })
-
-        _cbt_buf = io.BytesIO()
-        with pd.ExcelWriter(_cbt_buf, engine="openpyxl") as _w:
-            _cbt_disp.to_excel(_w, sheet_name="Resumen x Tienda", index=False)
-            _det_out.to_excel(_w, sheet_name="Detalle SKU x Tienda", index=False)
-        _cbt_buf.seek(0)
-        _cbt_extremo = "menor a mayor" if _cbt_asc else "mayor a menor"
-        st.download_button("📥 Descargar cobertura x tienda + detalle SKU (.xlsx)", data=_cbt_buf.getvalue(),
-                           file_name="Capi_Cobertura_x_Tienda.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           use_container_width=True, key="dl_cob_tienda",
-                           help=f"2 hojas: resumen por tienda + detalle de SKUs por tienda ordenados por cobertura ({_cbt_extremo}) para identificar qué atacar")
-# ═══════════════════════════════════════════════════════════════
-#  🤝 AGENTE TERCERAS — primer agente de Capi
-#  Detecta oportunidades con marcas terceras y genera BORRADORES de
-#  correo a proveedores. Nunca envía solo: Franco aprueba y envía.
-# ═══════════════════════════════════════════════════════════════
-
-
-
-# ─── GESTIÓN DE MARCAS: vistas unificadas con selector de universo ────
-# (fusión C2 2026-08-26, decisión Franco: 8 vistas eran 4 pares idénticos)
 
 elif nav_page == "📦 Reposición":
     st.markdown(f'<div class="section-header"><h3>📦 Reposición</h3><span class="live-badge">POR MARCA</span></div>', unsafe_allow_html=True)
@@ -4172,9 +4111,17 @@ Se calcula por cada combo **SKU × tienda** candidato:
                         st.success(f"🏭 **{len(_propias_prod)} señales de marcas propias** — tienes control de producción para responder.")
 # ─── Rendimiento por Tienda ─────────────────────────────────
 
-elif nav_page == "📐 Rendimiento por Tienda":
-    st.markdown('<div class="section-header"><h3>📐 Rendimiento por Tienda</h3>'
-                '<span class="live-badge">CONTRIBUCIÓN / M²</span></div>', unsafe_allow_html=True)
+elif nav_page == "📊 Planificación":
+    # Toda la vista vive en vista_planificacion.py (módulo aislado): este
+    # bloque solo delega. Ver la nota de scoping en el encabezado del módulo.
+    vista_plan.render(st)
+
+elif nav_page == "📐 Rendimiento de Marca":
+    # El nav dice Spavaldi porque es el caso de uso vivo, pero el módulo es
+    # genérico: el encabezado sigue a la marca que se elija en el selector.
+    _rt_titulo = st.empty()
+    _rt_titulo.markdown('<div class="section-header"><h3>📐 Rendimiento de Marca</h3>'
+                        '<span class="live-badge">CONTRIBUCIÓN / M²</span></div>', unsafe_allow_html=True)
 
     _rt_path = st.session_state.get("_base_profundidad_path")
     if not _rt_path or not os.path.exists(_rt_path):
@@ -4189,6 +4136,9 @@ elif nav_page == "📐 Rendimiento por Tienda":
             _rt_marca = st.selectbox("Marca", _rt_marcas, index=_rt_default, key="rend_t_marca")
 
         _rt_sem, _rt_cortes = 1, []
+        _rt_titulo.markdown(
+            f'<div class="section-header"><h3>📐 {_rt_marca.title()} — rendimiento por tienda</h3>'
+            f'<span class="live-badge">CONTRIBUCIÓN / M²</span></div>', unsafe_allow_html=True)
         try:
             _rt_largo, _rt_sem, _rt_cortes = _rt_cargar_micro(_rt_path, _rt_marca)
         except rend_t.FormatoMicroError as _e:
@@ -4203,7 +4153,12 @@ elif nav_page == "📐 Rendimiento por Tienda":
         else:
             _rt_largo = rend_t.clasificar_liquidacion(_rt_largo)
             _rt_m = rend_t.metricas_por_tienda(_rt_largo, marca=_rt_marca, semanas=_rt_sem)
-            _rt_vivas = _rt_m[_rt_m["unidades"] > 0]
+            # Activa = movió unidades O soles. No basta con unidades != 0:
+            # Chorrillos cerró la ventana con 0 unidades netas pero −S/58, porque
+            # la venta y la devolución fueron a precios distintos. Con el filtro
+            # por unidades la tienda desaparecía del listado pero su plata seguía
+            # en los KPIs, y los dos números no cuadraban.
+            _rt_vivas = _rt_m[(_rt_m["unidades"] != 0) | (_rt_m["venta_soles"] != 0)]
             # Las pestañas de análisis van solo sobre tiendas con metraje: son
             # locales que venden a precio y ocupan espacio. Ecommerce, outlets y
             # liquidadoras tienen su propio bloque — mezclarlos ensucia la
@@ -4211,10 +4166,10 @@ elif nav_page == "📐 Rendimiento por Tienda":
             _rt_con = _rt_vivas[_rt_vivas["m2"].notna()]
             _rt_sin = _rt_vivas[_rt_vivas["m2"].isna()]
 
-            _rt_und = _rt_m["unidades"].sum()
-            _rt_vta = _rt_m["venta_soles"].sum()
+            _rt_und = _rt_vivas["unidades"].sum()
+            _rt_vta = _rt_vivas["venta_soles"].sum()
             _rt_contrib = _rt_m["contribucion"].sum()
-            _rt_liq = _rt_m["venta_liq"].sum()
+            _rt_liq = _rt_vivas["venta_liq"].sum()
             _k = st.columns(5)
             _k[0].markdown(_kpi_html(f"S/ {_rt_vta:,.0f}",
                                      f"Venta neta ({_rt_sem} sem)" if _rt_sem > 1 else "Venta neta (semana)"),
@@ -4238,8 +4193,9 @@ elif nav_page == "📐 Rendimiento por Tienda":
                            f"de la venta ({', '.join(_rt_sin['tienda'].head(4))}) va al final, porque no "
                            f"tiene metraje contra el cual medirse.")
 
-            _t1, _t2, _t3, _t4, _t5 = st.tabs(
-                ["📋 Resumen", "📐 Rendimiento m²", "📦 Cobertura", "📅 Evolución", "⚖️ Comparar marcas"])
+            _t1, _t2, _t3, _t7, _t4, _t5, _t6 = st.tabs(
+                ["📋 Resumen", "📐 Rendimiento m²", "📦 Cobertura", "🏆 Best sellers",
+                 "📅 Evolución", "⚖️ Comparar marcas", "✉️ Correo a gerencia"])
 
             # ── Resumen: P&L partido temporada / liquidación ──
             with _t1:
@@ -4326,11 +4282,124 @@ elif nav_page == "📐 Rendimiento por Tienda":
 
             # ── Evolución ──
             with _t4:
-                st.info("La serie mensual necesita acumular snapshots semanales por tienda — el Micro "
-                        "solo trae la última semana. Está planificado como fase siguiente, junto con "
-                        "el backfill del histórico desde la base transaccional.\n\n"
-                        "Ojo con la unidad: el calendario de Ripley es 4-4-5, así que un mes calendario "
-                        "nunca se compone exacto desde semanas. La serie va a ir por **Periodo**.")
+                st.caption("El mes se toma como las últimas 4 semanas, sin meterse con el calendario "
+                           "comercial. Acá va la evolución semana a semana dentro de esa ventana.")
+                if "semana_idx" not in _rt_largo.columns or _rt_sem < 2:
+                    st.info("Con un solo corte no hay evolución que mostrar. Guarda el Micro cada "
+                            "semana y la serie se arma sola.")
+                else:
+                    _ev = _rt_largo[_rt_largo["cod_tienda"].isin(_rt_con["cod_tienda"])]
+                    _ev = _ev.groupby(["semana_idx", "fecha_corte"], dropna=False).agg(
+                        unidades=("unidades", "sum"), venta_soles=("venta_soles", "sum"),
+                        contribucion=("contribucion", "sum")).reset_index()
+                    _ev["margen"] = np.where(_ev.venta_soles > 0,
+                                             _ev.contribucion / _ev.venta_soles, np.nan)
+                    _ev["Semana"] = _ev["fecha_corte"].dt.strftime("Cierre %d-%b")
+                    st.dataframe(_ev[["Semana", "unidades", "venta_soles", "contribucion", "margen"]]
+                                 .rename(columns={"unidades": "Und", "venta_soles": "Venta S/",
+                                                  "contribucion": "Contribución S/", "margen": "Margen"})
+                                 .style.format({"Und": "{:,.0f}", "Venta S/": "{:,.0f}",
+                                                "Contribución S/": "{:,.0f}", "Margen": "{:.1%}"},
+                                               na_rep="—"),
+                                 use_container_width=True, hide_index=True)
+                    st.line_chart(_ev.set_index("Semana")[["venta_soles", "contribucion"]],
+                                  use_container_width=True)
+                    _ev_d = _ev.venta_soles.iloc[-1] - _ev.venta_soles.iloc[0]
+                    st.caption(f"Entre el primer y el último corte la venta semanal "
+                               f"{'subió' if _ev_d >= 0 else 'bajó'} S/ {abs(_ev_d):,.0f}. "
+                               f"Solo tiendas con m² asignado, para que cuadre con los otros cuadros.")
+
+            # ── Best sellers ──
+            with _t7:
+                st.caption(f"Ordenado por venta de la ventana de {_rt_sem} semanas. **El grano es el "
+                           f"ESTILO**: el reporte micro no baja a color ni talla. Para el detalle por "
+                           f"color hace falta la base transaccional — está abajo. Stock del último corte.")
+                _bs_n = st.slider("Cuántos mostrar", 5, 60, 20, 5, key="rend_t_bs_n")
+                _bs_por = st.radio("Ordenar por", ["venta_soles", "contribucion", "unidades"],
+                                   format_func=lambda x: {"venta_soles": "Venta S/",
+                                                          "contribucion": "Contribución",
+                                                          "unidades": "Unidades"}[x],
+                                   horizontal=True, key="rend_t_bs_por")
+                _bs = rend_t.bestsellers(_rt_largo, top=_bs_n, por=_bs_por)
+                st.dataframe(_bs[["rk", "descripcion", "linea", "unidades", "venta_soles",
+                                  "contribucion", "margen", "precio_real", "stock_uds",
+                                  "cobertura_sem", "tiendas", "es_liquidacion"]].rename(columns={
+                    "rk": "#", "descripcion": "Producto", "linea": "Línea", "unidades": "Und",
+                    "venta_soles": "Venta S/", "contribucion": "Contribución S/", "margen": "Margen",
+                    "precio_real": "Precio real", "stock_uds": "Stock", "cobertura_sem": "Cobertura",
+                    "tiendas": "Tiendas", "es_liquidacion": "Tipo"}
+                ).style.format({"Und": "{:,.0f}", "Venta S/": "{:,.0f}", "Contribución S/": "{:,.0f}",
+                                "Margen": "{:.1%}", "Precio real": "{:,.0f}", "Stock": "{:,.0f}",
+                                "Cobertura": "{:,.1f}"}, na_rep="—"),
+                    use_container_width=True, hide_index=True, height=460)
+
+                _bs_mal = _bs[_bs.contribucion < 0]
+                if len(_bs_mal):
+                    st.warning("⚠️ Entre los más vendidos hay productos con **contribución negativa**: "
+                               + ", ".join(f"{r.descripcion} (S/ {r.contribucion:,.0f})"
+                                           for _, r in _bs_mal.head(4).iterrows())
+                               + ". Venden volumen pero restan plata.")
+
+                st.markdown("---")
+                st.markdown("**Detalle por color y talla**")
+                st.caption("El reporte micro no baja de estilo. Para ver colores hace falta la base de "
+                           "ventas por línea de ticket (día × tienda × SKU, con color y talla). "
+                           "Súbela acá y el detalle aparece abajo.")
+                _bs_f = st.file_uploader("Base de ventas con color y talla (.xlsx)", type=["xlsx"],
+                                         key="rend_t_trans")
+                if _bs_f is not None:
+                    try:
+                        _bs_t = _rt_cargar_trans(_bs_f.getvalue(), _rt_marca)
+                    except Exception as _e:
+                        _bs_t = None
+                        st.error(f"No pude leer el archivo: {_e}")
+                    if _bs_t is not None and len(_bs_t):
+                        _bs_min, _bs_max = _bs_t["fecha"].min(), _bs_t["fecha"].max()
+                        st.caption(f"{len(_bs_t):,} líneas de venta · {_bs_min:%d-%b-%y} a {_bs_max:%d-%b-%y} · "
+                                   f"{_bs_t['color'].nunique()} colores · {_bs_t['talla'].nunique()} tallas")
+                        # La ventana del transaccional casi nunca coincide con la
+                        # del Micro. Declararlo evita comparar cifras de periodos
+                        # distintos creyendo que son la misma ventana.
+                        if _rt_cortes:
+                            _bs_ini = pd.Timestamp(_rt_cortes[0]) - pd.Timedelta(days=7)
+                            _bs_fin = pd.Timestamp(_rt_cortes[-1])
+                            _bs_dentro = _bs_t[(_bs_t.fecha >= _bs_ini) & (_bs_t.fecha <= _bs_fin)]
+                            if len(_bs_dentro) < len(_bs_t) * 0.5:
+                                st.warning(
+                                    f"⚠️ Este archivo cubre hasta el {_bs_max:%d-%b}, pero la ventana de "
+                                    f"arriba va del {_bs_ini:%d-%b} al {_bs_fin:%d-%b}. Solo "
+                                    f"{len(_bs_dentro):,} de {len(_bs_t):,} líneas caen dentro. "
+                                    f"Elige qué periodo quieres mirar.")
+                            _bs_amb = st.radio(
+                                "Periodo", ["Ventana del micro", "Todo el archivo"],
+                                horizontal=True, key="rend_t_bs_periodo")
+                            _bs_use = _bs_dentro if _bs_amb == "Ventana del micro" else _bs_t
+                        else:
+                            _bs_use = _bs_t
+
+                        if not len(_bs_use):
+                            st.info("No hay ventas en ese periodo.")
+                        else:
+                            _bs_niv = st.radio("Nivel", ["color", "talla", "solo_color"],
+                                               format_func=lambda x: {"color": "Estilo × color",
+                                                                      "talla": "Estilo × color × talla",
+                                                                      "solo_color": "Solo color"}[x],
+                                               horizontal=True, key="rend_t_bs_nivel")
+                            _bs_c = rend_t.bestsellers_color(_bs_use, top=_bs_n, por=_bs_por,
+                                                             nivel=_bs_niv)
+                            _bs_cols = [c for c in ("rk", "estilo", "color", "talla", "linea",
+                                                    "unidades", "venta_soles", "contribucion",
+                                                    "margen", "precio_real", "tiendas")
+                                        if c in _bs_c.columns]
+                            st.dataframe(_bs_c[_bs_cols].rename(columns={
+                                "rk": "#", "estilo": "Estilo", "color": "Color", "talla": "Talla",
+                                "linea": "Línea", "unidades": "Und", "venta_soles": "Venta S/",
+                                "contribucion": "Contribución S/", "margen": "Margen",
+                                "precio_real": "Precio real", "tiendas": "Tiendas"}
+                            ).style.format({"Und": "{:,.0f}", "Venta S/": "{:,.0f}",
+                                            "Contribución S/": "{:,.0f}", "Margen": "{:.1%}",
+                                            "Precio real": "{:,.0f}"}, na_rep="—"),
+                                use_container_width=True, hide_index=True, height=440)
 
             # ── Comparar marcas ──
             with _t5:
@@ -4347,11 +4416,78 @@ elif nav_page == "📐 Rendimiento por Tienda":
                     st.caption("Participación calculada solo sobre tiendas donde alguna de las marcas "
                                "vende. Dos marcas no están en las mismas tiendas, así que el total "
                                "global no es comparable sin esta salvedad.")
+                    # Totalizado: Majo lo pidió explícitamente ("y también tener
+                    # un totalizado"). Va como fila, no como métrica aparte.
+                    _num = [c for c in _cmp.columns if c != "tienda"]
+                    _tot = {"tienda": "TOTAL (tiendas con m²)"}
+                    for _c in _num:
+                        _tot[_c] = _cmp[_c].sum() if not str(_c).startswith(("pct_",)) and "_vs_" not in str(_c) else None
+                    _a, _b = rend_t._norm(_rt_marca), rend_t._norm(_vs[0])
+                    if _a in _cmp.columns and _b in _cmp.columns and _cmp[_b].sum():
+                        _tot[f"{_a}_vs_{_b}"] = _cmp[_a].sum() / _cmp[_b].sum()
+                    _cmp = pd.concat([_cmp, pd.DataFrame([_tot])], ignore_index=True)
                     st.dataframe(_cmp.style.format(
                         {c: "{:,.0f}" for c in _cmp.columns if c not in ("tienda",)
                          and not str(c).startswith("pct_") and not str(c).endswith("_vs_" + _vs[0])}
                         | {c: "{:.1%}" for c in _cmp.columns if str(c).startswith("pct_")},
                         na_rep="—"), use_container_width=True, hide_index=True, height=420)
+
+
+            # ── Correo a gerencia ──
+            with _t6:
+                st.caption("Genera el borrador del correo semanal con las cifras de esta ventana. "
+                           "**El agente redacta, no calcula**: recibe los números ya verificados por el "
+                           "motor y solo los pone en prosa. Siempre es un borrador — nada se envía solo.")
+
+                # Sin value=: con key, Streamlit ya persiste el contenido en
+                # session_state, y pasar ambos lanza StreamlitAPIException.
+                _ag_pre = st.text_area(
+                    "¿Qué preguntó la gerencia? (opcional)", height=100, key="rend_t_preg",
+                    help="Pega acá sus preguntas y el correo las responde punto por punto, en ese orden.")
+
+                _ag_c1, _ag_c2 = st.columns([1, 2])
+                with _ag_c1:
+                    _ag_go = st.button("✉️ Redactar borrador", type="primary",
+                                       use_container_width=True, key="rend_t_gen")
+                _ag_hay_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+                if not _ag_hay_key:
+                    with _ag_c2:
+                        st.caption("🔑 Sin API key: se usa la versión por reglas, que arma el mismo "
+                                   "correo con frases fijas. Las cifras son idénticas.")
+
+                if _ag_go:
+                    _ag_d = {"act": _rt_vivas, "conm2": _rt_con, "comp": pd.DataFrame(),
+                             "nsem": _rt_sem, "cortes": _rt_cortes or ["—"],
+                             "marca": _rt_marca, "vs": None}
+                    _ag_h = ag_rep.hechos(_ag_d)
+                    try:
+                        _ag_r = ag_rep.redactar(_ag_h, _ag_pre)
+                        _ag_txt = (f"**Asunto:** {_ag_r['asunto']}\n\n{_ag_r['cuerpo']}"
+                                   if _ag_r["asunto"] else _ag_r["cuerpo"])
+                        _ag_sosp = ag_rep.verificar(_ag_txt, _ag_h)
+                        _ag_via = "redactado con IA"
+                    except (ValueError, ImportError) as _e:
+                        _ag_txt = rep_sem.correo(_ag_d)
+                        _ag_sosp, _ag_via = [], f"versión por reglas ({_e})"
+                    st.session_state["rend_t_borrador"] = _ag_txt
+                    st.session_state["rend_t_sosp"] = _ag_sosp
+                    st.session_state["rend_t_via"] = _ag_via
+
+                if st.session_state.get("rend_t_borrador"):
+                    st.caption(f"Borrador — {st.session_state.get('rend_t_via', '')}")
+                    if st.session_state.get("rend_t_sosp"):
+                        st.error("⚠️ El borrador tiene cifras que NO están en el análisis: "
+                                 + ", ".join(st.session_state["rend_t_sosp"])
+                                 + ". Revísalas antes de enviar — el agente pudo haberlas inventado.")
+                    st.text_area("Borrador (selecciona y copia)", st.session_state["rend_t_borrador"],
+                                 height=420, key="rend_t_out")
+                    st.download_button(
+                        "📥 Descargar el borrador (.md)",
+                        data=st.session_state["rend_t_borrador"].encode("utf-8"),
+                        file_name=f"Correo_{_rt_marca}_{(_rt_cortes or ['x'])[-1]}.md",
+                        mime="text/markdown", key="dl_rend_t_correo")
+                    st.caption("Revisa el borrador contra los cuadros de las otras pestañas antes de "
+                               "enviarlo. El agente no ve la base: solo las cifras que le pasamos.")
 
             # ── Export ──
             _rt_buf = io.BytesIO()
