@@ -689,11 +689,21 @@ def get_resumen_semanal(semana: str = None) -> dict:
     except FileNotFoundError:
         return {}
 
+    # Fix A4 (2026-09-05): `unidades_vendidas` / `venta_soles` son ACUMULADOS de
+    # temporada, no venta de la semana. La venta semanal real vive en vta_u_sem_1ant.
+    _vta_sem = int(df['vta_u_sem_1ant'].sum()) if 'vta_u_sem_1ant' in df.columns else None
     return {
         'semana_iso': semana,
         'n_skus': int(df['sku'].nunique()),
         'stock_total_unidades': int(df['stock_total'].sum()),
         'stock_total_valorizado': float(df['stock_valor_costo'].sum()) if 'stock_valor_costo' in df.columns else 0,
+        # Semanal (lo que un buyer llama "venta de la semana")
+        'venta_semana_unidades': _vta_sem,
+        # Acumulados de temporada (nombre explícito para que nadie los lea como semanales)
+        'venta_acum_unidades': int(df['unidades_vendidas'].sum()),
+        'venta_acum_soles': float(df['venta_soles'].sum()) if 'venta_soles' in df.columns else 0,
+        'contribucion_acum': float(df['contribucion_soles'].sum()) if 'contribucion_soles' in df.columns else 0,
+        # Compat con consumidores viejos (mismo significado acumulado que antes)
         'venta_total_unidades': int(df['unidades_vendidas'].sum()),
         'venta_total_soles': float(df['venta_soles'].sum()) if 'venta_soles' in df.columns else 0,
         'contribucion_total': float(df['contribucion_soles'].sum()) if 'contribucion_soles' in df.columns else 0,

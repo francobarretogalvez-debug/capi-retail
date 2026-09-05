@@ -663,8 +663,8 @@ with st.sidebar:
     _bp = st.session_state.get("_base_profundidad_path")
     if _bp:
         try:
-            _fc = etl_profundidad.fecha_corte_desde_nombre(os.path.basename(_bp))
-            _corte_txt = f"base al {_fc.strftime('%d.%m.%Y')}" if _fc else os.path.basename(_bp)
+            _fc = etl_profundidad.fecha_corte_desde_nombre(os.path.basename(_bp))  # 'dd/mm/yyyy'
+            _corte_txt = f"base al {_fc.replace('/', '.')}" if _fc else os.path.basename(_bp)
         except Exception:
             _corte_txt = os.path.basename(_bp)
     st.caption(f"Capi v{CAPI_VERSION} · {_corte_txt}")
@@ -1883,13 +1883,23 @@ if nav_page == "🏠 Dashboard":
             _vp_evit_n = int(_vp_q['evitable'].sum()) if not _vp_q.empty else 0
             _vp_evit_soles = float(_vp_q.loc[_vp_q['evitable'], 'perdida_sem_soles'].sum()) if not _vp_q.empty else 0.0
 
-            _vp_c1, _vp_c2, _vp_c3 = st.columns([2, 1, 1])
+            # S2 (2026-09-05): el motor ya calcula ingreso NETO (descontada sustitución) y
+            # MARGEN perdido; antes la pantalla solo mostraba el bruto viejo.
+            _vp_recap = int(round(_vp.get('tasa_recaptura', 0.30) * 100))
+            _vp_c1, _vp_c1b, _vp_c2, _vp_c3 = st.columns([1.4, 1.4, 1, 1])
             with _vp_c1:
                 st.markdown(f"""
                 <div style="background:#FEF2F2; border-radius:12px; padding:16px 20px; border-left:4px solid #DC2626;">
-                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Venta perdida estimada — semanas {_vp_sem[0]} a {_vp_sem[-1]}</div>
-                    <div style="font-size:1.6rem; font-weight:700; color:#DC2626;">S/ {_vp['banda_min']:,.0f} – S/ {_vp['banda_max']:,.0f}</div>
-                    <div style="font-size:0.7rem; color:var(--capi-text2);">Dinero que se dejó de vender por quiebres de stock (banda conservadora–optimista)</div>
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Venta perdida NETA — semanas {_vp_sem[0]} a {_vp_sem[-1]}</div>
+                    <div style="font-size:1.6rem; font-weight:700; color:#DC2626;">S/ {_vp.get('ingreso_neto_min', 0):,.0f} – S/ {_vp.get('ingreso_neto_max', 0):,.0f}</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">Ingreso que no se recuperó con otro SKU (descontada sustitución {_vp_recap}%). Bruto: S/ {_vp['banda_min']:,.0f} – {_vp['banda_max']:,.0f}</div>
+                </div>""", unsafe_allow_html=True)
+            with _vp_c1b:
+                st.markdown(f"""
+                <div style="background:#FFF7ED; border-radius:12px; padding:16px 20px; border-left:4px solid #EA580C;">
+                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Margen perdido NETO (lo que mueve el P&L)</div>
+                    <div style="font-size:1.6rem; font-weight:700; color:#EA580C;">S/ {_vp.get('margen_neto_min', 0):,.0f} – S/ {_vp.get('margen_neto_max', 0):,.0f}</div>
+                    <div style="font-size:0.7rem; color:var(--capi-text2);">Ingreso neto × margen contable del SKU (contribución ÷ venta), sin IGV</div>
                 </div>""", unsafe_allow_html=True)
             with _vp_c2:
                 st.markdown(f"""
@@ -1911,13 +1921,15 @@ if nav_page == "🏠 Dashboard":
             <div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:12px; padding:14px 18px; margin-top:12px;">
                 <div style="font-size:0.78rem; font-weight:600; color:var(--capi-text); margin-bottom:6px;">📐 Cómo se calcula (por cada SKU en quiebre)</div>
                 <div style="font-size:0.98rem; color:var(--capi-text); margin-bottom:8px;">
-                    Venta perdida = <strong>velocidad semanal</strong> &times; <strong>semanas en quiebre</strong> &times; <strong>precio de venta</strong>
+                    Ingreso bruto = <strong>velocidad semanal</strong> &times; <strong>semanas en quiebre</strong> &times; <strong>precio realizado</strong>
+                    &nbsp;→&nbsp; Neto = bruto &times; (1 − {_vp_recap}% sustitución) &nbsp;→&nbsp; Margen perdido = neto &times; margen contable
                 </div>
                 <div style="font-size:0.72rem; color:var(--capi-text2); line-height:1.5;">
-                    <strong>Velocidad semanal</strong> = venta real por semana del SKU (serie reconstruida) &nbsp;·&nbsp;
-                    <strong>Semanas en quiebre</strong> = tiempo sin stock (0.5–1.0 por corte) &nbsp;·&nbsp;
-                    <strong>Precio de venta</strong> = precio vigente.<br>
-                    Es la <strong>venta (ingreso) que se dejó de hacer — NO el costo ni la utilidad</strong> (la utilidad perdida sería esto &times; el margen).
+                    <strong>Velocidad semanal</strong> = venta real por semana del SKU (serie reconstruida de los snapshots; banda = promedio simple vs ponderado reciente) &nbsp;·&nbsp;
+                    <strong>Semanas en quiebre</strong> = cierres con stock 0 (0.5 sem) + semanas entre cierres confirmadas sin venta (0.5–1.0) &nbsp;·&nbsp;
+                    <strong>Precio realizado</strong> = venta S/ ÷ unidades del SKU, <strong>sin IGV</strong> (no el precio de lista) &nbsp;·&nbsp;
+                    <strong>Margen contable</strong> = contribución ÷ venta del SKU (no precio − costo: el costo falta en ~48% de los SKUs).<br>
+                    El <strong>neto</strong> es lo que de verdad no se vendió; el <strong>margen perdido</strong> es lo que dejó de entrar al P&L. Solo SKUs con venta comprobada antes del quiebre (DORMIDO/MUERTO no cuentan).
                 </div>
             </div>""", unsafe_allow_html=True)
 
@@ -2176,6 +2188,12 @@ if nav_page == "🏠 Dashboard":
         _ly_g = ly_comparison.get('ly_global')
         _sem_act = ly_comparison.get('semana_actual', '?')
         _ticket_act = ly_comparison.get('ticket_actual_global', 0)
+        # S3 (2026-09-05): si la base no trae fecha de corte, el motor cae a la semana del
+        # reloj (date.today) y el YoY compara contra la semana equivocada. Se avisa, no se calla.
+        if 'semana_corte_base' in s and s.get('semana_corte_base') is None:
+            st.error("⚠️ El comparativo vs año pasado usa la **semana de hoy**, no la de la base: el archivo "
+                     "subido no tiene fecha en el nombre (ej. 'Base al 30.08.xlsx'). Renómbralo y vuelve a subir "
+                     "antes de citar estos números.")
 
         _tk1, _tk2, _tk3, _tk4 = st.columns(4)
         with _tk1:
@@ -5318,14 +5336,25 @@ elif nav_page == "🏆 Caso de Éxito":
                     from snapshots_engine.storage import list_available_weeks as _law_ce
                     _cum_w = _law_ce()
                 if len(_cum_w) >= 2:
-                    _cum = snapshots_engine.api.detect_repo_cumplimiento(_cum_w[-2], _cum_w[-1])
-                    if _cum is None or _cum.empty:
-                        st.info("Sin reposiciones sugeridas rastreables entre los dos últimos cortes.")
+                    # S6 v1 (2026-09-05): antes se filtraba por una columna `cumplido` que no
+                    # existía y la métrica daba N/N siempre. Ahora: pedido (acciones_log) × observado (snapshots).
+                    _ce = analisis_estados.cumplimiento_empujes(_cum_w[-2], _cum_w[-1])
+                    _ce_df = _ce["df"]
+                    _c1, _c2, _c3 = st.columns(3)
+                    _c1.metric("Empujes pedidos", f"{_ce['n_pedidos']}",
+                               help=f"Registrados en el log como 'Reposición / Empuje' en la semana {_cum_w[-2]}")
+                    _c2.metric("Cumplimiento", (f"{_ce['pct']:.0f}%" if _ce["pct"] is not None else "—"),
+                               help="Pedidos cuyo stock en tiendas subió más de lo que la venta explica. "
+                                    "— = no hay pedidos registrados esa semana, no se inventa un 100%")
+                    _c3.metric("Recibidos sin pedir", f"{_ce['n_sin_pedir']}",
+                               help="Movimientos CD→tienda que nadie registró como empuje")
+                    if _ce["n_pedidos"] == 0:
+                        st.caption("Para medir cumplimiento hay que marcar los empujes enviados en "
+                                   "🎯 Match Producto-Plaza (\"marcar como ejecutado\") la semana que se piden.")
+                    if _ce_df.empty:
+                        st.info("Sin empujes pedidos ni movimientos CD→tienda entre los dos últimos cortes.")
                     else:
-                        _cum_ok = _cum[_cum.get("cumplido", False) == True] if "cumplido" in _cum.columns else _cum
-                        st.metric("Cumplimiento", f"{len(_cum_ok)}/{len(_cum)}",
-                                  help="Reposiciones sugeridas en el corte previo que se ejecutaron")
-                        st.dataframe(_cum.head(100), use_container_width=True, hide_index=True, height=260)
+                        st.dataframe(_ce_df.head(200), use_container_width=True, hide_index=True, height=280)
 
             with st.expander("🔮 Predicción de quiebre — qué se agota antes del próximo corte", expanded=False):
                 try:

@@ -299,3 +299,87 @@ def etiqueta_semana(semana: str, corta: bool = False) -> str:
         f = str(fc)[5:]
         return f"{semana} · cierre {f[3:5]}.{f[0:2]}"
     return semana
+
+
+# ══════════════════════════════════════════════════════════════
+#  CUMPLIMIENTO DE EMPUJES — S6 v1 (2026-09-05)
+#  Cruza lo que se PIDIÓ (acciones_log: tipo "Reposición / Empuje") con lo que
+#  se OBSERVÓ en los snapshots (stock en tiendas subió más de lo que la venta
+#  explica). Nivel cadena: el snapshot semanal no tiene tienda todavía.
+# ══════════════════════════════════════════════════════════════
+
+CUADRANTES = {
+    (True, True):   "✅ Pedido y recibido",
+    (True, False):  "⚠️ Pedido, no recibido",
+    (False, True):  "ℹ️ Recibido sin pedir",
+    (False, False): "⬜ Sin pedido ni movimiento",
+}
+
+
+def cumplimiento_empujes_df(df_a: pd.DataFrame, df_b: pd.DataFrame,
+                            acciones_df: pd.DataFrame) -> pd.DataFrame:
+    """Versión pura (sin I/O) para poder testear con data sintética.
+
+    df_a / df_b: snapshots de dos cierres consecutivos con columnas
+        sku, marca, stock_cd, stock_tiendas, unidades_vendidas.
+    acciones_df: log con columnas sku, tipo, semana_iso, estado (se filtra a
+        "Reposición / Empuje"; el resto de tipos no es un empuje).
+
+    Devuelve una fila por SKU con: pedido (bool), observado (bool), cuadrante,
+    unidades_despacho, y las columnas de stock de ambos cierres.
+    """
+    cols = ['sku', 'marca', 'stock_cd', 'stock_tiendas', 'unidades_vendidas']
+    a = df_a[cols].rename(columns={'stock_cd': 'stock_cd_a', 'stock_tiendas': 'stock_tiendas_a',
+                                   'unidades_vendidas': 'venta_a'})
+    b = df_b[cols].rename(columns={'stock_cd': 'stock_cd_b', 'stock_tiendas': 'stock_tiendas_b',
+                                   'unidades_vendidas': 'venta_b'})
+    m = a.merge(b, on=['sku', 'marca'], how='outer')
+    for c in ('stock_cd_a', 'stock_cd_b', 'stock_tiendas_a', 'stock_tiendas_b', 'venta_a', 'venta_b'):
+        m[c] = pd.to_numeric(m[c], errors='coerce').fillna(0)
+    # `unidades_vendidas` es acumulado de temporada → la venta de la semana es la diferencia
+    venta_sem = (m['venta_b'] - m['venta_a']).clip(lower=0)
+    esperado = m['stock_tiendas_a'] - venta_sem
+    m['unidades_despacho'] = (m['stock_tiendas_b'] - esperado).clip(lower=0).round(0)
+    m['observado'] = m['unidades_despacho'] > 0
+
+    ped = pd.DataFrame(columns=['sku'])
+    if acciones_df is not None and not acciones_df.empty and 'sku' in acciones_df.columns:
+        ped = acciones_df[acciones_df['tipo'].astype(str).str.contains('Empuje', case=False, na=False)]
+        ped = ped[ped['sku'].astype(str).str.strip() != ''][['sku']].drop_duplicates()
+    m['sku'] = m['sku'].astype(str)
+    m['pedido'] = m['sku'].isin(set(ped['sku'].astype(str)))
+    m['cuadrante'] = [CUADRANTES[(p, o)] for p, o in zip(m['pedido'], m['observado'])]
+    m = m[m['pedido'] | m['observado']]  # el cuadrante vacío no se lista, solo se cuenta
+    orden = ['cuadrante', 'sku', 'marca', 'stock_tiendas_a', 'stock_tiendas_b', 'unidades_despacho',
+             'stock_cd_a', 'stock_cd_b', 'pedido', 'observado']
+    return m[orden].sort_values(['cuadrante', 'unidades_despacho'], ascending=[True, False]).reset_index(drop=True)
+
+
+def cumplimiento_empujes(sem_a: str, sem_b: str, acciones_df: pd.DataFrame = None) -> dict:
+    """Wrapper con I/O: snapshots de sem_a y sem_b + log filtrado a la semana sem_a.
+
+    Devuelve {'df': DataFrame, 'n_pedidos', 'n_cumplidos', 'pct', 'n_sin_pedir'}.
+    pct es None cuando no hubo pedidos registrados (no se inventa un 100%).
+    """
+    try:
+        df_a, df_b = load_snapshot(sem_a), load_snapshot(sem_b)
+    except FileNotFoundError:
+        return {'df': pd.DataFrame(), 'n_pedidos': 0, 'n_cumplidos': 0, 'pct': None, 'n_sin_pedir': 0}
+    if acciones_df is None:
+        try:
+            import acciones_log
+            acciones_df = acciones_log.cargar()
+        except Exception:
+            acciones_df = pd.DataFrame()
+    if acciones_df is not None and not acciones_df.empty and 'semana_iso' in acciones_df.columns:
+        acciones_df = acciones_df[acciones_df['semana_iso'].astype(str) == str(sem_a)]
+    df = cumplimiento_empujes_df(df_a, df_b, acciones_df)
+    n_ped = int(df['pedido'].sum())
+    n_ok = int((df['pedido'] & df['observado']).sum())
+    return {
+        'df': df,
+        'n_pedidos': n_ped,
+        'n_cumplidos': n_ok,
+        'pct': (round(100.0 * n_ok / n_ped, 1) if n_ped else None),
+        'n_sin_pedir': int((~df['pedido'] & df['observado']).sum()),
+    }
