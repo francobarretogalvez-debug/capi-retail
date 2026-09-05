@@ -1,11 +1,13 @@
-pandas>=2.0
-numpy>=1.24
-openpyxl>=3.1
-streamlit>=1.30
-plotly>=5.18
-altair>=5.0
-anthropic>=0.40
-reportlab>=4.0
-jinja2>=3.1
-python-dotenv>=1.0
-pyarrow>=14.0
+# Versiones pineadas (2026-09-05, sprint Chile). Streamlit < 1.58 por la
+# deprecación de use_container_width; subir de versión solo con la suite verde.
+pandas==2.3.3
+numpy==2.4.4
+openpyxl==3.1.5
+streamlit==1.55.0
+plotly==6.7.0
+altair==6.0.0
+anthropic==0.86.0
+reportlab==4.4.10
+jinja2==3.1.6
+python-dotenv==1.2.2
+pyarrow==23.0.1

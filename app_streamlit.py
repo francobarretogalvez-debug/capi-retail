@@ -100,6 +100,10 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Versión visible (S1 robustez, 2026-09-05): se muestra en el sidebar junto al corte
+# de la base cargada, para que cualquier número citado sea trazable a una versión.
+CAPI_VERSION = "2.1.0"
+
 # ── Paleta de colores Capi (Clean Corporate: navy + light) ──
 TEAL_600 = "#6D3B8E"     # Morado Ripley — primary accent (Franco 2026-08-26)
 TEAL_700 = "#572E73"     # Morado oscuro — hover/active
@@ -654,6 +658,17 @@ with st.sidebar:
             st.rerun()
     st.markdown(f'<div style="border-bottom: 1px solid {SLATE_200}; margin-bottom: 0.8rem;"></div>', unsafe_allow_html=True)
 
+    # ── Versión + corte de la base cargada (trazabilidad) ──
+    _corte_txt = "sin base cargada"
+    _bp = st.session_state.get("_base_profundidad_path")
+    if _bp:
+        try:
+            _fc = etl_profundidad.fecha_corte_desde_nombre(os.path.basename(_bp))
+            _corte_txt = f"base al {_fc.strftime('%d.%m.%Y')}" if _fc else os.path.basename(_bp)
+        except Exception:
+            _corte_txt = os.path.basename(_bp)
+    st.caption(f"Capi v{CAPI_VERSION} · {_corte_txt}")
+
     if _DEMO_MODE:
         st.caption("🎬 Modo demo activo")
 
@@ -962,8 +977,10 @@ if run_btn:
                     if _HAS_SNAPSHOTS:
                         try:
                             snapshots_engine.process_micro_profundidad(_base_copy_path, force=True)
-                        except Exception:
-                            pass  # Silencioso — no bloquear el flujo
+                        except Exception as _e_snap:
+                            # No bloquea el análisis, pero la semana perdida se avisa (S1, 2026-09-05)
+                            st.warning(f"⚠️ El snapshot semanal no se guardó: {_e_snap}. "
+                                       "El análisis sigue, pero esta semana no entra al comparativo.")
 
                     plantilla_path = tmp_path.replace(".xlsx", "_plantilla.xlsx")
                     etl_profundidad.transform(
@@ -980,16 +997,20 @@ if run_btn:
                 if _HAS_SNAPSHOTS and not st.session_state.get("_base_profundidad_path"):
                     try:
                         snapshots_engine.process_micro_profundidad(tmp_path, force=True)
-                    except Exception:
-                        pass
+                    except Exception as _e_snap:
+                        st.warning(f"⚠️ El snapshot semanal no se guardó: {_e_snap}. "
+                                   "El análisis sigue, pero esta semana no entra al comparativo.")
 
                 os.unlink(tmp_path)
                 st.session_state["results"] = results
                 st.rerun()  # Forzar rerun para que sidebar se re-renderice con nav
 
         except Exception as e:
-            st.error(f"❌ Error al procesar el archivo: {e}")
-            st.exception(e)
+            import logging as _logging, traceback as _tb
+            _logging.getLogger("capi").exception("Error al procesar la base subida")
+            st.error(f"❌ No se pudo procesar el archivo: {e}")
+            with st.expander("Detalle técnico (para soporte)"):
+                st.code(_tb.format_exc())
 
 
 # ══════════════════════════════════════════════════════════════
