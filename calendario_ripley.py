@@ -60,3 +60,20 @@ def etiqueta_fecha(fecha, corta: bool = False) -> str:
     _vent_txt = f" · Vent. {_vent}" if _vent and _vent != "---" else ""
     return (f"Sem {int(info['sem_num'])} Ripley · {info['temporada_ventanas']}"
             f"{_vent_txt} · cierre {ddmm}")
+
+
+def semanas_de_periodo(periodo: str) -> list[dict]:
+    """Semanas comerciales que componen un periodo, en orden.
+
+    Ripley usa calendario 4-4-5: un periodo tiene 4 o 5 semanas exactas. Sirve
+    para saber cuántos cortes faltan para cerrarlo — una serie por periodo se
+    puede componer exacta desde semanas; una por mes calendario, nunca.
+    """
+    df = _tabla()
+    p = df[df["periodo"] == periodo].sort_values("fecha_inicio")
+    return [{"semact": r.semact, "sem_num": int(r.sem_num),
+             "inicio": r.fecha_inicio, "fin": r.fecha_fin} for r in p.itertuples()]
+
+
+def periodo_de(fecha) -> str | None:
+    return (info_fecha(fecha) or {}).get("periodo")

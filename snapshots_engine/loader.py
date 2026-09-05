@@ -73,13 +73,17 @@ def _normalizar_base(df: pd.DataFrame) -> pd.DataFrame:
 
     # 3. Limpiar tipos numéricos
     int_cols = ['sku', 'unidades_vendidas', 'stock_total', 'stock_tiendas', 'stock_cd',
-                'vta_u_sem_1ant', 'vta_u_sem_2ant', 'vta_u_sem_3ant', 'vta_u_sem_4ant']
+                'vta_u_sem_1ant', 'vta_u_sem_2ant', 'vta_u_sem_3ant', 'vta_u_sem_4ant',
+                # Planificación (2026-09-02): el on-order es lo que se resta de
+                # la compra requerida para llegar al OTB.
+                'on_order_cd_tiendas', 'on_order_ordenes']
     for col in int_cols:
         if col in df_norm.columns:
             df_norm[col] = pd.to_numeric(df_norm[col], errors='coerce').fillna(0).astype(int)
 
     float_cols = ['edad_semanas', 'venta_soles', 'contribucion_soles', 'stock_valor_costo',
-                  'precio_blanco', 'precio_vigente', 'pct_descuento', 'costo_unitario']
+                  'precio_blanco', 'precio_vigente', 'pct_descuento', 'costo_unitario',
+                  'agotamiento_calc', 'duracion_ciclo_total']
     for col in float_cols:
         if col in df_norm.columns:
             df_norm[col] = pd.to_numeric(df_norm[col], errors='coerce')

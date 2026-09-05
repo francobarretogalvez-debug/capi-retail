@@ -11,3 +11,12 @@ build_deck.js
 
 # Config local de tooling
 .claude/
+
+# Data interna de Ripley usada por el módulo de planificación (no va al repo)
+data2/_flujo_planificacion.xlsm
+Descuadres_Inventario_para_Planificacion.xlsx
+
+# Data interna de Ripley y material archivado (no va al repo público)
+_archivo/
+data2/bases antiguas/*.xlsx
+*.xlsb

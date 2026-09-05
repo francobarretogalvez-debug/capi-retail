@@ -45,6 +45,15 @@
     "hash": "0a51ff29c4a2"
   },
   {
+    "semana_iso": "2026-20",
+    "fecha_cierre": "2026-05-17",
+    "n_filas": 5371,
+    "n_skus": 5371,
+    "timestamp": "2026-09-04T14:57:32.003502",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-20/snapshot.parquet",
+    "hash": "13f82c02414f"
+  },
+  {
     "semana_iso": "2026-22",
     "fecha_cierre": "2026-05-31",
     "n_filas": 5425,

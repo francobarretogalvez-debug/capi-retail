@@ -38,6 +38,35 @@ SNAPSHOT_SCHEMA = {
     'vta_u_sem_4ant':       'int64',      # Unid. Vendidas Sem. 4ant
     'semana_iso':           'object',     # YYYY-WW (ej: 2026-19)
     'fecha_cierre':         'object',     # YYYY-MM-DD del domingo de cierre
+
+    # ── Campos de planificación (agregados 2026-09-02) ──
+    # La base ya los traía y el snapshot los descartaba. Sin on-order no hay
+    # OTB real: la compra comprometida es lo que se resta de la compra
+    # requerida, y sin ella el número es teórico.
+    #
+    # Estado medido sobre la base del 23.08 (5.573 SKUs):
+    #   POBLADOS  on_order_ordenes (657.431 uds) · on_order_cd_tiendas (34.004)
+    #             tipo_producto · procedencia · proveedor · agotamiento_calc
+    #   PARCIAL   embarque (159 SKUs = 2,9%)
+    #   VACÍOS    primera_ventana_plan/real · duracion_ciclo_total · reorder
+    #             abc · tipo_reposicion
+    # Los vacíos se mantienen mapeados a propósito: si Ripley empieza a
+    # poblarlos, entran solos sin tocar código. Pero hoy NO se puede construir
+    # nada sobre ellos — en particular, el lead time de compra y el MOQ hay que
+    # cargarlos aparte por proveedor, no salen de acá.
+    'on_order_cd_tiendas':  'int64',      # Stock On Order CD-Tiendas (en tránsito)
+    'on_order_ordenes':     'int64',      # Stock On Order Ordenes (colocado)
+    'tipo_producto':        'object',     # BASICO / MODA — separa los dos motores
+    'embarque':             'object',     # ventana de embarque de la compra
+    'agotamiento_calc':     'float64',    # Agotamiento Calculado
+    'primera_ventana_plan': 'object',     # ventana de entrega planificada
+    'primera_ventana_real': 'object',     # ventana de entrega efectiva
+    'duracion_ciclo_total': 'float64',    # largo del ciclo de vida del producto
+    'reorder':              'object',     # marca de reposición del maestro
+    'abc':                  'object',     # clasificación ABC
+    'procedencia':          'object',     # nacional / importado — define lead time
+    'tipo_reposicion':      'object',
+    'proveedor':            'object',     # necesario para MOQ y lead time de compra
 }
 
 # Columnas requeridas (sin ellas el snapshot se rechaza)
@@ -72,4 +101,19 @@ COLUMN_MAP = {
     'Unid. Vendidas Sem. 2ant':            'vta_u_sem_2ant',
     'Unid. Vendidas Sem. 3ant':            'vta_u_sem_3ant',
     'Unid. Vendidas Sem. 4ant':            'vta_u_sem_4ant',
+
+    # ── Planificación (2026-09-02) ──
+    'Stock On Order CD-Tiendas':           'on_order_cd_tiendas',
+    'Stock On Order Ordenes':              'on_order_ordenes',
+    'Tipo de producto':                    'tipo_producto',
+    'Embarque':                            'embarque',
+    'Agotamiento Calculado':               'agotamiento_calc',
+    'Primera Ventana Plan':                'primera_ventana_plan',
+    'Primera Ventana Real':                'primera_ventana_real',
+    'Duración Ciclo Total':                'duracion_ciclo_total',
+    'Reorder':                             'reorder',
+    'ABC':                                 'abc',
+    'Proced.':                             'procedencia',
+    'Tipo de Reposición':                  'tipo_reposicion',
+    'Proveedor':                           'proveedor',
 }

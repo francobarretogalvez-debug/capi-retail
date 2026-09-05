@@ -1,0 +1,55 @@
+{
+  "_nota": "Lead time DE COMPRA en meses: desde que se coloca la orden hasta que la mercadería está disponible en tienda. NO confundir con config_lead_times.json, que son los lead times LOGÍSTICOS (CD→tienda, en días).",
+  "_fuente": "Franco, 2026-09-02. Los valores por proveedor son defaults por procedencia hasta que se carguen los reales; el campo Proced. de la base (NAC/IMP) es lo que decide.",
+  "_uso": "Alimenta el LROD (last responsible order date) y el objetivo de cobertura por categoría (lead_time × 1.25).",
+  "_actualizado": "2026-09-02",
+
+  "por_procedencia": {
+    "NAC": {
+      "descripcion": "Producción nacional adicional. Depende del proveedor.",
+      "produccion_meses": 2.5,
+      "transito_meses": 0,
+      "nacionalizacion_meses": 0,
+      "total_meses": 2.5,
+      "rango_meses": [2, 3]
+    },
+    "IMP": {
+      "descripcion": "Reorder importado sobre un programa ya existente.",
+      "produccion_meses": 1.5,
+      "transito_meses": 1.0,
+      "nacionalizacion_meses": 0,
+      "total_meses": 2.5,
+      "rango_meses": [2, 3]
+    },
+    "IMP_COMPRA_NUEVA": {
+      "descripcion": "Compra nueva de temporada FOB, no reorder. Se coloca en la mesa de compra, no in-season.",
+      "produccion_meses": 4.0,
+      "transito_meses": 1.5,
+      "nacionalizacion_meses": 0.5,
+      "total_meses": 6.0,
+      "rango_meses": [5, 7]
+    }
+  },
+
+  "_default_meses": 2.5,
+  "_semanas_minimas_exhibicion": 6,
+
+  "por_proveedor": {
+    "_nota": "Overrides. Cargar acá el lead time real cuando se confirme con cada proveedor; lo que no esté acá cae al default de su procedencia.",
+    "PC MODA S.A.C": null,
+    "SAMITEX SA": null,
+    "Emuna Group, S.A.": null,
+    "INTERNATIONAL APPAREL CORPORATION PERU S": null,
+    "ESMO INTERNATIONAL S.A.": null,
+    "KOMAX PERU S.A.C.": null,
+    "BESTSELLER LATAM ZF S.A": null,
+    "NOVABLUE SOURCING S.A.C.": null,
+    "DAYAN ENTERPRISES CORP.": null,
+    "CHINA-BASE NINGBO FOREIGN TRADE CO., LTD": null
+  },
+
+  "_moq": {
+    "_nota": "MOQ por proveedor, en unidades. Sin esto la compra requerida puede ser inejecutable (calcular 400 uds cuando el mínimo son 2.000). NO viene en la base: hay que cargarlo a mano.",
+    "_default": null
+  }
+}
