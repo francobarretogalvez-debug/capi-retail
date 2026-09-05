@@ -553,3 +553,143 @@ def hoja_resumen_obsoletos(writer, df_obs: pd.DataFrame,
     ws.freeze_panes = "A3"
     ws.column_dimensions["A"].width = 16
     ws.column_dimensions["B"].width = 20
+
+
+# ══════════════════════════════════════════════════════════════
+#  TRANSFERENCIAS — S8 (2026-09-05, pedido Franco)
+#  Descargable con Marca/Departamento/Línea + consolidado por tienda destino
+#  (qué recibe y cuánto gana) y por tienda origen (qué despacha).
+# ══════════════════════════════════════════════════════════════
+
+def consolidar_transferencias_por_tienda(df_tp: pd.DataFrame):
+    """Devuelve (por_destino, por_origen) a partir del plan de transferencias.
+
+    df_tp: filas SKU×origen×destino con tienda_origen, tienda_destino,
+    uds_transferir, ganancia_esperada y (opcional) _marca.
+    La ganancia se atribuye a la tienda DESTINO: es la que vende la unidad.
+    """
+    if df_tp is None or df_tp.empty:
+        vacio = pd.DataFrame(columns=['Tienda', 'Movimientos', 'SKUs', 'Uds a recibir', 'Ganancia esperada S/', 'Marcas'])
+        return vacio, vacio.rename(columns={'Uds a recibir': 'Uds a despachar'})
+    d = df_tp.copy()
+    d['ganancia_esperada'] = pd.to_numeric(d.get('ganancia_esperada'), errors='coerce').fillna(0)
+    d['uds_transferir'] = pd.to_numeric(d.get('uds_transferir'), errors='coerce').fillna(0)
+    marca_col = '_marca' if '_marca' in d.columns else None
+
+    def _agg(col, uds_label):
+        g = d.groupby(col).agg(
+            Movimientos=('sku', 'size'), SKUs=('sku', 'nunique'),
+            Uds=('uds_transferir', 'sum'), Ganancia=('ganancia_esperada', 'sum'),
+            **({'Marcas': (marca_col, lambda x: ', '.join(sorted(set(str(v) for v in x if pd.notna(v)))[:6]))}
+               if marca_col else {}))
+        g = g.rename(columns={'Uds': uds_label, 'Ganancia': 'Ganancia esperada S/'})
+        g = g.reset_index().rename(columns={col: 'Tienda'})
+        return g.sort_values('Ganancia esperada S/', ascending=False).reset_index(drop=True)
+
+    return _agg('tienda_destino', 'Uds a recibir'), _agg('tienda_origen', 'Uds a despachar')
+
+
+def hoja_transferencias(writer, df_detalle: pd.DataFrame, por_destino: pd.DataFrame,
+                        por_origen: pd.DataFrame, universo: str = "Todas"):
+    """Excel de transferencias: 3 hojas (detalle, por destino, por origen) con formato."""
+    hojas = [
+        (f"Transferencias {universo}"[:31], df_detalle,
+         f"PLAN DE TRANSFERENCIAS ({universo}) — cada fila es un movimiento SKU × origen → destino",
+         {'Ganancia S/': '#,##0', 'Uds a Transferir': '#,##0', 'Cob Origen (pre)': '0.0',
+          'Cob Destino (pre)': '0.0', 'Cob Origen (post)': '0.0', 'Cob Destino (post)': '0.0'}),
+        ("Por tienda destino", por_destino,
+         "QUÉ RECIBE CADA TIENDA — ganancia esperada = lo que la tienda vende de más al recibir la mercadería",
+         {'Ganancia esperada S/': '#,##0', 'Uds a recibir': '#,##0', 'Movimientos': '#,##0', 'SKUs': '#,##0'}),
+        ("Por tienda origen", por_origen,
+         "QUÉ DESPACHA CADA TIENDA — para que el inventory manager arme los envíos",
+         {'Ganancia esperada S/': '#,##0', 'Uds a despachar': '#,##0', 'Movimientos': '#,##0', 'SKUs': '#,##0'}),
+    ]
+    for nombre, df, titulo, fmts in hojas:
+        _tabla_con_titulo(writer, nombre, titulo, df if df is not None else pd.DataFrame(), fmts)
+
+
+def _tabla_con_titulo(writer, hoja: str, titulo: str, df: pd.DataFrame, formatos: dict,
+                      anchos: dict = None):
+    """Hoja estándar Capi: título en A1, header en fila 2, formatos por columna,
+    autofiltro y panel congelado bajo el header. Devuelve el worksheet."""
+    df.to_excel(writer, sheet_name=hoja, index=False, startrow=1)
+    ws = writer.sheets[hoja]
+    ws["A1"] = titulo
+    ws["A1"].font = F_TITULO
+    ws["A1"].fill = FILL_ACCENT_SOFT
+    _estilo_header(ws, fila=2)
+    headers = [c.value for c in ws[2]]
+    for nombre, fmt in (formatos or {}).items():
+        if nombre in headers:
+            ltr = get_column_letter(headers.index(nombre) + 1)
+            for r in range(3, ws.max_row + 1):
+                ws[f"{ltr}{r}"].number_format = fmt
+    if ws.max_row > 2:
+        ws.auto_filter.ref = f"A2:{get_column_letter(ws.max_column)}{ws.max_row}"
+    ws.freeze_panes = "A3"
+    for nombre, w in (anchos or {}).items():
+        if nombre in headers:
+            ws.column_dimensions[get_column_letter(headers.index(nombre) + 1)].width = w
+    return ws
+
+
+# ══════════════════════════════════════════════════════════════
+#  VENTA CERO — S7 (2026-09-05). Antes vivía inline en la vista
+#  📲 Productos Venta Cero; ahora es reutilizable (vista + reporte por marca).
+# ══════════════════════════════════════════════════════════════
+
+COLS_VENTA_CERO = ["tienda", "marca", "sku", "nombre", "categoria", "stock_total", "stock_valor_costo",
+                   "pct_acum_tienda", "top_80", "precio_vigente", "pct_descuento", "tipo_evento",
+                   "edad_semanas", "accion"]
+REN_VENTA_CERO = {
+    "tienda": "Tienda", "marca": "Marca", "sku": "SKU", "nombre": "Producto", "categoria": "Línea",
+    "stock_total": "Stock (uds)", "stock_valor_costo": "Capital S/", "pct_acum_tienda": "% acum. en tienda",
+    "top_80": "Prioridad", "precio_vigente": "Precio", "pct_descuento": "Dscto", "tipo_evento": "Tipo evento",
+    "edad_semanas": "Edad (sem)", "accion": "Acción"}
+FMT_VENTA_CERO = {"Capital S/": "#,##0", "Stock (uds)": "#,##0", "% acum. en tienda": "0%",
+                  "Dscto": "0%", "Precio": "#,##0.00", "Edad (sem)": "0"}
+
+
+def _accion_venta_cero(r) -> str:
+    _tp = str(r.get("tipo_evento", "") or "")
+    _dsc = float(r.get("pct_descuento", 0) or 0)
+    if _dsc > 0 and _tp == "MD1":
+        return "🏷️ Etiquetar mercadería (precio ya impreso)"
+    if _dsc > 0 and _tp == "PTR":
+        return "📋 Colocar cartel de precio"
+    return "👁️ Revisar exhibición"
+
+
+def venta_cero(df_cob: pd.DataFrame, min_capital: float = 0, tipo_evento_map: dict = None) -> pd.DataFrame:
+    """SKU×tienda con stock y sin venta la última semana, con acción de piso y Pareto 80%
+    del capital por tienda. Regla del TOP 80% (auditoría C1 2026-08-26): el acumulado
+    ANTES del SKU no llegaba a 80%, así el primer SKU de cada tienda siempre es TOP."""
+    if df_cob is None or df_cob.empty or "prom_vta_uds" not in df_cob.columns:
+        return pd.DataFrame(columns=COLS_VENTA_CERO)
+    d = df_cob[(df_cob["prom_vta_uds"].fillna(0) == 0) & (df_cob["stock_total"].fillna(0) > 0)].copy()
+    if "stock_valor_costo" not in d.columns:
+        d["stock_valor_costo"] = 0.0
+    d = d[d["stock_valor_costo"].fillna(0) >= float(min_capital or 0)]
+    if d.empty:
+        return pd.DataFrame(columns=COLS_VENTA_CERO)
+    d["tipo_evento"] = d["sku"].map(tipo_evento_map or {}).fillna("") if "sku" in d.columns else ""
+    d["accion"] = d.apply(_accion_venta_cero, axis=1)
+    d = d.sort_values(["tienda", "stock_valor_costo"], ascending=[True, False], kind="mergesort")  # estable: empates conservan orden
+    tot = d.groupby("tienda")["stock_valor_costo"].transform("sum").replace(0, np.nan)
+    share = d["stock_valor_costo"] / tot
+    acum = d.groupby("tienda")["stock_valor_costo"].cumsum() / tot
+    d["pct_acum_tienda"] = acum.fillna(0)
+    d["top_80"] = np.where((acum - share).fillna(0) < 0.80, "⭐ TOP 80%", "")
+    for c in COLS_VENTA_CERO:
+        if c not in d.columns:
+            d[c] = np.nan
+    return d[COLS_VENTA_CERO].reset_index(drop=True)
+
+
+def hoja_venta_cero(writer, df_vc: pd.DataFrame, hoja: str = "Venta Cero x Tienda",
+                    titulo: str = None):
+    """Hoja para tiendas: cada jefe filtra SU tienda y ataca los ⭐ TOP 80%."""
+    titulo = titulo or ("REVISIÓN DE PISO — filtra TU tienda y ataca primero los ⭐ TOP 80% "
+                        "(concentran el 80% del capital sin venta de tu tienda)")
+    out = df_vc[[c for c in COLS_VENTA_CERO if c in df_vc.columns]].rename(columns=REN_VENTA_CERO)
+    return _tabla_con_titulo(writer, hoja, titulo, out, FMT_VENTA_CERO, anchos={"Producto": 34})

@@ -2929,20 +2929,32 @@ elif nav_page == "🔄 Transferencias":
                            f"S/ {abs(_tp.loc[_tp['ganancia_esperada'] <= 0, 'ganancia_esperada'].sum()):,.0f}")
                 if st.toggle("Mostrar solo rentables", value=True, key="solo_rent_uni"):
                     _tp = _rent
-            _tp_cols = [c for c in ['_marca', 'sku', 'nombre', 'tienda_origen', 'tienda_destino', 'uds_transferir',
-                                    'ganancia_esperada', 'veredicto', 'fuente_velocidad',
+            # S8 (2026-09-05, pedido Franco): Marca y Departamento en el descargable +
+            # consolidado por tienda con la ganancia que recibe cada una.
+            _s2d = dict(zip(df_cob['sku'], df_cob['departamento'])) if 'departamento' in df_cob.columns else {}
+            _tp['_departamento'] = _tp['sku'].map(_s2d).fillna('')
+            _tp_cols = [c for c in ['_marca', '_departamento', 'categoria', 'sku', 'nombre', 'tienda_origen', 'tienda_destino',
+                                    'uds_transferir', 'ganancia_esperada', 'veredicto', 'fuente_velocidad',
                                     'cob_origen_pre', 'cob_destino_pre', 'cob_origen_post', 'cob_destino_post', 'motivo'] if c in _tp.columns]
-            _tp_disp = _tp[_tp_cols].rename(columns={
-                '_marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'tienda_origen': 'Tienda Origen',
-                'tienda_destino': 'Tienda Destino', 'uds_transferir': 'Uds a Transferir',
+            _tp_ren = {
+                '_marca': 'Marca', '_departamento': 'Departamento', 'categoria': 'Línea', 'sku': 'SKU', 'nombre': 'Producto',
+                'tienda_origen': 'Tienda Origen', 'tienda_destino': 'Tienda Destino', 'uds_transferir': 'Uds a Transferir',
                 'cob_origen_pre': 'Cob Origen (pre)', 'cob_destino_pre': 'Cob Destino (pre)',
                 'cob_origen_post': 'Cob Origen (post)', 'cob_destino_post': 'Cob Destino (post)', 'motivo': 'Motivo',
-                'ganancia_esperada': 'Ganancia S/', 'veredicto': 'Veredicto', 'fuente_velocidad': 'Velocidad'})
+                'ganancia_esperada': 'Ganancia S/', 'veredicto': 'Veredicto', 'fuente_velocidad': 'Velocidad'}
+            _tp_disp = _tp[_tp_cols].rename(columns=_tp_ren)
             st.dataframe(_tp_disp.style.format({'Cob Origen (pre)': '{:.1f}', 'Cob Destino (pre)': '{:.1f}', 'Cob Origen (post)': '{:.1f}', 'Cob Destino (post)': '{:.1f}', 'Ganancia S/': 'S/ {:,.0f}'}, na_rep="—"),
                          use_container_width=True, hide_index=True, height=440)
+
+            # Consolidado por tienda: qué recibe cada tienda y cuánto gana con eso
+            _cons_dest, _cons_orig = vistas_excel.consolidar_transferencias_por_tienda(_tp)
+            with st.expander(f"🏬 Consolidado por tienda destino — qué recibe cada una ({len(_cons_dest)} tiendas)", expanded=True):
+                st.dataframe(_cons_dest.style.format({'Ganancia esperada S/': 'S/ {:,.0f}', 'Uds a recibir': '{:,.0f}',
+                                                      'Movimientos': '{:,.0f}', 'SKUs': '{:,.0f}'}, na_rep="—"),
+                             use_container_width=True, hide_index=True, height=min(60 + 35 * len(_cons_dest), 420))
             _tp_buf = io.BytesIO()
             with pd.ExcelWriter(_tp_buf, engine='openpyxl') as _w:
-                _tp[_tp_cols].to_excel(_w, sheet_name=f'Transferencias {_uni_tr}', index=False)
+                vistas_excel.hoja_transferencias(_w, _tp_disp, _cons_dest, _cons_orig, universo=_uni_tr)
             _tp_buf.seek(0)
             st.download_button(f"📥 Descargar transferencias {_uni_tr.lower()} (.xlsx)", data=_tp_buf.getvalue(),
                                file_name=f"Capi_Transferencias_{_uni_tr}.xlsx",
@@ -4717,50 +4729,12 @@ if nav_page == "📲 Productos Venta Cero":
                        "original (no la plantilla) para el detalle MD1/PTR.")
 
         # ── Excel para tiendas: Pareto 80% (decisión Franco C1 2026-08-26) ──
-        # La gente de tienda filtra SU tienda y ve de un porrazo los SKUs que
-        # concentran el 80% del capital sin venta.
-        _vp80 = _vc.sort_values(['tienda', 'stock_valor_costo'],
-                                ascending=[True, False]).copy()
-        _vp80['pct_acum_tienda'] = (_vp80.groupby('tienda')['stock_valor_costo']
-                                    .transform(lambda x: x.cumsum() / x.sum()))
-        # TOP 80% = el acumulado ANTES de este SKU no llegaba a 80% (así el
-        # primer SKU de cada tienda SIEMPRE es TOP aunque él solo pese >80% —
-        # bug cazado en auditoría C1 2026-08-26)
-        _vp80['_share'] = (_vp80.groupby('tienda')['stock_valor_costo']
-                           .transform(lambda x: x / x.sum()))
-        _vp80['top_80'] = np.where(
-            (_vp80['pct_acum_tienda'] - _vp80['_share']) < 0.80, '⭐ TOP 80%', '')
-        _vp80 = _vp80.drop(columns='_share')
-        _vp80_cols = [c for c in ['tienda', 'marca', 'sku', 'nombre', 'categoria',
-                                  'stock_total', 'stock_valor_costo', 'pct_acum_tienda',
-                                  'top_80', 'pct_descuento', 'tipo_evento', 'accion']
-                      if c in _vp80.columns]
-        _vp80_out = _vp80[_vp80_cols].rename(columns={
-            'tienda': 'Tienda', 'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto',
-            'categoria': 'Línea', 'stock_total': 'Stock (uds)',
-            'stock_valor_costo': 'Capital S/', 'pct_acum_tienda': '% acum. en tienda',
-            'top_80': 'Prioridad', 'pct_descuento': 'Dscto',
-            'tipo_evento': 'Tipo evento', 'accion': 'Acción'})
+        # S7 (2026-09-05): la lógica vive en vistas_excel.venta_cero() y se reusa en el
+        # reporte por marca tercera (hoja "5. Venta Cero").
+        _vp80 = vistas_excel.venta_cero(df_cob, min_capital=_vc_min_cap, tipo_evento_map=_vc_tev)
         _vp80_buf = io.BytesIO()
         with pd.ExcelWriter(_vp80_buf, engine='openpyxl') as _wvp:
-            _vp80_out.to_excel(_wvp, sheet_name='Venta Cero x Tienda', index=False, startrow=1)
-            _wsvp = _wvp.sheets['Venta Cero x Tienda']
-            _wsvp['A1'] = ("REVISIÓN DE PISO — filtra TU tienda y ataca primero los ⭐ TOP 80% "
-                           "(concentran el 80% del capital sin venta de tu tienda)")
-            _wsvp['A1'].font = vistas_excel.F_TITULO
-            _wsvp['A1'].fill = vistas_excel.FILL_ACCENT_SOFT
-            vistas_excel._estilo_header(_wsvp, fila=2)
-            from openpyxl.utils import get_column_letter as _gcl_vp
-            _hd_vp = [c.value for c in _wsvp[2]]
-            for _nm, _ft in [('Capital S/', '#,##0'), ('Stock (uds)', '#,##0'),
-                             ('% acum. en tienda', '0%'), ('Dscto', '0%')]:
-                if _nm in _hd_vp:
-                    _lt = _gcl_vp(_hd_vp.index(_nm) + 1)
-                    for _rw in range(3, _wsvp.max_row + 1):
-                        _wsvp[f'{_lt}{_rw}'].number_format = _ft
-            _wsvp.auto_filter.ref = f"A2:{_gcl_vp(_wsvp.max_column)}{_wsvp.max_row}"
-            _wsvp.freeze_panes = "A3"
-            _wsvp.column_dimensions['D'].width = 34
+            vistas_excel.hoja_venta_cero(_wvp, _vp80)
         _vp80_buf.seek(0)
         st.download_button(
             "📥 Excel para tiendas — Pareto 80% del capital sin venta",

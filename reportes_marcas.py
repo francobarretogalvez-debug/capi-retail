@@ -7,7 +7,7 @@ costo, transferencias agregadas por modelo con umbral ≥12 uds y ≥S/1.000,
 descuento sugerido por pirámide oficial + precio y margen resultantes.
 
 Un Excel por marca con pestañas: Resumen · 1. Liquidar · 2. Activar ·
-3. Reponer (guía OTB) · 4. Transferir · Tendencias · Leyenda.
+3. Reponer (guía OTB) · 4. Transferir · 5. Venta Cero · Tendencias · Leyenda.
 Todo a nivel modelo (sin tiendas ni rutas — eso es ejecución interna Ripley).
 """
 
@@ -320,6 +320,19 @@ def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
                         f"{marca} — Rebalanceo entre tiendas (solo movimientos ≥{TRANSF_MIN_UDS} uds y ≥S/{TRANSF_MIN_VALOR:,.0f}) · corte {corte}",
                         tg, {"Uds a mover": _FMT_S, "Valor S/ (venta)": _FMT_S,
                              "Ganancia neta S/": _FMT_S})
+
+        # ── 5. Venta Cero (S7 2026-09-05, pedido Franco): SKU×tienda con stock y sin
+        #    venta la última semana, Pareto 80% del capital por tienda. Es lo que el
+        #    proveedor necesita para atacar exhibición/precio tienda por tienda. ──
+        try:
+            _vc = vistas_excel.venta_cero(dfm, min_capital=0)
+        except Exception:
+            _vc = pd.DataFrame()
+        if not _vc.empty:
+            vistas_excel.hoja_venta_cero(
+                w, _vc, hoja="5. Venta Cero",
+                titulo=f"{marca} — SKUs con stock y SIN venta la última semana, por tienda "
+                       f"(⭐ TOP 80% = concentran el 80% del capital sin venta de esa tienda) · corte {corte}")
 
         # ── Tendencias (alertas del motor para la marca) ──
         if df_alertas is not None and not df_alertas.empty and "marca" in df_alertas.columns:
