@@ -3587,7 +3587,9 @@ elif nav_page == "📊 Gestión por Antigüedad":
                     st.dataframe(_rk_disp.style.format({"Capital obsoleto S/": "S/ {:,.0f}", "Uds": "{:,.0f}", "SKUs": "{:,.0f}",
                                                         "Capital tienda S/": "S/ {:,.0f}", "% del stock de la tienda": "{:.1%}",
                                                         "Capital implícito terceras S/": "S/ {:,.0f}"}, na_rep="—")
-                                 .background_gradient(subset=["% del stock de la tienda"], cmap="Reds"),
+                                 .apply(lambda col: ["background-color:#FECACA" if (pd.notna(v) and v >= 0.30)
+                                                     else ("background-color:#FEF3C7" if (pd.notna(v) and v >= 0.15) else "") for v in col],
+                                        subset=["% del stock de la tienda"]),
                                  use_container_width=True, hide_index=True, height=min(60 + 35 * len(_rk_disp), 460))
 
                 # ── Alerta: lo que cruza a obsoleto en N semanas ──
