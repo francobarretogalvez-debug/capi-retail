@@ -964,6 +964,22 @@ if run_btn:
 
             # Auto-detectar formato
             if _is_base_profundidad(tmp_path):
+                # ── Contrato de entrada + modo seguro (S1, 2026-09-05) ──
+                _problemas = etl_profundidad.validar_base(tmp_path)
+                if _problemas:
+                    st.error("❌ La base subida no pasa la validación y NO se analizó, para no mostrar "
+                             "números mal mapeados:\n\n- " + "\n- ".join(_problemas))
+                    _ult = st.session_state.get("_base_profundidad_path")
+                    _bases_dir = os.path.join(os.path.dirname(__file__), "data2", "bases antiguas")
+                    if not _ult and os.path.isdir(_bases_dir):
+                        _cands = sorted(_glob.glob(os.path.join(_bases_dir, "Base al *.xlsx")), key=os.path.getmtime)
+                        _ult = _cands[-1] if _cands else None
+                    if _ult and os.path.exists(_ult):
+                        st.warning(f"🛟 Modo seguro: se mantiene el último corte válido disponible "
+                                   f"(**{os.path.basename(_ult)}**). Corrige el archivo y vuelve a subirlo.")
+                        if st.session_state.get("results") is None:
+                            st.session_state["_modo_seguro_pendiente"] = _ult
+                    st.stop()
                 with st.spinner("Detectada Base Profundidad de Ripley. Transformando..."):
                     # Guardar copia en data2/bases antiguas/ para Afinidad y snapshots
                     _bases_dir = os.path.join(os.path.dirname(__file__), "data2", "bases antiguas")
@@ -1012,6 +1028,28 @@ if run_btn:
             st.error(f"❌ No se pudo procesar el archivo: {e}")
             with st.expander("Detalle técnico (para soporte)"):
                 st.code(_tb.format_exc())
+
+# ── Modo seguro (S1): si la base nueva falló la validación y no hay análisis en
+#    memoria, ofrecer cargar el último corte válido en vez de dejar la app en blanco.
+_ms = st.session_state.get("_modo_seguro_pendiente")
+if _ms and st.session_state.get("results") is None and os.path.exists(_ms):
+    if st.button(f"🛟 Cargar el último corte válido: {os.path.basename(_ms)}", key="btn_modo_seguro",
+                 use_container_width=True, type="primary"):
+        try:
+            with st.spinner(f"Cargando {os.path.basename(_ms)} en modo seguro..."):
+                _pl = os.path.join(tempfile.gettempdir(), "capi_modo_seguro_plantilla.xlsx")
+                etl_profundidad.transform(_ms, output_path=_pl,
+                                          fecha_corte=etl_profundidad.fecha_corte_desde_nombre(os.path.basename(_ms)))
+                st.session_state["_base_profundidad_path"] = _ms
+                st.session_state["results"] = motor_v2.run_analysis(_pl, params=params_ui, formato=formato_input)
+                st.session_state["_modo_seguro_activo"] = os.path.basename(_ms)
+                st.session_state.pop("_modo_seguro_pendiente", None)
+            st.rerun()
+        except Exception as _e_ms:
+            st.error(f"No se pudo cargar el último corte válido: {_e_ms}")
+if st.session_state.get("_modo_seguro_activo"):
+    st.warning(f"🛟 Modo seguro: estás viendo el corte **{st.session_state['_modo_seguro_activo']}** porque la última "
+               "base subida no pasó la validación. Corrige el archivo y vuelve a subirlo.")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2330,16 +2368,22 @@ if nav_page == "🏠 Dashboard":
                     _m_ticket_ly = _lm.get('ticket_ly', 0)
                     _m_dvta = _lm.get('delta_vta_pct', 0)
                     _m_dticket = _lm.get('delta_ticket_pct', 0)
+                    _m_mg, _m_mg_ly, _m_dmg = _lm.get('margen_pct', 0), _lm.get('margen_ly_pct', 0), _lm.get('delta_margen_pp', 0)
                     _clr_mv = "#10b981" if _m_dvta >= 0 else "#ef4444"
                     _clr_mt = "#10b981" if _m_dticket >= 0 else "#ef4444"
+                    _clr_mg = "#10b981" if _m_dmg >= 0 else "#ef4444"
                     _arr_mv = "▲" if _m_dvta >= 0 else "▼"
                     _arr_mt = "▲" if _m_dticket >= 0 else "▼"
+                    _arr_mg = "▲" if _m_dmg >= 0 else "▼"
                     _ly_rows_html += f"""<tr>
                         <td style="padding:6px 10px; font-weight:500;">{_m_name}</td>
                         <td style="padding:6px 10px; text-align:right;">S/ {_m_ticket:,.0f}</td>
                         <td style="padding:6px 10px; text-align:right; color:var(--capi-text2);">S/ {_m_ticket_ly:,.0f}</td>
                         <td style="padding:6px 10px; text-align:right; font-weight:600; color:{_clr_mt};">{_arr_mt} {abs(_m_dticket):.1f}%</td>
                         <td style="padding:6px 10px; text-align:right; font-weight:600; color:{_clr_mv};">{_arr_mv} {abs(_m_dvta):.1f}%</td>
+                        <td style="padding:6px 10px; text-align:right;">{_m_mg:.1f}%</td>
+                        <td style="padding:6px 10px; text-align:right; color:var(--capi-text2);">{_m_mg_ly:.1f}%</td>
+                        <td style="padding:6px 10px; text-align:right; font-weight:600; color:{_clr_mg};">{_arr_mg} {abs(_m_dmg):.1f} pp</td>
                     </tr>"""
 
                 st.markdown(f"""<div style="overflow-x:auto; max-height:400px; overflow-y:auto;">
@@ -2351,6 +2395,9 @@ if nav_page == "🏠 Dashboard":
                             <th style="padding:8px 10px; text-align:right;">Ticket LY</th>
                             <th style="padding:8px 10px; text-align:right;">Δ Ticket</th>
                             <th style="padding:8px 10px; text-align:right;">Δ Venta S/</th>
+                            <th style="padding:8px 10px; text-align:right;">Margen actual</th>
+                            <th style="padding:8px 10px; text-align:right;">Margen LY</th>
+                            <th style="padding:8px 10px; text-align:right;">Δ Margen</th>
                         </tr>
                     </thead>
                     <tbody>{_ly_rows_html}</tbody>

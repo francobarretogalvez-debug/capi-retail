@@ -195,6 +195,17 @@ def process_micro_profundidad(filepath: str, semana_iso: str = None,
     meta = save_snapshot(df_norm, semana_iso, fecha_cierre, force=force)
     print(f"   ✅ Snapshot {semana_iso}: {meta['n_filas']} SKUs guardados")
 
+    # Snapshot liviano SKU×tienda (sprint Chile 2026-09-05): mismo cierre, segundo
+    # parquet. No bloquea el flujo si la base no trae la firma de tiendas.
+    try:
+        from . import tienda as _tienda
+        meta_t = _tienda.save_tienda(_tienda.build_from_base(df, semana_iso), semana_iso, force=True)
+        meta['tienda'] = meta_t
+        print(f"   ✅ Snapshot tienda {semana_iso}: {meta_t['n_filas']:,} filas SKU×tienda")
+    except Exception as _e_t:
+        meta['tienda_error'] = str(_e_t)
+        print(f"   ⚠️ Snapshot tienda {semana_iso} no generado: {_e_t}")
+
     return meta
 
 

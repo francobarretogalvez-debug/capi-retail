@@ -1,0 +1,23 @@
+{
+  "n_skus": 254,
+  "n_filas_cobertura": 965,
+  "capital_total": 1049141.9,
+  "capital_por_estado": {
+    "ALTO": 118301.87,
+    "DORMIDO": 270857.09,
+    "ESTANCADO": 134301.34,
+    "LIQUIDAR": 6854.54,
+    "MUERTO": 45516.59,
+    "NUEVO SIN VENTA": 156203.28,
+    "PRE-QUIEBRE": 61581.04,
+    "QUIEBRE": 18694.21,
+    "SOBRESTOCK": 138788.97,
+    "ÓPTIMO": 98042.97
+  },
+  "n_reposiciones": 108,
+  "uds_reposicion": 1809,
+  "n_transferencias": 73,
+  "uds_transferencias": 684,
+  "ganancia_transferencias": 24756.95,
+  "margen_efectivo_global": 0.348201
+}

@@ -3072,6 +3072,12 @@ def build_ly_comparison(df_cob, semana_actual=None):
         _df_sku['vta_soles_4sem'] = _df_sku['sku'].map(_vta_soles_por_sku).fillna(0)
     else:
         _df_sku['vta_soles_4sem'] = 0
+    # Contribución 4 sem por SKU (S3 2026-09-05: Δ margen vs AP por marca)
+    if 'contrib_soles_4sem' in df_cob.columns:
+        _contr_por_sku = df_cob.drop_duplicates('sku').set_index('sku')['contrib_soles_4sem']
+        _df_sku['contrib_soles_4sem'] = _df_sku['sku'].map(_contr_por_sku).fillna(0)
+    else:
+        _df_sku['contrib_soles_4sem'] = 0
 
     # Vta uds 4sem REAL: suma de los totales semanales cadena (fix B2 auditoría
     # 2026-08-23 — antes se extrapolaba semana 1 × 4 y el ticket salía sesgado)
@@ -3092,7 +3098,10 @@ def build_ly_comparison(df_cob, semana_actual=None):
     _marca_actual = _df_sku.groupby('marca').agg(
         vta_soles=('vta_soles_4sem', 'sum'),
         vta_uds=('vta_uds_4sem', 'sum'),
+        contr=('contrib_soles_4sem', 'sum'),
     ).reset_index()
+    _marca_actual['margen_pct'] = np.where(_marca_actual['vta_soles'] > 0,
+                                           _marca_actual['contr'] / _marca_actual['vta_soles'] * 100, 0)
     _marca_actual['ticket'] = np.where(
         _marca_actual['vta_uds'] > 0,
         _marca_actual['vta_soles'] / _marca_actual['vta_uds'],
@@ -3184,12 +3193,18 @@ def build_ly_comparison(df_cob, semana_actual=None):
         (_merge['ticket'] - _merge['ticket_ly']) / _merge['ticket_ly'] * 100,
         0
     )
+    # Margen % actual vs LY por marca (S3): contribución/venta, ambos de la misma fuente
+    # (Contr/VtaSMF de Ripley), en puntos porcentuales
+    _merge['margen_ly_pct'] = np.where(_merge['vta_soles_ly'] > 0,
+                                       _merge['contr_ly'] / _merge['vta_soles_ly'] * 100, 0)
+    _merge['delta_margen_pp'] = np.where((_merge['vta_soles'] > 0) & (_merge['vta_soles_ly'] > 0),
+                                         _merge['margen_pct'] - _merge['margen_ly_pct'], 0)
     _merge = _merge.sort_values('vta_soles', ascending=False)
 
     result['ly_marca'] = _merge[[
-        'marca', 'vta_soles', 'vta_uds', 'ticket',
-        'vta_soles_ly', 'vta_uds_ly', 'ticket_ly',
-        'delta_vta_pct', 'delta_ticket_pct'
+        'marca', 'vta_soles', 'vta_uds', 'ticket', 'margen_pct',
+        'vta_soles_ly', 'vta_uds_ly', 'ticket_ly', 'margen_ly_pct',
+        'delta_vta_pct', 'delta_ticket_pct', 'delta_margen_pp'
     ]].round(2).to_dict('records')
 
     return result

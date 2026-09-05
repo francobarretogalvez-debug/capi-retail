@@ -584,3 +584,45 @@ if __name__ == '__main__':
         fecha = sys.argv[sys.argv.index('--fecha') + 1]
 
     transform(input_file, output_file, fecha)
+
+
+# ══════════════════════════════════════════════════════════════
+#  CONTRATO DE ENTRADA — S1 robustez (2026-09-05)
+#  Antes: el mapeo era posicional y una base con columnas movidas producía
+#  números mal mapeados en silencio. Ahora se valida ANTES de transformar.
+# ══════════════════════════════════════════════════════════════
+
+COLUMNAS_OBLIGATORIAS = [
+    'Cód. Prod.', 'Descripción', 'Línea', 'Marca', 'Temp.',
+    'STOCK ACTUAL (UNIDADES)', 'Costo S/.', 'P.Vigente PMM',
+    'Unid. Vendidas Sem. 1ant', 'Unid. Vendidas Sem. 2ant',
+    'Unid. Vendidas Sem. 3ant', 'Unid. Vendidas Sem. 4ant',
+    'Vta. S/. Semana 1ant', 'Contrib. S/. Sem. 1ant',
+]
+MIN_TIENDAS = 10
+
+
+def validar_base(df_or_path, min_tiendas: int = MIN_TIENDAS) -> list:
+    """Devuelve la lista de problemas (vacía = base válida). No lanza excepción.
+
+    Reglas: columnas obligatorias presentes, ≥ min_tiendas con firma
+    '{t} Stk' + '{t} UME' + '{t} On Order', al menos 100 SKUs y stock total > 0.
+    """
+    import pandas as pd
+    df = pd.read_excel(df_or_path, nrows=2000) if isinstance(df_or_path, str) else df_or_path
+    problemas = []
+    cols = set(df.columns)
+    faltan = [c for c in COLUMNAS_OBLIGATORIAS if c not in cols]
+    if faltan:
+        problemas.append(f"Faltan columnas obligatorias: {', '.join(faltan)}")
+    stores = detect_stores(list(df.columns))
+    if len(stores) < min_tiendas:
+        problemas.append(f"Solo {len(stores)} tiendas con firma Stk+UME+On Order (mínimo {min_tiendas}). "
+                         "¿Cambió el formato del reporte micro?")
+    if len(df) < 100:
+        problemas.append(f"La base tiene {len(df)} filas; se esperaban miles de SKUs.")
+    if 'STOCK ACTUAL (UNIDADES)' in cols:
+        stk = pd.to_numeric(df['STOCK ACTUAL (UNIDADES)'], errors='coerce').fillna(0).sum()
+        if stk <= 0:
+            problemas.append("El stock total de la base es 0: archivo vacío o columna de stock corrida.")
+    return problemas
