@@ -679,7 +679,8 @@ def venta_cero(df_cob: pd.DataFrame, min_capital: float = 0, tipo_evento_map: di
     share = d["stock_valor_costo"] / tot
     acum = d.groupby("tienda")["stock_valor_costo"].cumsum() / tot
     d["pct_acum_tienda"] = acum.fillna(0)
-    d["top_80"] = np.where((acum - share).fillna(0) < 0.80, "⭐ TOP 80%", "")
+    # round(6): sin esto 0.95−0.15 da 0.7999… y un SKU exactamente en el borde entra al TOP
+    d["top_80"] = np.where((acum - share).fillna(0).round(6) < 0.80, "⭐ TOP 80%", "")
     for c in COLS_VENTA_CERO:
         if c not in d.columns:
             d[c] = np.nan
