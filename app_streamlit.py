@@ -1131,7 +1131,7 @@ if st.session_state["results"] is None:
             </div>
             <div style="margin-top:14px; padding:10px 14px; background:var(--capi-bg-card); border-radius:8px; border:1px solid var(--capi-border);">
                 <span style="font-size:0.82rem; color:var(--capi-text2);">
-                    Acepta <strong>Base Profundidad</strong> de Ripley o Plantilla Capi. Se detecta y transforma automáticamente.
+                    Acepta el <strong>Micro</strong> de Ripley (Base Profundidad) o la Plantilla Capi. Se detecta y transforma automáticamente.
                 </span>
             </div>
         </div>
