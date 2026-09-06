@@ -17,6 +17,7 @@ import tempfile
 
 import pandas as pd
 
+import motor_tt
 import stock_variacion as sv
 
 
@@ -89,7 +90,7 @@ def render(st):
            "vta_uds_3s": "{:,.0f}", "stock_uds": "{:,.0f}", "on_order": "{:,.0f}"}
     ren = {"vta_uds_3s": "Venta 3s", "stock_uds": "Stock", "on_order": "On order", "peso_venta": "% venta",
            "peso_stock": "% stock", "gap_pp": "Gap (pp)", "cobertura_sem": "Cob (sem)", "diagnostico": "Diagnóstico"}
-    t1, t2, t3, t4 = st.tabs(["📏 Por talla", "🎨 Por color", "🧩 Curva rota", "🏬 Por tienda"])
+    t1, t2, t3, t4, t5 = st.tabs(["📏 Por talla", "🎨 Por color", "🧩 Curva rota", "🏬 Por tienda", "🚚 Reposición TT"])
     with t1:
         mt = sv.mix_por_eje(dt, "talla")
         st.dataframe(mt.rename(columns=ren).style.format({ren.get(k, k): v for k, v in fmt.items()}, na_rep="—"),
@@ -113,6 +114,69 @@ def render(st):
                      .style.format({"Venta 3s": "{:,.0f}", "Stock": "{:,.0f}", "On order": "{:,.0f}",
                                     "Cob (sem)": "{:.1f}", "Opciones curva rota": "{:,.0f}"}, na_rep="—"),
                      use_container_width=True, hide_index=True, height=min(60 + 35 * len(dg), 480))
+
+    with t5:
+        if modelo == "Todos":
+            st.info("Elige un modelo/programa arriba: la reposición TT se calcula por programa (curva de talla y peso de color propios).")
+        else:
+            st.caption("Réplica parametrizable de tu Excel del Pima: stock ideal por **cubicaje** (cubicaje × peso del color × curva de talla) "
+                       "y por **velocidad** (venta semanal × cobertura objetivo + adicional). Elige la regla; el peso de color y la curva "
+                       "salen de la venta de todas las tiendas del programa, o los editas.")
+            p1, p2, p3, p4 = st.columns(4)
+            regla = p1.radio("Regla", ["cubicaje", "velocidad", "max"], horizontal=True, key="tt_regla",
+                             help="cubicaje = lo que usas hoy (Repo 2) · velocidad = Repo 1 · max = el mayor de los dos")
+            cob_obj = p2.number_input("Cobertura objetivo (sem)", 1.0, 16.0, 4.0, 0.5, key="tt_cob")
+            adic = p3.number_input("Adicional (semanas de venta)", 0, 6, 2, key="tt_adic")
+            divisor = p4.number_input("Divisor de curva (0 = Σcurva)", 0, 20, 0, key="tt_div",
+                                      help="Tu Excel divide entre 6 con una curva que suma 9. 0 usa la suma de la curva.")
+            cubicajes = motor_tt.cargar_cubicajes(modelo)
+            pc, ct = motor_tt.pesos_desde_venta(d)
+            with st.expander("Peso de color y curva de talla del programa (editable)", expanded=False):
+                e1, e2 = st.columns(2)
+                pc_df = e1.data_editor(pd.DataFrame({"color": list(pc), "peso": list(pc.values())}), key="tt_pc", hide_index=True)
+                ct_df = e2.data_editor(pd.DataFrame({"talla": list(ct), "curva": list(ct.values())}), key="tt_ct", hide_index=True)
+                pc = dict(zip(pc_df["color"], pd.to_numeric(pc_df["peso"], errors="coerce").fillna(0)))
+                ct = dict(zip(ct_df["talla"], pd.to_numeric(ct_df["curva"], errors="coerce").fillna(0)))
+                st.caption(f"Cubicajes cargados para {len(cubicajes)} tiendas desde config_cubicaje_tt.json (programa: {modelo if modelo in open(motor_tt.CONFIG_CUBICAJE).read() else 'default Pima'}).")
+            rep = motor_tt.reposicion_tt(d, cubicajes, cob_objetivo=cob_obj, adic_semanas=int(adic), regla=regla,
+                                         peso_color=pc, curva_talla=ct, divisor=(divisor or None))
+            if rep.empty:
+                st.warning("Sin filas para calcular.")
+            else:
+                rt = motor_tt.resumen_por_tienda(rep)
+                cdv = motor_tt.cobertura_cd(rep)
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Uds a reponer (regla elegida)", f"{int(rep['repo_final'].sum()):,}")
+                m2.metric("Por cubicaje", f"{int(rep['repo_cubicaje'].sum()):,}")
+                m3.metric("Por velocidad", f"{int(rep['repo_velocidad'].sum()):,}")
+                m4.metric("Faltante para compra (no hay en CD)", f"{int(cdv['faltante_compra'].sum()):,}")
+                st.markdown("**Por tienda**")
+                st.dataframe(rt.style.format({"cubicaje": "{:,.0f}", "oh": "{:,.0f}", "vta_3s": "{:,.0f}", "stock_ideal_cubicaje": "{:,.0f}",
+                                              "repo_velocidad": "{:,.0f}", "repo_cubicaje": "{:,.0f}", "repo_final": "{:,.0f}",
+                                              "cobertura_sem": "{:.1f}", "cobertura_post": "{:.1f}"}, na_rep="—"),
+                             use_container_width=True, hide_index=True, height=min(60 + 35 * len(rt), 420))
+                st.markdown("**Mix ideal: ¿qué peso debería tener cada color y talla?**")
+                x1, x2 = st.columns(2)
+                for col, eje in ((x1, "color"), (x2, "talla")):
+                    mi = motor_tt.mix_ideal(d, eje)
+                    col.dataframe(mi.style.format({"vta_uds_3s": "{:,.0f}", "stock_uds": "{:,.0f}", "peso_venta": "{:.1%}",
+                                                   "peso_stock": "{:.1%}", "stock_objetivo": "{:,.0f}", "ajuste_uds": "{:+,.0f}"}, na_rep="—"),
+                                  use_container_width=True, hide_index=True, height=min(60 + 35 * len(mi), 360))
+                st.markdown("**Cobertura del pedido con stock de CD (por variación)**")
+                st.dataframe(cdv.style.format({"pedido": "{:,.0f}", "cd_disp": "{:,.0f}", "on_order": "{:,.0f}", "cubierto_cd": "{:,.0f}",
+                                               "faltante_compra": "{:,.0f}", "pct_cubierto": "{:.0%}"}, na_rep="—"),
+                             use_container_width=True, hide_index=True, height=300)
+                rb = io.BytesIO()
+                with pd.ExcelWriter(rb, engine="openpyxl") as w:
+                    rep.to_excel(w, sheet_name="Repo variacion x tienda", index=False)
+                    rt.to_excel(w, sheet_name="Por tienda", index=False)
+                    cdv.to_excel(w, sheet_name="Cobertura CD", index=False)
+                    motor_tt.mix_ideal(d, "color").to_excel(w, sheet_name="Mix color", index=False)
+                    motor_tt.mix_ideal(d, "talla").to_excel(w, sheet_name="Mix talla", index=False)
+                rb.seek(0)
+                st.download_button("📥 Excel — reposición TT (a girar) por variación y tienda", rb.getvalue(),
+                                   file_name=f"Capi_Repo_TT_{modelo[:30]}.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="tt_dl")
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:

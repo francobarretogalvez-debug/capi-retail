@@ -1,0 +1,125 @@
+{
+ "_doc": "Cubicaje (capacidad del mueble, uds) y cobertura objetivo por programa TT × tienda. Fuente: Empuje Polos Pima TT Cacharel 03.08.26.xlsx (Franco). Editable.",
+ "POLO PIQUE PIMA CAH": {
+  "Arequipa": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Atocongo": {
+   "cubicaje": 300,
+   "cob_objetivo_sem": 4
+  },
+  "Breña": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Ripley Callao": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Cayma": {
+   "cubicaje": 100,
+   "cob_objetivo_sem": 4
+  },
+  "Chiclayo": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Chimbote": {
+   "cubicaje": 150,
+   "cob_objetivo_sem": 4
+  },
+  "Chorrillos": {
+   "cubicaje": 150,
+   "cob_objetivo_sem": 4
+  },
+  "Huancayo": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Ica": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Jiron Union": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Jockey Plaza": {
+   "cubicaje": 200,
+   "cob_objetivo_sem": 4
+  },
+  "MegaPlaza": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Miraflores": {
+   "cubicaje": 300,
+   "cob_objetivo_sem": 4
+  },
+  "Piura": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Piuraii": {
+   "cubicaje": 150,
+   "cob_objetivo_sem": 4
+  },
+  "Plaza Lima Norte": {
+   "cubicaje": 100,
+   "cob_objetivo_sem": 4
+  },
+  "Primavera": {
+   "cubicaje": 300,
+   "cob_objetivo_sem": 4
+  },
+  "Salaverry": {
+   "cubicaje": 200,
+   "cob_objetivo_sem": 4
+  },
+  "San Borja": {
+   "cubicaje": 400,
+   "cob_objetivo_sem": 4
+  },
+  "San Isidro": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "San Miguel": {
+   "cubicaje": 300,
+   "cob_objetivo_sem": 4
+  },
+  "Santa Anita": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Trujillo": {
+   "cubicaje": 300,
+   "cob_objetivo_sem": 4
+  },
+  "Pucallpa": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Chiclayo II": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Comas": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Puruchuco": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "Iquitos": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  },
+  "San Juan De Lurigancho": {
+   "cubicaje": 0,
+   "cob_objetivo_sem": 4
+  }
+ }
+}
