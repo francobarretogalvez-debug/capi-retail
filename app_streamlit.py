@@ -1120,7 +1120,7 @@ if st.session_state["results"] is None:
             ¿Qué está pasando con tu inventario?
         </div>
         <p style="color:var(--capi-text2); font-size:1rem; margin-bottom:30px;">
-            Sube tu Base Profundidad para desbloquear el análisis completo.
+            Sube tu Micro para desbloquear el análisis completo.
         </p>
         <div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:14px; padding:24px; max-width:500px; margin:0 auto; text-align:left;">
             <div style="font-weight:600; color:var(--capi-text); margin-bottom:12px;">Cómo empezar:</div>
