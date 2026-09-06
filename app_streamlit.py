@@ -35,6 +35,7 @@ import transformar_profundidad as etl_profundidad
 importlib.reload(etl_profundidad)
 import vista_planificacion as vista_plan
 import vista_talla_color
+import vista_auditoria_predist
 importlib.reload(vista_plan)
 
 # Snapshots Engine — histórico semanal (Prompt B)
@@ -93,7 +94,7 @@ import venta_perdida_semanal
 # Streamlit recarga el script principal pero mantiene en memoria los módulos importados; tras un deploy
 # el app puede correr con un módulo viejo (visto 2026-09-06: "sin dato" en Sobrestock). Recargar los
 # módulos propios que cambian seguido, como ya se hace con vista_planificacion.
-for _mod in (comparativo_semanal, render_foto, otb_terceras, venta_perdida_semanal, analisis_estados):
+for _mod in (comparativo_semanal, render_foto, otb_terceras, venta_perdida_semanal, analisis_estados, vista_auditoria_predist):
     importlib.reload(_mod)
 import rendimiento_tienda as rend_t
 import reporte_semanal as rep_sem
@@ -744,6 +745,7 @@ with st.sidebar:
 
             _NAV_PREDICTIVO = [
                 ("🎯", "Match Producto-Plaza"),
+                ("🔍", "Auditoría de predistribución"),
                 ("🧵", "Talla y Color"),
                 ("📊", "Planificación"),
             ]
@@ -4609,6 +4611,10 @@ Se calcula por cada combo **SKU × tienda** candidato:
                     if len(_propias_prod) > 0:
                         st.success(f"🏭 **{len(_propias_prod)} señales de marcas propias** — tienes control de producción para responder.")
 # ─── Rendimiento por Tienda ─────────────────────────────────
+
+elif nav_page == "🔍 Auditoría de predistribución":
+    # Vista aislada (S15, 2026-09-06): venta perdida → causa raíz → índice de acierto por tienda × línea
+    vista_auditoria_predist.render(st, df_cob, etiqueta_semana=lambda w: analisis_estados.etiqueta_semana(w, corta=True))
 
 elif nav_page == "🧵 Talla y Color":
     # Vista aislada (S9 ingesta, 2026-09-05): stock y venta por talla × color × tienda.
