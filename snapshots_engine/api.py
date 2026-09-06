@@ -714,7 +714,7 @@ def get_resumen_semanal(semana: str = None) -> dict:
 def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
                         min_semanas_velocidad: int = 2,
                         tasa_recaptura: float = 0.30,
-                        ajuste_estacional: bool = False) -> dict:  # v1 confunde quiebre con baja estación — ver nota
+                        ajuste_estacional: bool = False, excluir_liquidacion_obsoleto=True) -> dict:  # v1 confunde quiebre con baja estación — ver nota
     """
     Estima la venta perdida (S/) por quiebres de stock en la ventana de
     snapshots disponibles. Devuelve una BANDA (conservadora-optimista),
@@ -964,6 +964,17 @@ def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
         })
 
     df_detalle = pd.DataFrame(detalle)
+    n_excluidos_liq = 0
+    if not df_detalle.empty and excluir_liquidacion_obsoleto:
+        # Regla Franco 2026-09-06: liquidación (dscto ≥40%), temporada en liquidación y >6 meses NO cuentan como quiebre
+        try:
+            from venta_perdida_semanal import exclusiones_quiebre
+            _excl, _ = exclusiones_quiebre(sem_list[-1])
+            _mask = df_detalle['sku'].astype(str).str.strip().isin(_excl)
+            n_excluidos_liq = int(_mask.sum())
+            df_detalle = df_detalle[~_mask]
+        except Exception:
+            pass
     if not df_detalle.empty:
         df_detalle = df_detalle.sort_values('perdida_max_soles', ascending=False).reset_index(drop=True)
 
@@ -980,6 +991,8 @@ def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
         "Precio e ingreso SIN IGV (venta_soles/uds realizado); margen perdido = ingreso × margen contable (contribución/venta).",
         f"{n_excluidos} SKUs excluidos por historia o precio insuficientes." if n_excluidos else "Sin SKUs excluidos.",
         "Nivel SKU agregado cadena (el detalle por tienda usa la base actual).",
+        (f"Excluidos {n_excluidos_liq} SKUs en liquidación (dscto ≥40%), temporada en liquidación u >6 meses (regla 2026-09-06)."
+         if excluir_liquidacion_obsoleto else "Sin exclusión de liquidación/obsoletos."),
     ]
 
     return {

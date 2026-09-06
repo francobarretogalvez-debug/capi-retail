@@ -88,6 +88,7 @@ import acciones_log
 import analisis_estados
 import comparativo_semanal
 import otb_terceras
+import venta_perdida_semanal
 import rendimiento_tienda as rend_t
 import reporte_semanal as rep_sem
 import agente_reporte as ag_rep
@@ -1922,6 +1923,96 @@ if nav_page == "🏠 Dashboard":
             st.markdown("---")
             st.markdown(f'<div class="section-header"><h3>💸 Ventas Perdidas por Quiebre</h3><span class="live-badge">NUEVO</span></div>', unsafe_allow_html=True)
 
+            # ── ÚLTIMA SEMANA, por SKU × tienda (feedback Franco 2026-09-06) ──
+            # Quiebre = la tienda cerró la semana con stock 0 en un SKU que vendía ahí. Usa el snapshot
+            # por tienda; el acumulado de abajo es a nivel cadena (stock 0 en TODA la cadena).
+            try:
+                _vps = venta_perdida_semanal.venta_perdida_semana()
+            except Exception as _e_vps:
+                _vps = {}
+                st.caption(f"Venta perdida semanal no disponible: {_e_vps}")
+            if _vps and not _vps.get("insuficiente") and _vps.get("n_combos", 0) > 0:
+                _vps_et = analisis_estados.etiqueta_semana(_vps["semana"], corta=True)
+                st.markdown(f"<h5 style='margin:4px 0 6px 0;'>Última semana · {_vps['semana']} ({_vps_et})</h5>", unsafe_allow_html=True)
+                _pt = _vps["por_tienda"]
+                _ev_n = int(_vps["detalle"]["evitable"].sum()); _ev_s = float(_vps["detalle"].loc[_vps["detalle"]["evitable"], "neto_max"].sum())
+                _w1, _w2, _w3, _w4 = st.columns([1.4, 1.4, 1, 1])
+                with _w1:
+                    st.markdown(f"""
+                    <div style="background:#FEF2F2; border-radius:12px; padding:16px 20px; border-left:4px solid #DC2626;">
+                        <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Venta perdida NETA de la semana</div>
+                        <div style="font-size:1.6rem; font-weight:700; color:#DC2626;">S/ {_vps['neto_min']:,.0f} – S/ {_vps['neto_max']:,.0f}</div>
+                        <div style="font-size:0.7rem; color:var(--capi-text2);">{_vps['n_combos']:,} SKU×tienda que cerraron en 0 y vendían ahí · {_vps['n_tiendas']} tiendas · bruto S/ {_vps['bruto_min']:,.0f} – {_vps['bruto_max']:,.0f}</div>
+                    </div>""", unsafe_allow_html=True)
+                with _w2:
+                    st.markdown(f"""
+                    <div style="background:#FFF7ED; border-radius:12px; padding:16px 20px; border-left:4px solid #EA580C;">
+                        <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Margen perdido NETO de la semana</div>
+                        <div style="font-size:1.6rem; font-weight:700; color:#EA580C;">S/ {_vps['margen_min']:,.0f} – S/ {_vps['margen_max']:,.0f}</div>
+                        <div style="font-size:0.7rem; color:var(--capi-text2);">neto × margen contable del SKU</div>
+                    </div>""", unsafe_allow_html=True)
+                with _w3:
+                    st.markdown(f"""
+                    <div style="background:#FFFBEB; border-radius:12px; padding:16px 20px; border-left:4px solid #D97706;">
+                        <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Evitables (hay stock en CD o viene)</div>
+                        <div style="font-size:1.6rem; font-weight:700; color:#D97706;">{_ev_n:,}</div>
+                        <div style="font-size:0.7rem; color:var(--capi-text2);">S/ {_ev_s:,.0f} de venta neta en juego</div>
+                    </div>""", unsafe_allow_html=True)
+                with _w4:
+                    _qr = _vps.get("quiebre", {})
+                    _dist = _qr.get("dist_semanas", {})
+                    _dist_txt = " · ".join(f"{('4+' if k >= 4 else k)} sem: {v}" for k, v in sorted(_dist.items()))
+                    st.markdown(f"""
+                    <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_CRITICO};">
+                        <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">En quiebre (≤ 4 sem de cobertura en la tienda)</div>
+                        <div style="font-size:1.6rem; font-weight:700; color:{STATUS_CRITICO};">{_qr.get('n_combos_cob4', 0):,}</div>
+                        <div style="font-size:0.7rem; color:var(--capi-text2);">SKU×tienda · {_qr.get('n_tiendas_cob4', 0)} tiendas · {_qr.get('semanas_promedio', 0):.1f} sem en quiebre en promedio<br>{_dist_txt}</div>
+                    </div>""", unsafe_allow_html=True)
+                _exc = _vps.get("quiebre", {}).get("exclusiones", {})
+                _temp_liq = next((k.split("_")[1] for k in _exc if k.startswith("temporada_")), "?")
+                st.caption(f"Regla (Franco 06-sep): quiebre = cobertura ≤ 4 semanas por SKU × tienda; se cuentan las semanas seguidas hasta que la reposición la sube. "
+                           f"Fuera del cálculo: liquidación (dscto ≥40%: {_exc.get('dscto_40', 0):,} SKUs), temporada en liquidación ({_temp_liq}: "
+                           f"{_exc.get('temporada_' + _temp_liq, 0):,}) y más de 6 meses ({_exc.get('obsoleto_6m', 0):,}) → {_exc.get('total', 0):,} SKUs excluidos. "
+                           "La plata se pierde solo en las semanas en que la tienda cerró sin stock.")
+                with st.expander("Ver por tienda, tendencia de 4 semanas y detalle SKU × tienda", expanded=False):
+                    try:
+                        _ser = venta_perdida_semanal.serie_semanas(5)
+                        if len(_ser) >= 2:
+                            _ser_d = _ser.copy(); _ser_d["Venta perdida neta"] = _ser_d.apply(lambda r: f"S/ {r.neto_min:,.0f} – {r.neto_max:,.0f}", axis=1)
+                            _ser_d["Margen perdido neto"] = _ser_d.apply(lambda r: f"S/ {r.margen_min:,.0f} – {r.margen_max:,.0f}", axis=1)
+                            st.dataframe(_ser_d[["semana", "combos", "Venta perdida neta", "Margen perdido neto"]].rename(columns={"semana": "Semana", "combos": "SKU×tienda"}),
+                                         use_container_width=True, hide_index=True, height=min(60 + 35 * len(_ser_d), 260))
+                    except Exception as _e_ser:
+                        st.caption(f"Serie no disponible: {_e_ser}")
+                    st.dataframe(_pt.rename(columns={"tienda": "Tienda", "combos": "SKU×tienda", "uds_min": "Uds mín", "uds_max": "Uds máx",
+                                                     "neto_min": "Neto mín S/", "neto_max": "Neto máx S/", "margen_min": "Margen mín S/",
+                                                     "margen_max": "Margen máx S/", "evitables": "Evitables", "neto_evitable": "Neto evitable S/"})
+                                 .style.format({"Uds mín": "{:,.0f}", "Uds máx": "{:,.0f}", "Neto mín S/": "S/ {:,.0f}", "Neto máx S/": "S/ {:,.0f}",
+                                                "Margen mín S/": "S/ {:,.0f}", "Margen máx S/": "S/ {:,.0f}", "Evitables": "{:,.0f}", "Neto evitable S/": "S/ {:,.0f}"}),
+                                 use_container_width=True, hide_index=True, height=min(60 + 35 * len(_pt), 420))
+                    _det = _vps["detalle"].head(300).rename(columns={"tienda": "Tienda", "sku": "SKU", "descripcion": "Producto", "marca": "Marca",
+                                                                     "linea": "Línea", "vel_min": "Vel mín", "vel_max": "Vel máx", "vta_uds_sem": "Vendió",
+                                                                     "uds_min": "Perdió mín", "uds_max": "Perdió máx", "precio": "Precio", "margen": "Margen",
+                                                                     "neto_max": "Neto máx S/", "stock_cd": "Stock CD", "on_order": "On order", "evitable": "Evitable"})
+                    st.dataframe(_det[[c for c in ["Tienda", "SKU", "Producto", "Marca", "Línea", "Vel máx", "Vendió", "Perdió máx", "Precio", "Margen",
+                                                   "Neto máx S/", "Stock CD", "On order", "Evitable"] if c in _det.columns]]
+                                 .style.format({"Vel máx": "{:.1f}", "Vendió": "{:,.0f}", "Perdió máx": "{:.1f}", "Precio": "S/ {:,.2f}", "Margen": "{:.0%}",
+                                                "Neto máx S/": "S/ {:,.0f}", "Stock CD": "{:,.0f}", "On order": "{:,.0f}"}, na_rep="—"),
+                                 use_container_width=True, hide_index=True, height=360)
+                    _enq = _vps.get("en_quiebre")
+                    if _enq is not None and len(_enq):
+                        st.markdown("**En quiebre por cobertura (≤ 4 sem), con semanas seguidas en quiebre**")
+                        _enq_d = _enq.merge(_vps["detalle"][["sku", "tienda", "descripcion", "marca"]].drop_duplicates(), on=["sku", "tienda"], how="left") if "descripcion" not in _enq.columns else _enq
+                        st.dataframe(_enq_d[[c for c in ["tienda", "sku", "descripcion", "marca", "semanas_en_quiebre", "stock_uds", "vel_ref", "cobertura_sem", "vta_uds_sem", "on_order"] if c in _enq_d.columns]]
+                                     .rename(columns={"tienda": "Tienda", "sku": "SKU", "descripcion": "Producto", "marca": "Marca", "semanas_en_quiebre": "Sem en quiebre",
+                                                      "stock_uds": "Stock", "vel_ref": "Vel/sem", "cobertura_sem": "Cob (sem)", "vta_uds_sem": "Vendió", "on_order": "On order"})
+                                     .head(400).style.format({"Vel/sem": "{:.1f}", "Cob (sem)": "{:.1f}", "Stock": "{:,.0f}", "Vendió": "{:,.0f}", "On order": "{:,.0f}"}, na_rep="—"),
+                                     use_container_width=True, hide_index=True, height=340)
+                    st.caption("Velocidad = venta semanal del SKU en esa tienda en las últimas 4 semanas con stock (mín. 2). "
+                               "Perdió = velocidad − lo que alcanzó a vender antes de quebrar. Precio realizado sin IGV y margen contable del SKU. "
+                               "Neto = bruto × (1 − 30% sustitución).")
+                st.markdown("<h5 style='margin:14px 0 6px 0;'>Acumulado desde abril (nivel cadena: stock 0 en toda la cadena)</h5>", unsafe_allow_html=True)
+
             _vp_sem = _vp['semanas_analizadas']
             _vp_evit_n = int(_vp_q['evitable'].sum()) if not _vp_q.empty else 0
             _vp_evit_soles = float(_vp_q.loc[_vp_q['evitable'], 'perdida_sem_soles'].sum()) if not _vp_q.empty else 0.0
@@ -1977,6 +2068,43 @@ if nav_page == "🏠 Dashboard":
             </div>""", unsafe_allow_html=True)
 
             st.caption(" · ".join(_vp['supuestos']))
+
+            # ── De dónde sale el acumulado (feedback Franco 2026-09-06): por marca y por SKU ──
+            _vpd = _vp.get('df_detalle')
+            if _vpd is not None and not _vpd.empty:
+                with st.expander(f"🔎 De dónde sale el acumulado — {len(_vpd):,} SKUs con quiebre a nivel cadena, por marca y por SKU", expanded=False):
+                    _vpm = (_vpd.groupby('marca').agg(skus=('sku', 'nunique'), sem_quiebre=('semanas_quiebre_max', 'sum'),
+                                                       uds_max=('uds_perdidas_max', 'sum'), neto_min=('ingreso_neto_min', 'sum'),
+                                                       neto_max=('ingreso_neto_max', 'sum'), margen_max=('margen_neto_max', 'sum'))
+                            .reset_index().sort_values('neto_max', ascending=False))
+                    _vpm['pct'] = _vpm['neto_max'] / _vpm['neto_max'].sum()
+                    st.markdown("**Por marca**")
+                    st.dataframe(_vpm.rename(columns={'marca': 'Marca', 'skus': 'SKUs', 'sem_quiebre': 'Semanas en quiebre (Σ)', 'uds_max': 'Uds perdidas máx',
+                                                      'neto_min': 'Neto mín S/', 'neto_max': 'Neto máx S/', 'margen_max': 'Margen neto máx S/', 'pct': '% del total'})
+                                 .style.format({'SKUs': '{:,.0f}', 'Semanas en quiebre (Σ)': '{:,.1f}', 'Uds perdidas máx': '{:,.0f}', 'Neto mín S/': 'S/ {:,.0f}',
+                                                'Neto máx S/': 'S/ {:,.0f}', 'Margen neto máx S/': 'S/ {:,.0f}', '% del total': '{:.0%}'}),
+                                 use_container_width=True, hide_index=True, height=min(60 + 35 * len(_vpm), 420))
+                    st.markdown("**Por SKU** (ordenado por lo que más pesa)")
+                    _vpd_cols = [c for c in ['sku', 'descripcion', 'marca', 'semanas_quiebre_min', 'semanas_quiebre_max', 'uds_perdidas_min', 'uds_perdidas_max',
+                                             'precio_usado', 'margen_pct', 'ingreso_neto_min', 'ingreso_neto_max', 'margen_neto_max'] if c in _vpd.columns]
+                    _vpd_ren = {'sku': 'SKU', 'descripcion': 'Producto', 'marca': 'Marca', 'semanas_quiebre_min': 'Sem quiebre mín', 'semanas_quiebre_max': 'Sem quiebre máx',
+                                'uds_perdidas_min': 'Uds mín', 'uds_perdidas_max': 'Uds máx', 'precio_usado': 'Precio', 'margen_pct': 'Margen %',
+                                'ingreso_neto_min': 'Neto mín S/', 'ingreso_neto_max': 'Neto máx S/', 'margen_neto_max': 'Margen neto máx S/'}
+                    _vpd_d = _vpd[_vpd_cols].rename(columns=_vpd_ren)
+                    st.dataframe(_vpd_d.head(500).style.format({'Sem quiebre mín': '{:.1f}', 'Sem quiebre máx': '{:.1f}', 'Uds mín': '{:,.0f}', 'Uds máx': '{:,.0f}',
+                                                                'Precio': 'S/ {:,.2f}', 'Margen %': '{:.0f}%', 'Neto mín S/': 'S/ {:,.0f}', 'Neto máx S/': 'S/ {:,.0f}',
+                                                                'Margen neto máx S/': 'S/ {:,.0f}'}, na_rep='—'),
+                                 use_container_width=True, hide_index=True, height=420)
+                    _vpd_buf = io.BytesIO()
+                    with pd.ExcelWriter(_vpd_buf, engine='openpyxl') as _wvd:
+                        vistas_excel._tabla_con_titulo(_wvd, 'Por marca', f"Venta perdida acumulada {_vp_sem[0]} a {_vp_sem[-1]} — por marca", _vpm,
+                                                       {'neto_min': '#,##0', 'neto_max': '#,##0', 'margen_max': '#,##0', 'pct': '0%'})
+                        vistas_excel._tabla_con_titulo(_wvd, 'Por SKU', 'Venta perdida acumulada — por SKU (nivel cadena)', _vpd_d,
+                                                       {'Neto mín S/': '#,##0', 'Neto máx S/': '#,##0', 'Margen neto máx S/': '#,##0', 'Precio': '#,##0.00'})
+                    _vpd_buf.seek(0)
+                    st.download_button("📥 Excel — de dónde sale la venta perdida acumulada", _vpd_buf.getvalue(), file_name="Capi_Venta_Perdida_Detalle.xlsx",
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_vp_detalle")
+
 
             with st.expander(f"Ver detalle y soluciones — top quiebres actuales por tienda ({len(_vp_q):,} combos)", expanded=False):
                 if _vp_q.empty:
