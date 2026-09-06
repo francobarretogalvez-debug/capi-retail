@@ -14,9 +14,10 @@ def _cob():
     ])
 
 
-def test_ranking_por_tienda_rango_y_taxonomia():
+def test_ranking_por_tienda_dos_niveles():
     r = obsoletos.ranking_por_tienda(_cob(), definicion="rango", marcas_terceras={"DOCKERS"})
     assert r.iloc[0]["tienda"] == "A" and r.iloc[0]["capital_obsoleto"] == 300
+    assert r.iloc[0]["capital_obsoleto_9m_mas"] == 300 and r.iloc[0]["capital_preobsoleto_6_9m"] == 0   # RANGO 9_12 → obsoleto
     assert abs(r.iloc[0]["pct_stock_tienda"] - 0.6) < 1e-9 and r.iloc[0]["marca_top"] == "MARQUIS"
     assert "B" not in set(r["tienda"])
     t = obsoletos.ranking_por_tienda(_cob(), definicion="taxonomia")
@@ -32,6 +33,7 @@ def test_por_entrar_dos_semanas_y_descuento():
     assert set(pe3["sku"]) == {"2", "3"}
     pe3t = obsoletos.por_entrar(_cob(), semanas=4, definicion="taxonomia")
     assert set(pe3t["sku"]) == {"2"}             # taxonomía exige sin venta
+    assert obsoletos.por_entrar(_cob(), semanas=4, hacia="obsoleto").empty   # nadie está entre 35 y 39 sem
     res = obsoletos.resumen_por_entrar(pe3)
     assert res.iloc[0]["marca"] in {"DOCKERS", "MARQUIS"} and res["capital"].sum() == 300
 

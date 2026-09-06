@@ -7,10 +7,12 @@ Tres piezas sobre el df de cobertura (SKU×tienda) del motor:
    con el descuento sugerido de la pirámide para atacarla ANTES de que se congele.
 3. delta_marca: capital MUERTO por marca en la semana actual vs la anterior (snapshots).
 
-Definiciones (conviven; Franco elige la oficial):
-- "rango": rango_antiguedad ∈ {6_9, 9_12, 12_99} → más de 6 meses en tienda, venda o no
-  (la que usa hoy la vista Gestión por Antigüedad).
-- "taxonomia": estado MUERTO (>26 semanas sin venta) según taxonomia.classify_series.
+Definición oficial (Franco, 2026-09-05):
+- PRE-OBSOLETO = 6 a 9 meses en tienda (RANGO 6_9 / 26–39 semanas), venda o no.
+- OBSOLETO     = 9 meses a más (RANGO 9_12 + 12_99 / >39 semanas), venda o no.
+- "Por entrar": lo que cruza a pre-obsoleto (llega a 26 sem) o a obsoleto (llega a 39 sem) en N semanas.
+Se usa rango_antiguedad cuando existe (misma fuente que la vista Gestión por Antigüedad) y
+edad_semanas como respaldo. La taxonomía (MUERTO = sin venta) queda para Salud del Stock, no para esto.
 
 Sesgo del campo Costo (memoria 2026-08-26): en terceras nacionales `costo` subestima el
 margen ~11.7 pp. `capital_implicito` = stock × precio_vigente/1.18 × (1 − margen contable)
@@ -21,15 +23,35 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-RANGOS_OBSOLETO = {"RANGO 6_9", "RANGO 9_12", "RANGO 12_99"}
-UMBRAL_OBSOLETO_SEM = 26          # 6 meses
+RANGOS_PREOBSOLETO = {"RANGO 6_9"}
+RANGOS_OBSOLETO = {"RANGO 9_12", "RANGO 12_99"}
+SEM_PREOBSOLETO = 26              # 6 meses
+SEM_OBSOLETO = 39                 # 9 meses
+UMBRAL_OBSOLETO_SEM = SEM_PREOBSOLETO   # compat
+NIVELES = ("preobsoleto", "obsoleto", "ambos")
 IGV = 1.18
 
 
-def _mask_obsoleto(df: pd.DataFrame, definicion: str) -> pd.Series:
+def _edad(df):
+    return pd.to_numeric(df.get("edad_semanas"), errors="coerce") if "edad_semanas" in df.columns else pd.Series(np.nan, index=df.index)
+
+
+def _mask_nivel(df: pd.DataFrame, nivel: str) -> pd.Series:
+    """pre-obsoleto (6–9 m), obsoleto (≥9 m) o ambos. Rango del maestro si existe; si no, edad en semanas."""
+    if "rango_antiguedad" in df.columns and df["rango_antiguedad"].notna().any():
+        r = df["rango_antiguedad"].astype(str)
+        pre, obs = r.isin(RANGOS_PREOBSOLETO), r.isin(RANGOS_OBSOLETO)
+    else:
+        e = _edad(df)
+        pre, obs = (e > SEM_PREOBSOLETO) & (e <= SEM_OBSOLETO), e > SEM_OBSOLETO
+    return pre if nivel == "preobsoleto" else obs if nivel == "obsoleto" else (pre | obs)
+
+
+def _mask_obsoleto(df: pd.DataFrame, definicion: str = "rango") -> pd.Series:
+    """Compat: 'rango' = ambos niveles (más de 6 meses); 'taxonomia' = MUERTO (solo Salud del Stock)."""
     if definicion == "taxonomia":
         return df.get("estado", pd.Series("", index=df.index)).astype(str).eq("MUERTO")
-    return df.get("rango_antiguedad", pd.Series("", index=df.index)).isin(RANGOS_OBSOLETO)
+    return _mask_nivel(df, "ambos")
 
 
 def capital_implicito(df: pd.DataFrame, marcas_terceras: set | None = None) -> pd.Series:
@@ -58,6 +80,8 @@ def ranking_por_tienda(df_cob: pd.DataFrame, definicion: str = "rango",
     d["capital"] = pd.to_numeric(d.get("stock_valor_costo"), errors="coerce").fillna(0)
     d["stock"] = pd.to_numeric(d.get("stock_total"), errors="coerce").fillna(0)
     d["_obs"] = _mask_obsoleto(d, definicion)
+    d["_pre"] = _mask_nivel(d, "preobsoleto") if definicion != "taxonomia" else False
+    d["_ob9"] = _mask_nivel(d, "obsoleto") if definicion != "taxonomia" else d["_obs"]
     d["_ci"] = capital_implicito(d, marcas_terceras)
     tot = d.groupby("tienda")["capital"].sum().rename("capital_tienda")
     o = d[d["_obs"]]
@@ -65,6 +89,9 @@ def ranking_por_tienda(df_cob: pd.DataFrame, definicion: str = "rango",
         return pd.DataFrame()
     g = o.groupby("tienda").agg(capital_obsoleto=("capital", "sum"), uds_obsoletas=("stock", "sum"),
                                 skus_obsoletos=("sku", "nunique"), capital_implicito=("_ci", "sum"))
+    g["capital_preobsoleto_6_9m"] = o[o["_pre"]].groupby("tienda")["capital"].sum()
+    g["capital_obsoleto_9m_mas"] = o[o["_ob9"]].groupby("tienda")["capital"].sum()
+    g = g.fillna({"capital_preobsoleto_6_9m": 0.0, "capital_obsoleto_9m_mas": 0.0})
     if "marca" in o.columns:
         top = (o.groupby(["tienda", "marca"])["capital"].sum().reset_index()
                 .sort_values("capital", ascending=False).drop_duplicates("tienda").set_index("tienda")["marca"])
@@ -76,21 +103,20 @@ def ranking_por_tienda(df_cob: pd.DataFrame, definicion: str = "rango",
 
 
 def por_entrar(df_cob: pd.DataFrame, semanas: int = 2, definicion: str = "rango",
-               solo_sin_venta: bool | None = None, margen_min: float = 0.10) -> pd.DataFrame:
-    """Mercadería que cruza el umbral de obsoleto (26 semanas) dentro de `semanas`.
-
-    - definicion "rango": cualquier SKU×tienda con 26−N < edad ≤ 26 que aún no está en rango obsoleto.
-    - definicion "taxonomia": lo mismo pero solo sin venta (prom_vta_uds == 0), que es lo que MUERTO exige.
-    Devuelve filas con semanas_para_obsoleto, capital, descuento sugerido (pirámide) y precio sugerido.
-    """
+               solo_sin_venta: bool | None = None, margen_min: float = 0.10,
+               hacia: str = "preobsoleto") -> pd.DataFrame:
+    """Mercadería que cruza un umbral de antigüedad dentro de `semanas`:
+    hacia="preobsoleto" → llega a 26 sem (6 meses); hacia="obsoleto" → llega a 39 sem (9 meses).
+    Devuelve filas con semanas_para_cruzar, capital, descuento sugerido (pirámide) y precio sugerido.
+    `definicion`/`solo_sin_venta` se conservan por compatibilidad (taxonomía exige sin venta)."""
     from pricing import descuento_sugerido, precio_piso
     if df_cob is None or df_cob.empty or "edad_semanas" not in df_cob.columns:
         return pd.DataFrame()
+    umbral = SEM_OBSOLETO if hacia == "obsoleto" else SEM_PREOBSOLETO
     d = df_cob.copy()
     edad = pd.to_numeric(d["edad_semanas"], errors="coerce")
     d["capital"] = pd.to_numeric(d.get("stock_valor_costo"), errors="coerce").fillna(0)
-    ya = _mask_obsoleto(d, definicion)
-    m = (edad > UMBRAL_OBSOLETO_SEM - semanas) & (edad <= UMBRAL_OBSOLETO_SEM) & ~ya & (d["capital"] > 0)
+    m = (edad > umbral - semanas) & (edad <= umbral) & (d["capital"] > 0)
     if solo_sin_venta is None:
         solo_sin_venta = definicion == "taxonomia"
     if solo_sin_venta and "prom_vta_uds" in d.columns:
@@ -98,15 +124,15 @@ def por_entrar(df_cob: pd.DataFrame, semanas: int = 2, definicion: str = "rango"
     o = d[m].copy()
     if o.empty:
         return pd.DataFrame()
-    o["semanas_para_obsoleto"] = (UMBRAL_OBSOLETO_SEM - edad[m]).clip(lower=0).round(0)
+    o["semanas_para_obsoleto"] = (umbral - edad[m]).clip(lower=0).round(0)
+    o["cruza_a"] = "obsoleto (≥9 m)" if hacia == "obsoleto" else "pre-obsoleto (6–9 m)"
     pv = pd.to_numeric(o.get("precio_vigente"), errors="coerce")
     costo = pd.to_numeric(o.get("costo"), errors="coerce")
     dsc_act = pd.to_numeric(o.get("pct_descuento"), errors="coerce").fillna(0)
+    dsc_cruce, _ = descuento_sugerido(umbral)
     sug = []
     for e, p, c, da in zip(edad[m], pv, costo, dsc_act):
-        dsc, tipo = descuento_sugerido(float(e) if pd.notna(e) else 0)
-        # el descuento preventivo es el de la pirámide AL CRUZAR (edad 26) si es mayor que el actual
-        dsc_cruce, _ = descuento_sugerido(UMBRAL_OBSOLETO_SEM)
+        dsc, _tipo = descuento_sugerido(float(e) if pd.notna(e) else 0)
         dsc_obj = max(dsc, dsc_cruce)
         if pd.notna(p) and p > 0:
             piso = precio_piso(float(c), margen_min) if pd.notna(c) and c > 0 else 0.0
@@ -119,7 +145,7 @@ def por_entrar(df_cob: pd.DataFrame, semanas: int = 2, definicion: str = "rango"
     o["precio_sugerido"] = [x[1] for x in sug]
     o["dscto_real"] = [x[2] for x in sug]
     o["accion"] = [("✅ Descuento ya aplicado" if x[3] == "ya está" else "💰 Subir descuento antes de que cruce") for x in sug]
-    cols = [c for c in ["tienda", "marca", "sku", "nombre", "categoria", "edad_semanas", "semanas_para_obsoleto",
+    cols = [c for c in ["tienda", "marca", "sku", "nombre", "categoria", "edad_semanas", "semanas_para_obsoleto", "cruza_a",
                         "stock_total", "capital", "prom_vta_uds", "cobertura_sem", "precio_vigente", "pct_descuento",
                         "dscto_sugerido", "precio_sugerido", "dscto_real", "accion"] if c in o.columns]
     return o[cols].sort_values(["semanas_para_obsoleto", "capital"], ascending=[True, False]).reset_index(drop=True)

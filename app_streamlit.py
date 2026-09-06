@@ -2174,7 +2174,8 @@ if nav_page == "🏠 Dashboard":
             _cards = [
                 ("Capital inmovilizado", "capital_inmovilizado", "soles"),
                 ("% del capital inmovilizado", "pct_inmovilizado", "pct"),
-                ("Capital obsoleto (>26 sem)", "capital_obsoleto", "soles"),
+                ("Pre-obsoleto (6–9 meses)", "capital_preobsoleto", "soles"),
+                ("Obsoleto (9 meses a más)", "capital_obsoleto", "soles"),
                 ("SKUs en quiebre", "skus_quiebre", "int"),
                 ("% SKUs con stock sin venta", "pct_venta_cero", "pct"),
                 ("Cobertura (semanas)", "cobertura_sem", "num1"),
@@ -2197,7 +2198,8 @@ if nav_page == "🏠 Dashboard":
 
             # Segunda fila (revisión Franco 2026-09-05): ¿qué viene y dónde está la plata?
             _cards2 = [
-                ("Por entrar a obsoleto (4 sem)", "capital_por_entrar", "soles"),
+                ("Entra a pre-obsoleto en 4 sem", "capital_por_entrar", "soles"),
+                ("Pasa a obsoleto en 4 sem", "capital_por_pasar", "soles"),
                 ("Lanzamientos sin venta", "capital_nuevo_sin_venta", "soles"),
                 ("% del capital en CD", "pct_capital_cd", "pct"),
                 ("Capital en liquidación (≥40%)", "capital_liquidacion", "soles"),
@@ -2213,7 +2215,7 @@ if nav_page == "🏠 Dashboard":
                     _dmv = _dm[1] if _dm else float("nan")
                     _clr = "#6B7280" if pd.isna(_dmv) else ("#10b981" if _dmv < 0 else "#ef4444")
                     _col.markdown(f'<div style="font-size:0.72rem; color:{_clr}; margin-top:-8px;">mes: {_fmtd(_dm, _f)}</div>', unsafe_allow_html=True)
-            st.caption("Fila 1: dónde está el problema hoy. Fila 2: qué viene (por entrar a obsoleto = mercadería de 22–26 semanas que cruza las 26 en 4 semanas; "
+            st.caption("Fila 1: dónde está el problema hoy. Fila 2: qué viene (entra a pre-obsoleto = llega a 6 meses en 4 semanas; pasa a obsoleto = llega a 9 meses en 4 semanas; "
                        "lanzamientos sin venta = NUEVO SIN VENTA) y dónde está la plata (en CD sin bajar al piso, o ya en liquidación). "
                        "On order solo existe en cortes desde el 30-ago.")
 
@@ -2231,7 +2233,7 @@ if nav_page == "🏠 Dashboard":
                     st.dataframe(_t_disp, use_container_width=True, height=440)
                     st.caption("Venta, contribución y margen van como contexto: semana a semana los mueven los eventos de precio, "
                                "no las acciones sobre el inventario. Capital inmovilizado = DORMIDO + ESTANCADO + SOBRESTOCK + LIQUIDAR + MUERTO. "
-                               "Obsoleto = más de 26 semanas en tienda (definición por antigüedad, provisional hasta que Franco elija). Cuando haya más cortes, el comparativo mensual pasa a periodo comercial Ripley.")
+                               "Pre-obsoleto = 6–9 meses en tienda · Obsoleto = 9 meses a más (definición Franco 2026-09-05, por antigüedad). Cuando haya más cortes, el comparativo mensual pasa a periodo comercial Ripley.")
                 try:
                     _rp = comparativo_semanal.resumen_pareto(_act)
                     if _rp:
@@ -3631,26 +3633,26 @@ elif nav_page == "📊 Gestión por Antigüedad":
                 import obsoletos as _obsm
                 _df_cob_obs = df_cob if _obs_marca_sel == "Todas" else df_cob[df_cob["marca"] == _obs_marca_sel]
                 _terc_set = {m.upper() for m in agente_terceras.MARCAS_AGENTE}
-                _def_sel = st.radio("Definición de obsoleto", ["Más de 6 meses en tienda (rango)", "Sin venta más de 26 semanas (MUERTO)"],
-                                    horizontal=True, key="obs_def",
-                                    help="Conviven dos definiciones en Capi y dan números distintos. Franco elige la oficial; "
-                                         "mientras tanto se muestran las dos.")
-                _def_key = "rango" if _def_sel.startswith("Más") else "taxonomia"
+                # Definición Franco 2026-09-05: pre-obsoleto = 6–9 meses, obsoleto = 9 meses a más (por antigüedad)
+                _def_key = "rango"
                 _rk = _obsm.ranking_por_tienda(_df_cob_obs, definicion=_def_key, marcas_terceras=_terc_set)
-                _rk_otra = _obsm.ranking_por_tienda(_df_cob_obs, definicion=("taxonomia" if _def_key == "rango" else "rango"))
-                _tot_def = float(_rk["capital_obsoleto"].sum()) if not _rk.empty else 0.0
-                _tot_otra = float(_rk_otra["capital_obsoleto"].sum()) if not _rk_otra.empty else 0.0
-                st.markdown(f"<h5 style='margin:8px 0 2px 0;'>🏬 Capital obsoleto por tienda</h5>", unsafe_allow_html=True)
-                st.caption(f"Con esta definición: **S/ {_tot_def:,.0f}** · con la otra: S/ {_tot_otra:,.0f}"
-                           + (f" (difieren {abs(_tot_def - _tot_otra) / max(_tot_def, _tot_otra) * 100:.0f}%)" if max(_tot_def, _tot_otra) else "")
-                           + ". Para terceras se muestra también el capital a costo implícito (precio sin IGV × (1 − margen contable)), "
-                             "porque el campo Costo de Ripley subestima su margen ~11.7 pp.")
+                _tot_pre = float(_rk["capital_preobsoleto_6_9m"].sum()) if not _rk.empty else 0.0
+                _tot_obs = float(_rk["capital_obsoleto_9m_mas"].sum()) if not _rk.empty else 0.0
+                st.markdown(f"<h5 style='margin:8px 0 2px 0;'>🏬 Pre-obsoleto y obsoleto por tienda</h5>", unsafe_allow_html=True)
+                st.caption(f"**Pre-obsoleto (6–9 meses): S/ {_tot_pre:,.0f}** · **Obsoleto (9 meses a más): S/ {_tot_obs:,.0f}** · "
+                           f"total más de 6 meses: S/ {_tot_pre + _tot_obs:,.0f}. Ordenado por el total. "
+                           "Para terceras se muestra también el capital a costo implícito (precio sin IGV × (1 − margen contable)), "
+                           "porque el campo Costo de Ripley subestima su margen ~11.7 pp.")
                 if not _rk.empty:
-                    _rk_disp = _rk.rename(columns={"tienda": "Tienda", "capital_obsoleto": "Capital obsoleto S/",
-                                                   "uds_obsoletas": "Uds", "skus_obsoletos": "SKUs",
-                                                   "capital_tienda": "Capital tienda S/", "pct_stock_tienda": "% del stock de la tienda",
-                                                   "capital_implicito": "Capital implícito terceras S/", "marca_top": "Marca que más pesa"})
-                    st.dataframe(_rk_disp.style.format({"Capital obsoleto S/": "S/ {:,.0f}", "Uds": "{:,.0f}", "SKUs": "{:,.0f}",
+                    _rk_disp = _rk[[c for c in ["tienda", "capital_obsoleto", "capital_preobsoleto_6_9m", "capital_obsoleto_9m_mas",
+                                                "uds_obsoletas", "skus_obsoletos", "capital_tienda", "pct_stock_tienda",
+                                                "capital_implicito", "marca_top"] if c in _rk.columns]].rename(columns={
+                        "tienda": "Tienda", "capital_obsoleto": "Total >6 m S/", "capital_preobsoleto_6_9m": "Pre-obsoleto 6–9 m S/",
+                        "capital_obsoleto_9m_mas": "Obsoleto ≥9 m S/", "uds_obsoletas": "Uds", "skus_obsoletos": "SKUs",
+                        "capital_tienda": "Capital tienda S/", "pct_stock_tienda": "% del stock de la tienda",
+                        "capital_implicito": "Capital implícito terceras S/", "marca_top": "Marca que más pesa"})
+                    st.dataframe(_rk_disp.style.format({"Total >6 m S/": "S/ {:,.0f}", "Pre-obsoleto 6–9 m S/": "S/ {:,.0f}",
+                                                        "Obsoleto ≥9 m S/": "S/ {:,.0f}", "Uds": "{:,.0f}", "SKUs": "{:,.0f}",
                                                         "Capital tienda S/": "S/ {:,.0f}", "% del stock de la tienda": "{:.1%}",
                                                         "Capital implícito terceras S/": "S/ {:,.0f}"}, na_rep="—")
                                  .apply(lambda col: ["background-color:#FECACA" if (pd.notna(v) and v >= 0.30)
@@ -3659,17 +3661,23 @@ elif nav_page == "📊 Gestión por Antigüedad":
                                  use_container_width=True, hide_index=True, height=min(60 + 35 * len(_rk_disp), 460))
 
                 # ── Alerta: lo que cruza a obsoleto en N semanas ──
-                st.markdown(f"<h5 style='margin:14px 0 2px 0;'>⏳ Por entrar a obsoleto</h5>", unsafe_allow_html=True)
-                _n_sem = st.select_slider("Horizonte", options=[2, 3, 4, 6, 8], value=2, key="obs_horizonte",
-                                          format_func=lambda x: f"{x} semanas")
-                _pe = _obsm.por_entrar(_df_cob_obs, semanas=_n_sem, definicion=_def_key)
+                st.markdown(f"<h5 style='margin:14px 0 2px 0;'>⏳ Por cruzar de nivel</h5>", unsafe_allow_html=True)
+                _pe_c0, _pe_c00 = st.columns([1, 2])
+                with _pe_c0:
+                    _hacia_sel = st.radio("Hacia", ["Pre-obsoleto (llega a 6 meses)", "Obsoleto (llega a 9 meses)"],
+                                          horizontal=True, key="obs_hacia")
+                with _pe_c00:
+                    _n_sem = st.select_slider("Horizonte", options=[2, 3, 4, 6, 8], value=2, key="obs_horizonte",
+                                              format_func=lambda x: f"{x} semanas")
+                _hacia = "obsoleto" if _hacia_sel.startswith("Obsoleto") else "preobsoleto"
+                _pe = _obsm.por_entrar(_df_cob_obs, semanas=_n_sem, definicion=_def_key, hacia=_hacia)
                 if _pe.empty:
-                    st.success(f"Nada cruza a obsoleto en las próximas {_n_sem} semanas con esta definición.")
+                    st.success(f"Nada cruza a {_hacia_sel.split(' (')[0].lower()} en las próximas {_n_sem} semanas.")
                 else:
                     _pe_res = _obsm.resumen_por_entrar(_pe)
                     _pe_tot = float(_pe["capital"].sum()); _pe_sin = float(_pe_res["capital_sin_dscto"].sum())
                     st.markdown(f"""<div style="background:#FFF7ED; border-left:4px solid #EA580C; padding:10px 14px; border-radius:10px; margin-bottom:8px;">
-                    <strong style="color:#EA580C;">S/ {_pe_tot:,.0f}</strong> <span style="color:var(--capi-text2); font-size:0.85em;">a costo cruzan a obsoleto en {_n_sem} semanas
+                    <strong style="color:#EA580C;">S/ {_pe_tot:,.0f}</strong> <span style="color:var(--capi-text2); font-size:0.85em;">a costo cruzan a {_hacia_sel.split(' (')[0].lower()} en {_n_sem} semanas
                     ({len(_pe):,} combos · {int(_pe['stock_total'].sum()):,} uds). De eso, <strong>S/ {_pe_sin:,.0f}</strong> todavía no tiene el descuento de la pirámide: atacarlo ahora, no cuando ya esté congelado.</span></div>""",
                                 unsafe_allow_html=True)
                     _pe_c1, _pe_c2 = st.columns([1, 2])
@@ -3694,13 +3702,13 @@ elif nav_page == "📊 Gestión por Antigüedad":
                     _pe_buf = io.BytesIO()
                     with pd.ExcelWriter(_pe_buf, engine="openpyxl") as _wpe:
                         vistas_excel._tabla_con_titulo(_wpe, "Por entrar a obsoleto",
-                                                       f"Mercadería que cruza a obsoleto en {_n_sem} semanas — atacar con descuento ANTES del cruce",
+                                                       f"Mercadería que cruza a {_hacia_sel.split(' (')[0].lower()} en {_n_sem} semanas — atacar con descuento ANTES del cruce",
                                                        _pe_disp[_pe_cols], {"Capital S/": "#,##0", "Precio": "#,##0.00", "Precio sugerido": "#,##0.00",
                                                                             "Dscto actual": "0%", "Dscto sugerido": "0%"})
                         if not _rk.empty:
-                            vistas_excel._tabla_con_titulo(_wpe, "Obsoleto por tienda", "Capital obsoleto por tienda (mayor a menor)",
-                                                           _rk_disp, {"Capital obsoleto S/": "#,##0", "Capital tienda S/": "#,##0",
-                                                                      "% del stock de la tienda": "0.0%", "Capital implícito terceras S/": "#,##0"})
+                            vistas_excel._tabla_con_titulo(_wpe, "Obsoleto por tienda", "Pre-obsoleto (6–9 m) y obsoleto (≥9 m) por tienda",
+                                                           _rk_disp, {"Total >6 m S/": "#,##0", "Pre-obsoleto 6–9 m S/": "#,##0", "Obsoleto ≥9 m S/": "#,##0",
+                                                                      "Capital tienda S/": "#,##0", "% del stock de la tienda": "0.0%", "Capital implícito terceras S/": "#,##0"})
                     _pe_buf.seek(0)
                     st.download_button("📥 Excel — por entrar a obsoleto + ranking por tienda", _pe_buf.getvalue(),
                                        file_name=f"Capi_Obsoletos_por_entrar_{_n_sem}sem.xlsx",
@@ -3713,7 +3721,7 @@ elif nav_page == "📊 Gestión por Antigüedad":
                         if len(_wk) >= 2:
                             _dm = _obsm.delta_marca(_wk[-2], _wk[-1])
                             if not _dm.empty:
-                                with st.expander(f"📉 Capital MUERTO por marca: {_wk[-1]} vs {_wk[-2]} (¿bajó o subió?)", expanded=False):
+                                with st.expander(f"📉 Capital MUERTO (sin venta >26 sem, taxonomía) por marca: {_wk[-1]} vs {_wk[-2]}", expanded=False):
                                     st.dataframe(_dm.rename(columns={"marca": "Marca", "delta": "Δ S/", "delta_pct": "Δ %"})
                                                  .style.format({_wk[-2]: "S/ {:,.0f}", _wk[-1]: "S/ {:,.0f}", "Δ S/": "S/ {:+,.0f}", "Δ %": "{:+.1f}%"}, na_rep="—"),
                                                  use_container_width=True, hide_index=True, height=min(60 + 35 * len(_dm), 400))
