@@ -23,6 +23,8 @@ Este test corre sobre TODAS las series, no sobre la marca que uno mira.
 """
 
 import os
+
+import pytest
 import sys
 import warnings
 
@@ -35,6 +37,10 @@ import flujo_engine as fe  # noqa: E402
 import flujo_ingesta as fi  # noqa: E402
 
 XLSM = os.path.expanduser("~/Downloads/Flujo por Línea OI26 EFA Gus v3.xlsm")
+if not os.path.exists(XLSM):
+    XLSM = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data2", "_flujo_planificacion.xlsm")
+pytestmark = pytest.mark.skipif(not os.path.exists(XLSM),
+                                reason="sin el Excel de Planificación (data local de Ripley, no va al repo)")
 
 # El año vigente es el que alimenta las decisiones de compra. Los años viejos
 # tienen captura degradada conocida (2023: 41% de periodos rotos, 2024: 35%,

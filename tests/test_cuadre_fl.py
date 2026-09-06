@@ -18,6 +18,8 @@ hace sobre esa combinación, que es la que el archivo trae calculada.
 """
 
 import os
+
+import pytest
 import sys
 import warnings
 
@@ -30,6 +32,10 @@ import flujo_engine as fe  # noqa: E402
 import flujo_ingesta as fi  # noqa: E402
 
 XLSM = os.path.expanduser("~/Downloads/Flujo por Línea OI26 EFA Gus v3.xlsm")
+if not os.path.exists(XLSM):
+    XLSM = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data2", "_flujo_planificacion.xlsm")
+pytestmark = pytest.mark.skipif(not os.path.exists(XLSM),
+                                reason="sin el Excel de Planificación (data local de Ripley, no va al repo)")
 MARCA, LINEA = "OSCAR DE LA RENTA", "POLOS M/C"
 
 # Valores que el Excel MUESTRA para ese corte (hoja FL, filas 17-28, bloque

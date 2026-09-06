@@ -13,6 +13,7 @@ import sys
 import warnings
 
 import numpy as np
+import pytest
 import pandas as pd
 
 warnings.filterwarnings("ignore")
@@ -24,6 +25,10 @@ import flujo_ingesta as fi  # noqa: E402
 XLSM = os.path.expanduser(
     "~/Downloads/Flujo por Línea OI26 EFA Gus v3.xlsm"
 )
+if not os.path.exists(XLSM):
+    XLSM = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data2", "_flujo_planificacion.xlsm")
+pytestmark = pytest.mark.skipif(not os.path.exists(XLSM),
+                                reason="sin el Excel de Planificación (data local de Ripley, no va al repo)")
 
 # La identidad es exacta desde mayo 2025 (P202505). Antes hay ruido de arranque
 # de la serie: los desvíos de ene-abr 2025 se compensan entre sí (+86K netos
