@@ -1589,15 +1589,17 @@ if nav_page == "🏠 Dashboard":
         estado_counts["Capital"] = estado_counts["Estado"].astype(str).map(_capital_por_estado).fillna(0)
 
         _donut_title = f"Distribución por Estado — {_marca_donut_sel}" if _marca_donut_sel != "Todas" else "Distribución por Estado"
+        # Feedback Franco 2026-09-06: la proporción va por CAPITAL A COSTO (lo que le importa a gerencia),
+        # no por número de combos SKU×tienda. Los combos quedan en el hover y en la tabla de criterios.
         fig_donut = go.Figure(data=[go.Pie(
             labels=estado_counts["Label"],
-            values=estado_counts["Cantidad"],
+            values=estado_counts["Capital"],
             hole=0.55,
             marker=dict(colors=[_estado_color_map.get(e, "#CBD5E1") for e in estado_counts["Estado"]]),
             textinfo="label+percent",
             textfont=dict(size=11),
-            customdata=estado_counts[["Capital"]].values,
-            hovertemplate="<b>%{label}</b><br>%{value:,} combos<br>%{percent}<br>Capital: S/ %{customdata[0]:,.0f}<extra></extra>",
+            customdata=estado_counts[["Cantidad"]].values,
+            hovertemplate="<b>%{label}</b><br>Capital: S/ %{value:,.0f}<br>%{percent} del capital<br>%{customdata[0]:,} combos SKU×tienda<extra></extra>",
         )])
         fig_donut.update_layout(
             **_plotly_layout,
@@ -1606,8 +1608,10 @@ if nav_page == "🏠 Dashboard":
             height=380,
         )
         total_donut = len(_df_donut)
+        _cap_donut = float(_df_donut["stock_valor_costo"].sum()) if not _df_donut.empty else 0.0
+        _cap_txt = f"S/ {_cap_donut/1e6:.1f}M" if _cap_donut >= 1e6 else f"S/ {_cap_donut:,.0f}"
         fig_donut.add_annotation(
-            text=f"<b>{total_donut:,}</b><br><span style='font-size:10px;color:var(--capi-text2)'>SKU×Tienda</span>",
+            text=f"<b>{_cap_txt}</b><br><span style='font-size:10px;color:var(--capi-text2)'>capital a costo · {total_donut:,} SKU×tienda</span>",
             showarrow=False, font=dict(size=18, color=TH_TEXT_PY),
         )
         st.plotly_chart(fig_donut, use_container_width=True)
@@ -1635,7 +1639,7 @@ if nav_page == "🏠 Dashboard":
             # Contar combos en este estado
             _n_est = int((_df_donut["estado"] == _est_name).sum()) if not _df_donut.empty else 0
             _cap_est = _df_donut.loc[_df_donut["estado"] == _est_name, "stock_valor_costo"].sum() if _n_est > 0 else 0
-            _pct_est = (_n_est / total_donut * 100) if total_donut > 0 else 0
+            _pct_est = (_cap_est / _cap_donut * 100) if _cap_donut > 0 else 0   # % del capital, no de combos
 
             st.markdown(f"""<div style="display:flex; align-items:center; gap:10px; padding:5px 10px; margin-bottom:3px;
                 border-left:3px solid {_est_info['color']}; border-radius:0 6px 6px 0;
@@ -1645,9 +1649,10 @@ if nav_page == "🏠 Dashboard":
                     <span style="font-weight:600; color:var(--capi-text); font-size:0.82rem;">{_est_info.get('label', _est_name)}</span>
                     <span style="color:var(--capi-text2); font-size:0.78rem;"> — {_est_info['regla']}</span>
                 </div>
-                <div style="text-align:right; min-width:80px;">
-                    <span style="font-weight:700; color:{_est_info['color']}; font-size:0.85rem;">{_n_est:,}</span>
+                <div style="text-align:right; min-width:150px;">
+                    <span style="font-weight:700; color:{_est_info['color']}; font-size:0.85rem;">S/ {_cap_est:,.0f}</span>
                     <span style="color:var(--capi-text2); font-size:0.72rem;"> ({_pct_est:.0f}%)</span>
+                    <span style="display:block; color:var(--capi-text2); font-size:0.7rem;">{_n_est:,} combos</span>
                 </div>
             </div>""", unsafe_allow_html=True)
 
@@ -2309,7 +2314,7 @@ if nav_page == "🏠 Dashboard":
                 st.markdown(render_foto.render_matriz(comparativo_semanal.KPIS, _kp5, _sems5, _cs_et_all(_sems5), _prev, _mes),
                             unsafe_allow_html=True)
             st.caption("Cada fila tiene su propia escala (la barra más alta = el máximo de ese KPI en las 5 semanas); pasa el mouse por una barra para el número completo. "
-                       "Capital inmovilizado = DORMIDO + ESTANCADO + SOBRESTOCK + LIQUIDAR + MUERTO (por cobertura y antigüedad, no por venta cero). "
+                       "Capital inmovilizado = DORMIDO + ESTANCADO + LIQUIDAR + MUERTO (decisión Franco 06-sep; SOBRESTOCK va aparte porque sí vende). "
                        "Capital con venta cero = SKUs con stock que no vendieron esa semana. Pre-obsoleto 6–9 meses, obsoleto ≥9. On order solo desde el 30-ago.")
 
             with st.expander("Ver la serie completa (stock y venta) de las últimas 5 semanas", expanded=False):
@@ -2325,7 +2330,7 @@ if nav_page == "🏠 Dashboard":
                     _t_disp.columns = [f"{w}" + ("  ◀ hoy" if w == _act else "") for w in _t_disp.columns]
                     st.dataframe(_t_disp, use_container_width=True, height=440)
                     st.caption("Venta, contribución y margen van como contexto: semana a semana los mueven los eventos de precio, "
-                               "no las acciones sobre el inventario. Capital inmovilizado = DORMIDO + ESTANCADO + SOBRESTOCK + LIQUIDAR + MUERTO. "
+                               "no las acciones sobre el inventario. Capital inmovilizado = DORMIDO + ESTANCADO + LIQUIDAR + MUERTO; sobrestock aparte (decisión Franco 06-sep). "
                                "Pre-obsoleto = 6–9 meses en tienda · Obsoleto = 9 meses a más (definición Franco 2026-09-05, por antigüedad). Cuando haya más cortes, el comparativo mensual pasa a periodo comercial Ripley.")
                 try:
                     _rp = comparativo_semanal.resumen_pareto(_act)
@@ -5615,9 +5620,9 @@ elif nav_page == "🚚 Predistribución":
 # ─── CASO DE ÉXITO (Fase 1-2 auditoría 2026-08-23) ───────────
 
 elif nav_page == "🏆 Caso de Éxito":
-    st.markdown("#### 🏆 Caso de Éxito — capital en exceso, semana a semana")
+    st.markdown("#### 🏆 Caso de Éxito — capital inmovilizado (DORMIDO + ESTANCADO + LIQUIDAR + MUERTO), semana a semana")
     st.caption("La métrica titular para gerencia: capital a costo en DORMIDO + ESTANCADO + "
-               "SOBRESTOCK + LIQUIDAR + MUERTO. Cada acción registrada hace el delta atribuible.")
+               "LIQUIDAR + MUERTO (sobrestock aparte, decisión Franco 06-sep). Cada acción registrada hace el delta atribuible.")
 
     if not _HAS_SNAPSHOTS:
         st.warning("Esta vista necesita el módulo de snapshots.")

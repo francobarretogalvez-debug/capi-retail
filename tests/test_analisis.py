@@ -23,7 +23,8 @@ def test_conclusiones_32_33():
 
 def test_conclusiones_31_32_y_sin_datos():
     c2 = analisis_estados.conclusiones("2026-31", "2026-32")
-    assert any(t["nivel"] == "positivo" and "exceso" in t["titulo"].lower() for t in c2)
+    # con inmovilizado = DORMIDO+ESTANCADO+LIQUIDAR+MUERTO (06-sep) la mejora 31→32 la explica el sobrestock
+    assert any(t["nivel"] == "positivo" and ("exceso" in t["titulo"].lower() or "sobrestock" in t["titulo"].lower()) for t in c2)
     c3 = analisis_estados.conclusiones("2026-99", "2026-98")
     assert c3 and c3[0]["titulo"] == "Sin datos suficientes"
 
