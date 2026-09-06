@@ -518,7 +518,7 @@ def build_cobertura(df_maestro, df_ventas, df_stock, params):
         )
         result['sobrestock_aparente'] = (
             result['ratio_cd'] > 0.6
-        ) & result['estado'].isin({'SOBRESTOCK', 'LIQUIDAR', 'ALTO'})
+        ) & result['estado'].isin({'SOBRESTOCK', 'LIQUIDAR', 'PRE-SOBRESTOCK'})
     else:
         result['ratio_cd'] = 0.0
         result['sobrestock_aparente'] = False

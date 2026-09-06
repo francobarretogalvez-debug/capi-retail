@@ -59,7 +59,7 @@ _LECTURA_FLUJOS = {
     ("ESTANCADO", "LIQUIDAR"): ("⚠️ S/ {cap:,.0f} de producto estancado maduró a LIQUIDAR — "
                                 "el empuje no llegó a tiempo."),
 }
-_ESTADOS_VIVOS = {"ÓPTIMO", "ALTO", "QUIEBRE", "PRE-QUIEBRE", "SOBRESTOCK"}
+_ESTADOS_VIVOS = {"ÓPTIMO", "PRE-SOBRESTOCK", "QUIEBRE", "PRE-QUIEBRE", "SOBRESTOCK"}
 
 
 def _capital_por_estado_marca(semana):
@@ -197,7 +197,7 @@ def conclusiones(sem_a: str, sem_b: str, acciones_df: pd.DataFrame = None) -> li
 SALUD_ESTADO = {
     "MUERTO": 0, "LIQUIDAR": 1, "DORMIDO": 2, "ESTANCADO": 3,
     "NUEVO SIN VENTA": 3, "SOBRESTOCK": 4, "QUIEBRE": 4,
-    "PRE-QUIEBRE": 5, "ALTO": 5, "ÓPTIMO": 7,
+    "PRE-QUIEBRE": 5, "PRE-SOBRESTOCK": 5, "ÓPTIMO": 7,
 }
 
 

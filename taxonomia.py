@@ -48,7 +48,8 @@ class Estado:
     QUIEBRE      = "QUIEBRE"
     PRE_QUIEBRE  = "PRE-QUIEBRE"
     OPTIMO       = "ÓPTIMO"
-    ALTO         = "ALTO"
+    ALTO         = "PRE-SOBRESTOCK"   # renombrado de "ALTO" (Franco 2026-09-06): cobertura 16–26 sem = antesala del sobrestock
+    PRE_SOBRESTOCK = "PRE-SOBRESTOCK"
     SOBRESTOCK   = "SOBRESTOCK"
     ESTANCADO    = "ESTANCADO"
     LIQUIDAR     = "LIQUIDAR"
@@ -116,7 +117,7 @@ def classify(
             * cob <4                   → QUIEBRE
             * 4–8                      → BAJA
             * 8–16                     → ÓPTIMO
-            * 16–26                    → ALTO
+            * 16–26                    → PRE-SOBRESTOCK (antes ALTO, Franco 2026-09-06)
             * 26–52                    → SOBRESTOCK
             * >52, edad ≤26            → ESTANCADO
             * >52, edad >26            → LIQUIDAR

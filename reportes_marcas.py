@@ -48,7 +48,7 @@ _LEYENDA_ESTADOS = [
     ("QUIEBRE", "Cobertura menor a 4 semanas — riesgo de perder venta por falta de stock."),
     ("PRE-QUIEBRE", "Cobertura entre 4 y 8 semanas — próxima a quebrar, planificar reposición."),
     ("ÓPTIMO", "Cobertura entre 8 y 16 semanas — nivel saludable (target ~12)."),
-    ("ALTO", "Cobertura entre 16 y 26 semanas — stock por encima del nivel ideal."),
+    ("PRE-SOBRESTOCK", "Cobertura entre 16 y 26 semanas — antesala del sobrestock (antes ALTO)."),
     ("SOBRESTOCK", "Cobertura entre 26 y 52 semanas — exceso claro de stock vs. su venta."),
     ("ESTANCADO", "Más de 52 semanas de cobertura con producto aún joven (≤26 sem) — rota muy lento."),
     ("LIQUIDAR", "Más de 52 semanas de cobertura y producto maduro (>26 sem) — liquidación directa."),

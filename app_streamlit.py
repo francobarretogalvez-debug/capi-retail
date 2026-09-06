@@ -557,7 +557,7 @@ BADGE_CSS = {
     "QUIEBRE":          f"background:{STATUS_QUIEBRE}; color:#FFFFFF",
     "PRE-QUIEBRE":      f"background:{STATUS_BAJA}; color:#FFFFFF",
     "ÓPTIMO":           f"background:{STATUS_OPTIMO}; color:#FFFFFF",
-    "ALTO":             f"background:{STATUS_ALTO}; color:#FFFFFF",
+    "PRE-SOBRESTOCK":             f"background:{STATUS_ALTO}; color:#FFFFFF",
     "SOBRESTOCK":       f"background:{STATUS_SOBRESTOCK}; color:#FFFFFF",
     "LIQUIDAR":         f"background:{STATUS_LIQUIDAR}; color:#FFFFFF",
     "NUEVO SIN VENTA":  f"background:{STATUS_NUEVO_SV}; color:#FFFFFF",
@@ -577,7 +577,7 @@ def color_estado(val):
         "QUIEBRE":          f"background-color:{STATUS_QUIEBRE}; color:#FFFFFF",
         "PRE-QUIEBRE":      f"background-color:{STATUS_BAJA}; color:#FFFFFF",
         "ÓPTIMO":           f"background-color:{STATUS_OPTIMO}; color:#FFFFFF",
-        "ALTO":             f"background-color:{STATUS_ALTO}; color:#FFFFFF",
+        "PRE-SOBRESTOCK":             f"background-color:{STATUS_ALTO}; color:#FFFFFF",
         "SOBRESTOCK":       f"background-color:{STATUS_SOBRESTOCK}; color:#FFFFFF",
         "LIQUIDAR":         f"background-color:{STATUS_LIQUIDAR}; color:#FFFFFF",
         "NUEVO SIN VENTA":  f"background-color:{STATUS_NUEVO_SV}; color:#FFFFFF",
@@ -1377,7 +1377,7 @@ s["total_combos"]      = len(df_cob)
 s["n_critico"]         = int((df_cob["estado"] == "QUIEBRE").sum()) if not df_cob.empty else 0
 s["n_precritico"]      = int((df_cob["estado"] == "PRE-QUIEBRE").sum()) if not df_cob.empty else 0
 s["n_optimo"]          = int((df_cob["estado"] == "ÓPTIMO").sum()) if not df_cob.empty else 0
-s["n_alto"]            = int((df_cob["estado"] == "ALTO").sum()) if not df_cob.empty else 0
+s["n_alto"]            = int((df_cob["estado"] == "PRE-SOBRESTOCK").sum()) if not df_cob.empty else 0
 s["n_sobrestock"]      = int((df_cob["estado"] == "SOBRESTOCK").sum()) if not df_cob.empty else 0
 s["n_liquidar"]        = int((df_cob["estado"] == "LIQUIDAR").sum()) if not df_cob.empty else 0
 s["n_nuevo_sv"]        = int((df_cob["estado"] == "NUEVO SIN VENTA").sum()) if not df_cob.empty else 0
@@ -1411,7 +1411,7 @@ _estado_color_map = {
     "QUIEBRE":      STATUS_QUIEBRE,
     "PRE-QUIEBRE":  STATUS_BAJA,
     "ÓPTIMO":       STATUS_OPTIMO,
-    "ALTO":         STATUS_ALTO,
+    "PRE-SOBRESTOCK":         STATUS_ALTO,
     "SOBRESTOCK":   STATUS_SOBRESTOCK,
     "ESTANCADO":    STATUS_ESTANCADO,
     "LIQUIDAR":     STATUS_LIQUIDAR,
@@ -1575,7 +1575,7 @@ if nav_page == "🏠 Dashboard":
         estado_counts = _df_donut["estado"].value_counts().reset_index()
         estado_counts.columns = ["Estado", "Cantidad"]
         estado_order = [
-            "QUIEBRE", "PRE-QUIEBRE", "ÓPTIMO", "ALTO", "SOBRESTOCK",
+            "QUIEBRE", "PRE-QUIEBRE", "ÓPTIMO", "PRE-SOBRESTOCK", "SOBRESTOCK",
             "ESTANCADO", "LIQUIDAR", "NUEVO SIN VENTA", "DORMIDO", "MUERTO",
         ]
         estado_counts["Estado"] = pd.Categorical(estado_counts["Estado"], categories=estado_order, ordered=True)
@@ -1622,7 +1622,7 @@ if nav_page == "🏠 Dashboard":
             "QUIEBRE":     {"color": STATUS_QUIEBRE,     "icon": "🔴", "regla": "Cobertura < 4 semanas"},
             "PRE-QUIEBRE": {"color": STATUS_BAJA,        "icon": "🟠", "regla": "Cobertura 4–8 semanas"},
             "ÓPTIMO":      {"color": STATUS_OPTIMO,     "icon": "🟢", "regla": "Cobertura 8–16 semanas"},
-            "ALTO":        {"color": STATUS_ALTO,       "icon": "🟡", "regla": "Cobertura 16–26 semanas"},
+            "PRE-SOBRESTOCK":        {"color": STATUS_ALTO,       "icon": "🟡", "regla": "Cobertura 16–26 semanas"},
             "SOBRESTOCK":  {"color": STATUS_SOBRESTOCK, "icon": "🟤", "regla": "Cobertura 26–52 semanas"},
             "ESTANCADO":   {"color": STATUS_ESTANCADO,  "icon": "⬛", "regla": "Cob > 52 sem · edad ≤ 6 meses"},
             "LIQUIDAR":    {"color": STATUS_LIQUIDAR,   "icon": "💀", "regla": "Cob > 52 sem · edad > 6 meses"},
@@ -2670,7 +2670,7 @@ elif nav_page == "🩺 Salud del Stock":
                     # 5 componentes en cards
                     _comp_data = [
                         ("Cobertura", f"{float(_g['pct_optimo_alto'])*100:.0f}%", f"{float(_g['score_cobertura']):.0f}/100", "25%",
-                         "SKUs en OPTIMO + ALTO", '#059669' if float(_g['score_cobertura']) >= 70 else '#f59e0b' if float(_g['score_cobertura']) >= 40 else '#dc2626'),
+                         "SKUs en ÓPTIMO + PRE-SOBRESTOCK", '#059669' if float(_g['score_cobertura']) >= 70 else '#f59e0b' if float(_g['score_cobertura']) >= 40 else '#dc2626'),
                         ("Quiebre", f"{float(_g['pct_quiebre'])*100:.0f}%", f"{float(_g['score_quiebre']):.0f}/100", "20%",
                          "En QUIEBRE + PRE-QUIEBRE", '#059669' if float(_g['score_quiebre']) >= 70 else '#f59e0b' if float(_g['score_quiebre']) >= 40 else '#dc2626'),
                         ("Sobrestock", f"{float(_g['pct_exceso'])*100:.0f}%", f"{float(_g['score_sobrestock']):.0f}/100", "15%",

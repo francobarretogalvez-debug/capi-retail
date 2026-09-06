@@ -66,7 +66,7 @@ COLOR_MAP = {
     "QUIEBRE":      "#B71C1C",  # rojo oscuro — urgente reponer
     "PRE-QUIEBRE":  "#E65100",  # naranja oscuro — reponer pronto, riesgo de quiebre
     "ÓPTIMO":       "#1B5E20",  # verde oscuro — sano
-    "ALTO":         "#F57F17",  # ámbar — vigilar
+    "PRE-SOBRESTOCK":         "#F57F17",  # ámbar — vigilar
     "SOBRESTOCK":   "#BF360C",  # naranja-rojo — empuje
     "ESTANCADO":    "#424242",  # gris oscuro — capital parado, markdown evaluado
     "LIQUIDAR":     "#880E4F",  # púrpura-rojo — markdown agresivo
@@ -85,7 +85,7 @@ ESTADO_ORDEN = {
     "QUIEBRE":      0,
     "PRE-QUIEBRE":  1,
     "ÓPTIMO":       2,
-    "ALTO":         3,
+    "PRE-SOBRESTOCK":         3,
     "SOBRESTOCK":   4,
     "ESTANCADO":    5,
     "LIQUIDAR":     6,

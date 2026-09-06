@@ -24,7 +24,7 @@ import agente_terceras
 # Orden de trabajo de Franco: primero lo muerto (liquidar), luego activar.
 ORDEN_CRITICIDAD = [
     "MUERTO", "LIQUIDAR", "DORMIDO", "ESTANCADO", "SOBRESTOCK",
-    "ALTO", "QUIEBRE", "PRE-QUIEBRE", "NUEVO SIN VENTA", "ÓPTIMO",
+    "PRE-SOBRESTOCK", "QUIEBRE", "PRE-QUIEBRE", "NUEVO SIN VENTA", "ÓPTIMO",
 ]
 
 ESTADOS_ACTIVACION_TERCERAS = ["DORMIDO", "ESTANCADO", "SOBRESTOCK"]
@@ -73,7 +73,7 @@ CENTRADO = Alignment(horizontal="center")
 # Colores por estado (idénticos a los chips del mockup)
 COLORES_ESTADO = {
     "MUERTO": "A03028", "LIQUIDAR": "C25B2A", "DORMIDO": "B98514",
-    "ESTANCADO": "8F6B1E", "SOBRESTOCK": "6E7D27", "ALTO": "4A7D9E",
+    "ESTANCADO": "8F6B1E", "SOBRESTOCK": "6E7D27", "PRE-SOBRESTOCK": "4A7D9E",
     "QUIEBRE": "5B4A9E", "PRE-QUIEBRE": "8577C2",
     "NUEVO SIN VENTA": "6B7280", "ÓPTIMO": "2E7D5B",
 }
