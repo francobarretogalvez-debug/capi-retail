@@ -87,6 +87,7 @@ import reportes_marcas
 import acciones_log
 import analisis_estados
 import comparativo_semanal
+import otb_terceras
 import rendimiento_tienda as rend_t
 import reporte_semanal as rep_sem
 import agente_reporte as ag_rep
@@ -3174,6 +3175,75 @@ elif nav_page == "🤝 Agente Terceras":
         help="4 pestañas: SKUs Críticos · Reposición · Transferencias · Precios",
     )
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════
+    #  REPARTO DEL OTB MENSUAL ENTRE TERCERAS — S10 / NF1 (2026-09-05)
+    #  Frame Franco: maximizar venta, bajar cobertura, bajar obsoleto, negociar.
+    #  Cobertura alta castiga salvo destallado (curva rota).
+    # ══════════════════════════════════════════════════════════
+    with st.expander("💼 Reparto del OTB mensual entre marcas terceras", expanded=False):
+        st.caption("Hoy repartes por venta a costo y cobertura. Capi parte de la misma base (venta a costo 4 semanas) y la ajusta "
+                   "por cobertura vs objetivo, % de stock con más de 6 meses, margen contable y quiebres. Si el reporte de stock "
+                   "por variación está cargado en 🧵 Talla y Color, una marca destallada no pierde OTB por cobertura alta.")
+        _o1, _o2, _o3 = st.columns([1.2, 1, 1])
+        _otb_total = _o1.number_input("OTB total del mes (S/ a costo)", min_value=0.0, value=500000.0, step=10000.0, key="otb_total")
+        _otb_cob = _o2.number_input("Cobertura objetivo (semanas)", 4.0, 30.0, 13.0, 1.0, key="otb_cob")
+        _otb_cap = _o2.slider("Tope de cambio por marca (±%)", 0, 100, 40, 5, key="otb_cap",
+                              help="Evita que una sola marca absorba lo que pierden las demás. 0 = sin tope.")
+        _otb_uni = _o3.multiselect("Marcas", sorted(agente_terceras.MARCAS_AGENTE),
+                                   default=sorted(agente_terceras.MARCAS_AGENTE - agente_terceras.MARCAS_PROPIAS_SET), key="otb_marcas")
+        with st.expander("Pesos de los factores (1 = peso completo, 0 = ignorar)", expanded=False):
+            _w1, _w2, _w3, _w4 = st.columns(4)
+            _pesos = {"cobertura": _w1.slider("Cobertura", 0.0, 1.5, 1.0, 0.1, key="otb_w_cob"),
+                      "obsoleto": _w2.slider("Obsoleto (>6 m)", 0.0, 1.5, 1.0, 0.1, key="otb_w_obs"),
+                      "margen": _w3.slider("Margen", 0.0, 1.5, 0.5, 0.1, key="otb_w_mg"),
+                      "quiebre": _w4.slider("Quiebres", 0.0, 1.5, 0.5, 0.1, key="otb_w_q")}
+        # destallado desde el reporte de variación cargado en la sesión (si existe y trae marca)
+        _dest = None
+        for _k, _v in list(st.session_state.items()):
+            if isinstance(_k, str) and _k.startswith("_tc_") and isinstance(_v, pd.DataFrame) and "marca" in _v.columns:
+                try:
+                    import stock_variacion as _svo
+                    _cr = _svo.curva_rota_por_tienda(_v)
+                    _cr = _cr.merge(_v.drop_duplicates("cod_modelo")[["cod_modelo", "marca"]], on="cod_modelo", how="left")
+                    _dest = _cr.groupby(_cr["marca"].astype(str).str.upper())["curva_rota"].mean().to_dict()
+                except Exception:
+                    _dest = None
+                break
+        if _otb_uni and _otb_total > 0:
+            _met = otb_terceras.metricas_marca(df_cob, set(_otb_uni), destallado=_dest)
+            _rep = otb_terceras.repartir_otb(_met, _otb_total, pesos=_pesos, cob_objetivo=_otb_cob, max_delta_pct=(_otb_cap or None))
+            if _rep.empty:
+                st.info("Sin datos de esas marcas en la base cargada.")
+            else:
+                st.caption(("Destallado calculado desde el reporte de variación cargado." if _dest else
+                            "Sin reporte de variación cargado: el chequeo de destallado no aplica (cobertura alta castiga siempre)."))
+                _rd = _rep[["marca", "venta_costo_4sem", "cobertura_sem", "margen_pct", "pct_obsoleto", "pct_skus_quiebre", "pct_curva_rota",
+                            "reparto_venta", "reparto_capi", "reparto_capi_min", "reparto_capi_max", "delta_pct", "por_que"]].rename(columns={
+                    "marca": "Marca", "venta_costo_4sem": "Venta a costo 4 sem", "cobertura_sem": "Cob (sem)", "margen_pct": "Margen",
+                    "pct_obsoleto": "% >6 meses", "pct_skus_quiebre": "% quiebre", "pct_curva_rota": "% curva rota",
+                    "reparto_venta": "Reparto por venta (hoy)", "reparto_capi": "Reparto Capi", "reparto_capi_min": "Capi mín",
+                    "reparto_capi_max": "Capi máx", "delta_pct": "Δ %", "por_que": "Por qué"})
+                st.dataframe(_rd.style.format({"Venta a costo 4 sem": "S/ {:,.0f}", "Cob (sem)": "{:.0f}", "Margen": "{:.0%}",
+                                               "% >6 meses": "{:.0%}", "% quiebre": "{:.0%}", "% curva rota": "{:.0%}",
+                                               "Reparto por venta (hoy)": "S/ {:,.0f}", "Reparto Capi": "S/ {:,.0f}",
+                                               "Capi mín": "S/ {:,.0f}", "Capi máx": "S/ {:,.0f}", "Δ %": "{:+.0f}%"}, na_rep="—"),
+                             use_container_width=True, hide_index=True, height=min(60 + 35 * len(_rd), 460))
+                st.caption("Reparto Capi en banda ±10%: la venta de 4 semanas y el margen contable son estimaciones del mes. "
+                           "Los factores están acotados (cobertura 0.4–1.3×, obsoleto 0.5–1×, margen 0.8–1.2×, quiebre 1–1.3×).")
+                st.markdown("**Argumento para cada marca**")
+                for _r in _rep.itertuples(index=False):
+                    st.markdown(f"- **{_r.marca}** → S/ {_r.reparto_capi:,.0f} ({_r.delta_pct:+.0f}% vs por venta): {_r.argumento_negociacion}")
+                _ob = io.BytesIO()
+                with pd.ExcelWriter(_ob, engine="openpyxl") as _wo:
+                    vistas_excel._tabla_con_titulo(_wo, "Reparto OTB", f"Reparto del OTB S/ {_otb_total:,.0f} entre terceras — base venta a costo 4 sem × factores",
+                                                   _rd, {"Venta a costo 4 sem": "#,##0", "Reparto por venta (hoy)": "#,##0", "Reparto Capi": "#,##0",
+                                                         "Capi mín": "#,##0", "Capi máx": "#,##0", "Margen": "0%", "% >6 meses": "0%", "% quiebre": "0%",
+                                                         "% curva rota": "0%", "Cob (sem)": "0", "Δ %": "0"})
+                    _rep.to_excel(_wo, sheet_name="Detalle factores", index=False)
+                _ob.seek(0)
+                st.download_button("📥 Excel — reparto OTB con factores y argumentos", _ob.getvalue(), file_name="Capi_Reparto_OTB_Terceras.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="otb_dl")
 
     _at_prov = agente_terceras.cargar_proveedores()
 
