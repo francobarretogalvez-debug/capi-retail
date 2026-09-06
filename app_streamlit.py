@@ -2041,99 +2041,69 @@ if nav_page == "🏠 Dashboard":
                     st.caption("Velocidad = venta semanal del SKU en esa tienda en las últimas 4 semanas con stock (mín. 2). "
                                "Entra todo lo que está en quiebre (cob ≤ 4 sem); perdió = velocidad − lo que vendió esa semana (0 si vendió su velocidad). Precio realizado sin IGV y margen contable del SKU. "
                                "Neto = bruto × (1 − 30% sustitución).")
-                st.markdown("<h5 style='margin:14px 0 6px 0;'>Acumulado desde abril (nivel cadena: stock 0 en toda la cadena)</h5>", unsafe_allow_html=True)
-
-            _vp_sem = _vp['semanas_analizadas']
-            _vp_evit_n = int(_vp_q['evitable'].sum()) if not _vp_q.empty else 0
-            _vp_evit_soles = float(_vp_q.loc[_vp_q['evitable'], 'perdida_sem_soles'].sum()) if not _vp_q.empty else 0.0
-
-            # S2 (2026-09-05): el motor ya calcula ingreso NETO (descontada sustitución) y
-            # MARGEN perdido; antes la pantalla solo mostraba el bruto viejo.
-            _vp_recap = int(round(_vp.get('tasa_recaptura', 0.30) * 100))
-            _vp_c1, _vp_c1b, _vp_c2, _vp_c3 = st.columns([1.4, 1.4, 1, 1])
-            with _vp_c1:
+                # ── Cómo se calcula (método único, regla Franco 06-sep) ──
+                _exc2 = _vps.get("quiebre", {}).get("exclusiones", {})
                 st.markdown(f"""
-                <div style="background:#FEF2F2; border-radius:12px; padding:16px 20px; border-left:4px solid #DC2626;">
-                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Venta perdida NETA — semanas {_vp_sem[0]} a {_vp_sem[-1]}</div>
-                    <div style="font-size:1.6rem; font-weight:700; color:#DC2626;">S/ {_vp.get('ingreso_neto_min', 0):,.0f} – S/ {_vp.get('ingreso_neto_max', 0):,.0f}</div>
-                    <div style="font-size:0.7rem; color:var(--capi-text2);">Ingreso que no se recuperó con otro SKU (descontada sustitución {_vp_recap}%). Bruto: S/ {_vp['banda_min']:,.0f} – {_vp['banda_max']:,.0f}</div>
-                </div>""", unsafe_allow_html=True)
-            with _vp_c1b:
-                st.markdown(f"""
-                <div style="background:#FFF7ED; border-radius:12px; padding:16px 20px; border-left:4px solid #EA580C;">
-                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Margen perdido NETO (lo que mueve el P&L)</div>
-                    <div style="font-size:1.6rem; font-weight:700; color:#EA580C;">S/ {_vp.get('margen_neto_min', 0):,.0f} – S/ {_vp.get('margen_neto_max', 0):,.0f}</div>
-                    <div style="font-size:0.7rem; color:var(--capi-text2);">Ingreso neto × margen contable del SKU (contribución ÷ venta), sin IGV</div>
-                </div>""", unsafe_allow_html=True)
-            with _vp_c2:
-                st.markdown(f"""
-                <div style="background:var(--capi-bg-surface); border-radius:12px; padding:16px 20px; border-left:4px solid {STATUS_CRITICO};">
-                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">SKUs con quiebre en el período</div>
-                    <div style="font-size:1.6rem; font-weight:700; color:{STATUS_CRITICO};">{_vp['n_skus_afectados']:,}</div>
-                    <div style="font-size:0.7rem; color:var(--capi-text2);">con venta comprobada antes del quiebre</div>
-                </div>""", unsafe_allow_html=True)
-            with _vp_c3:
-                st.markdown(f"""
-                <div style="background:#FFFBEB; border-radius:12px; padding:16px 20px; border-left:4px solid #D97706;">
-                    <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Quiebres evitables HOY</div>
-                    <div style="font-size:1.6rem; font-weight:700; color:#D97706;">{_vp_evit_n:,}</div>
-                    <div style="font-size:0.7rem; color:var(--capi-text2);">combos con stock en CD · S/ {_vp_evit_soles:,.0f}/sem en juego</div>
+                <div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:12px; padding:14px 18px; margin-top:12px;">
+                    <div style="font-size:0.78rem; font-weight:600; color:var(--capi-text); margin-bottom:6px;">📐 Cómo se calcula la venta perdida</div>
+                    <div style="font-size:0.98rem; color:var(--capi-text); margin-bottom:8px;">
+                        En quiebre = <strong>SKU × tienda con 4 semanas de cobertura o menos</strong> &nbsp;→&nbsp;
+                        Perdió = <strong>velocidad</strong> − <strong>lo que vendió esa semana</strong> &nbsp;→&nbsp;
+                        Neto = bruto × (1 − {int(round(_vps.get('tasa_recaptura', 0.30)*100))}% sustitución) &nbsp;→&nbsp; Margen perdido = neto × margen contable
+                    </div>
+                    <div style="font-size:0.72rem; color:var(--capi-text2); line-height:1.5;">
+                        <strong>Cobertura</strong> = stock de la tienda ÷ velocidad del SKU en esa tienda &nbsp;·&nbsp;
+                        <strong>Velocidad</strong> = venta semanal del SKU en esa tienda en las últimas 4 semanas con stock (mín. 2) &nbsp;·&nbsp;
+                        <strong>Semanas en quiebre</strong> = semanas seguidas con cobertura ≤ 4, hasta que la reposición la sube &nbsp;·&nbsp;
+                        <strong>Precio</strong> = realizado sin IGV &nbsp;·&nbsp; <strong>Margen</strong> = contribución ÷ venta del SKU.<br>
+                        <strong>Fuera del cálculo:</strong> mercadería con más de 6 meses ({_exc2.get('obsoleto_6m', 0):,} SKUs) y liquidación
+                        ({_exc2.get('temporada_liq', '?')} o dscto ≥40%) sin stock relevante en CD ({_exc2.get('liquidacion_sin_cd', 0):,}).
+                        La liquidación que sí tiene stock en CD cuenta ({_exc2.get('liquidacion_con_cd_cuenta', 0):,} SKUs) y su pérdida se topa con ese stock.
+                        <strong>Evitable</strong> = hay stock en CD o viene en camino.
+                    </div>
                 </div>""", unsafe_allow_html=True)
 
-            # Fórmula visible: de dónde sale el número
-            st.markdown(f"""
-            <div style="background:var(--capi-bg-surface); border:1px solid var(--capi-border); border-radius:12px; padding:14px 18px; margin-top:12px;">
-                <div style="font-size:0.78rem; font-weight:600; color:var(--capi-text); margin-bottom:6px;">📐 Cómo se calcula (por cada SKU en quiebre)</div>
-                <div style="font-size:0.98rem; color:var(--capi-text); margin-bottom:8px;">
-                    Ingreso bruto = <strong>velocidad semanal</strong> &times; <strong>semanas en quiebre</strong> &times; <strong>precio realizado</strong>
-                    &nbsp;→&nbsp; Neto = bruto &times; (1 − {_vp_recap}% sustitución) &nbsp;→&nbsp; Margen perdido = neto &times; margen contable
-                </div>
-                <div style="font-size:0.72rem; color:var(--capi-text2); line-height:1.5;">
-                    <strong>Velocidad semanal</strong> = venta real por semana del SKU (serie reconstruida de los snapshots; banda = promedio simple vs ponderado reciente) &nbsp;·&nbsp;
-                    <strong>Semanas en quiebre</strong> = cierres con stock 0 (0.5 sem) + semanas entre cierres confirmadas sin venta (0.5–1.0) &nbsp;·&nbsp;
-                    <strong>Precio realizado</strong> = venta S/ ÷ unidades del SKU, <strong>sin IGV</strong> (no el precio de lista) &nbsp;·&nbsp;
-                    <strong>Margen contable</strong> = contribución ÷ venta del SKU (no precio − costo: el costo falta en ~48% de los SKUs).<br>
-                    El <strong>neto</strong> es lo que de verdad no se vendió; el <strong>margen perdido</strong> es lo que dejó de entrar al P&L. Solo SKUs con venta comprobada antes del quiebre (DORMIDO/MUERTO no cuentan).
-                </div>
-            </div>""", unsafe_allow_html=True)
-
-            st.caption(" · ".join(_vp['supuestos']))
-
-            # ── De dónde sale el acumulado (feedback Franco 2026-09-06): por marca y por SKU ──
-            _vpd = _vp.get('df_detalle')
-            if _vpd is not None and not _vpd.empty:
-                with st.expander(f"🔎 De dónde sale el acumulado — {len(_vpd):,} SKUs con quiebre a nivel cadena, por marca y por SKU", expanded=False):
-                    _vpm = (_vpd.groupby('marca').agg(skus=('sku', 'nunique'), sem_quiebre=('semanas_quiebre_max', 'sum'),
-                                                       uds_max=('uds_perdidas_max', 'sum'), neto_min=('ingreso_neto_min', 'sum'),
-                                                       neto_max=('ingreso_neto_max', 'sum'), margen_max=('margen_neto_max', 'sum'))
-                            .reset_index().sort_values('neto_max', ascending=False))
-                    _vpm['pct'] = _vpm['neto_max'] / _vpm['neto_max'].sum()
-                    st.markdown("**Por marca**")
-                    st.dataframe(_vpm.rename(columns={'marca': 'Marca', 'skus': 'SKUs', 'sem_quiebre': 'Semanas en quiebre (Σ)', 'uds_max': 'Uds perdidas máx',
-                                                      'neto_min': 'Neto mín S/', 'neto_max': 'Neto máx S/', 'margen_max': 'Margen neto máx S/', 'pct': '% del total'})
-                                 .style.format({'SKUs': '{:,.0f}', 'Semanas en quiebre (Σ)': '{:,.1f}', 'Uds perdidas máx': '{:,.0f}', 'Neto mín S/': 'S/ {:,.0f}',
-                                                'Neto máx S/': 'S/ {:,.0f}', 'Margen neto máx S/': 'S/ {:,.0f}', '% del total': '{:.0%}'}),
-                                 use_container_width=True, hide_index=True, height=min(60 + 35 * len(_vpm), 420))
-                    st.markdown("**Por SKU** (ordenado por lo que más pesa)")
-                    _vpd_cols = [c for c in ['sku', 'descripcion', 'marca', 'semanas_quiebre_min', 'semanas_quiebre_max', 'uds_perdidas_min', 'uds_perdidas_max',
-                                             'precio_usado', 'margen_pct', 'ingreso_neto_min', 'ingreso_neto_max', 'margen_neto_max'] if c in _vpd.columns]
-                    _vpd_ren = {'sku': 'SKU', 'descripcion': 'Producto', 'marca': 'Marca', 'semanas_quiebre_min': 'Sem quiebre mín', 'semanas_quiebre_max': 'Sem quiebre máx',
-                                'uds_perdidas_min': 'Uds mín', 'uds_perdidas_max': 'Uds máx', 'precio_usado': 'Precio', 'margen_pct': 'Margen %',
-                                'ingreso_neto_min': 'Neto mín S/', 'ingreso_neto_max': 'Neto máx S/', 'margen_neto_max': 'Margen neto máx S/'}
-                    _vpd_d = _vpd[_vpd_cols].rename(columns=_vpd_ren)
-                    st.dataframe(_vpd_d.head(500).style.format({'Sem quiebre mín': '{:.1f}', 'Sem quiebre máx': '{:.1f}', 'Uds mín': '{:,.0f}', 'Uds máx': '{:,.0f}',
-                                                                'Precio': 'S/ {:,.2f}', 'Margen %': '{:.0f}%', 'Neto mín S/': 'S/ {:,.0f}', 'Neto máx S/': 'S/ {:,.0f}',
-                                                                'Margen neto máx S/': 'S/ {:,.0f}'}, na_rep='—'),
-                                 use_container_width=True, hide_index=True, height=420)
-                    _vpd_buf = io.BytesIO()
-                    with pd.ExcelWriter(_vpd_buf, engine='openpyxl') as _wvd:
-                        vistas_excel._tabla_con_titulo(_wvd, 'Por marca', f"Venta perdida acumulada {_vp_sem[0]} a {_vp_sem[-1]} — por marca", _vpm,
-                                                       {'neto_min': '#,##0', 'neto_max': '#,##0', 'margen_max': '#,##0', 'pct': '0%'})
-                        vistas_excel._tabla_con_titulo(_wvd, 'Por SKU', 'Venta perdida acumulada — por SKU (nivel cadena)', _vpd_d,
-                                                       {'Neto mín S/': '#,##0', 'Neto máx S/': '#,##0', 'Margen neto máx S/': '#,##0', 'Precio': '#,##0.00'})
-                    _vpd_buf.seek(0)
-                    st.download_button("📥 Excel — de dónde sale la venta perdida acumulada", _vpd_buf.getvalue(), file_name="Capi_Venta_Perdida_Detalle.xlsx",
-                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_vp_detalle")
+                # ── Acumulado: suma de semanas con el mismo método ──
+                try:
+                    _vpa = venta_perdida_semanal.acumulado()
+                except Exception as _e_a:
+                    _vpa = {}
+                    st.caption(f"Acumulado no disponible: {_e_a}")
+                if _vpa:
+                    st.markdown(f"<h5 style='margin:14px 0 6px 0;'>Acumulado · {_vpa['semanas'][0]} a {_vpa['semanas'][-1]} ({_vpa['n_semanas']} semanas con snapshot)</h5>", unsafe_allow_html=True)
+                    _a1, _a2 = st.columns(2)
+                    _a1.markdown(f"""<div style="background:#FEF2F2; border-radius:12px; padding:14px 18px; border-left:4px solid #DC2626;">
+                        <div style="font-size:0.75rem; color:var(--capi-text2);">Venta perdida NETA acumulada</div>
+                        <div style="font-size:1.5rem; font-weight:700; color:#DC2626;">S/ {_vpa['neto_min']:,.0f} – S/ {_vpa['neto_max']:,.0f}</div></div>""", unsafe_allow_html=True)
+                    _a2.markdown(f"""<div style="background:#FFF7ED; border-radius:12px; padding:14px 18px; border-left:4px solid #EA580C;">
+                        <div style="font-size:0.75rem; color:var(--capi-text2);">Margen perdido NETO acumulado</div>
+                        <div style="font-size:1.5rem; font-weight:700; color:#EA580C;">S/ {_vpa['margen_min']:,.0f} – S/ {_vpa['margen_max']:,.0f}</div></div>""", unsafe_allow_html=True)
+                    with st.expander("🔎 De dónde sale el acumulado — por semana, por tienda y por marca", expanded=False):
+                        _ps = _vpa["por_semana"].copy()
+                        _ps["Venta perdida neta"] = _ps.apply(lambda r: f"S/ {r.neto_min:,.0f} – {r.neto_max:,.0f}", axis=1)
+                        _ps["Margen perdido neto"] = _ps.apply(lambda r: f"S/ {r.margen_min:,.0f} – {r.margen_max:,.0f}", axis=1)
+                        st.dataframe(_ps[["semana", "en_quiebre", "con_perdida", "Venta perdida neta", "Margen perdido neto"]]
+                                     .rename(columns={"semana": "Semana", "en_quiebre": "SKU×tienda en quiebre", "con_perdida": "Con pérdida"}),
+                                     use_container_width=True, hide_index=True, height=min(60 + 35 * len(_ps), 420))
+                        _c1a, _c2a = st.columns(2)
+                        _c1a.markdown("**Por tienda**")
+                        _c1a.dataframe(_vpa["por_tienda"].rename(columns={"tienda": "Tienda", "semanas": "Semanas", "combos": "SKU×tienda", "neto_min": "Neto mín S/",
+                                                                          "neto_max": "Neto máx S/", "margen_min": "Margen mín S/", "margen_max": "Margen máx S/"})
+                                       .style.format({"Neto mín S/": "S/ {:,.0f}", "Neto máx S/": "S/ {:,.0f}", "Margen mín S/": "S/ {:,.0f}", "Margen máx S/": "S/ {:,.0f}"}),
+                                       use_container_width=True, hide_index=True, height=380)
+                        _c2a.markdown("**Por marca**")
+                        _c2a.dataframe(_vpa["por_marca"].rename(columns={"marca": "Marca", "skus": "SKUs", "combos": "SKU×tienda", "neto_min": "Neto mín S/",
+                                                                         "neto_max": "Neto máx S/", "margen_min": "Margen mín S/", "margen_max": "Margen máx S/", "pct": "% del total"})
+                                       .style.format({"Neto mín S/": "S/ {:,.0f}", "Neto máx S/": "S/ {:,.0f}", "Margen mín S/": "S/ {:,.0f}", "Margen máx S/": "S/ {:,.0f}", "% del total": "{:.0%}"}),
+                                       use_container_width=True, hide_index=True, height=380)
+                        _vpa_buf = io.BytesIO()
+                        with pd.ExcelWriter(_vpa_buf, engine='openpyxl') as _wva:
+                            vistas_excel._tabla_con_titulo(_wva, 'Por semana', 'Venta perdida acumulada — por semana (cob ≤ 4 sem por SKU×tienda)', _vpa["por_semana"], {"neto_min": "#,##0", "neto_max": "#,##0", "margen_min": "#,##0", "margen_max": "#,##0"})
+                            vistas_excel._tabla_con_titulo(_wva, 'Por tienda', 'Venta perdida acumulada — por tienda', _vpa["por_tienda"], {"neto_min": "#,##0", "neto_max": "#,##0", "margen_min": "#,##0", "margen_max": "#,##0"})
+                            vistas_excel._tabla_con_titulo(_wva, 'Por marca', 'Venta perdida acumulada — por marca', _vpa["por_marca"], {"neto_min": "#,##0", "neto_max": "#,##0", "margen_min": "#,##0", "margen_max": "#,##0", "pct": "0%"})
+                        _vpa_buf.seek(0)
+                        st.download_button("📥 Excel — venta perdida acumulada", _vpa_buf.getvalue(), file_name="Capi_Venta_Perdida_Acumulada.xlsx",
+                                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_vp_acum")
 
 
             with st.expander(f"Ver detalle y soluciones — top quiebres actuales por tienda ({len(_vp_q):,} combos)", expanded=False):

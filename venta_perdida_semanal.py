@@ -227,3 +227,40 @@ def serie_semanas(n: int = 5) -> pd.DataFrame:
             rows.append({"semana": w, "combos": r["n_combos"], "neto_min": r["neto_min"], "neto_max": r["neto_max"],
                          "margen_min": r["margen_min"], "margen_max": r["margen_max"]})
     return pd.DataFrame(rows)
+
+
+def acumulado(desde: str | None = None, hasta: str | None = None) -> dict:
+    """Suma de la venta perdida semanal (mismo método: cob ≤ 4 por SKU×tienda) sobre todas las
+    semanas con snapshot de tienda que tengan ≥2 semanas previas. Devuelve totales, por semana,
+    por tienda y por marca (bandas min/max)."""
+    weeks = _t.list_tienda_weeks()
+    if desde:
+        weeks = [w for w in weeks if w >= desde]
+    if hasta:
+        weeks = [w for w in weeks if w <= hasta]
+    dets, filas = [], []
+    for w in weeks:
+        r = venta_perdida_semana(w)
+        if not r or r.get("insuficiente") or r["detalle"].empty:
+            continue
+        d = r["detalle"].copy(); d["semana"] = w
+        dets.append(d)
+        filas.append({"semana": w, "en_quiebre": r.get("n_en_quiebre", 0), "con_perdida": r["n_combos"],
+                      "neto_min": r["neto_min"], "neto_max": r["neto_max"], "margen_min": r["margen_min"], "margen_max": r["margen_max"]})
+    if not dets:
+        return {}
+    det = pd.concat(dets, ignore_index=True)
+    por_sem = pd.DataFrame(filas)
+    por_tienda = (det.groupby("tienda").agg(semanas=("semana", "nunique"), combos=("sku", "size"),
+                                            neto_min=("neto_min", "sum"), neto_max=("neto_max", "sum"),
+                                            margen_min=("margen_min", "sum"), margen_max=("margen_max", "sum"))
+                    .reset_index().sort_values("neto_max", ascending=False))
+    por_marca = (det.groupby("marca").agg(skus=("sku", "nunique"), combos=("sku", "size"),
+                                          neto_min=("neto_min", "sum"), neto_max=("neto_max", "sum"),
+                                          margen_min=("margen_min", "sum"), margen_max=("margen_max", "sum"))
+                   .reset_index().sort_values("neto_max", ascending=False))
+    por_marca["pct"] = por_marca["neto_max"] / por_marca["neto_max"].sum()
+    return {"semanas": por_sem["semana"].tolist(), "por_semana": por_sem, "por_tienda": por_tienda, "por_marca": por_marca,
+            "neto_min": float(por_sem["neto_min"].sum()), "neto_max": float(por_sem["neto_max"].sum()),
+            "margen_min": float(por_sem["margen_min"].sum()), "margen_max": float(por_sem["margen_max"].sum()),
+            "n_semanas": int(len(por_sem))}
