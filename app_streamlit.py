@@ -33,6 +33,7 @@ importlib.reload(R_at)
 import transformar_profundidad as etl_profundidad
 importlib.reload(etl_profundidad)
 import vista_planificacion as vista_plan
+import vista_talla_color
 importlib.reload(vista_plan)
 
 # Snapshots Engine — histórico semanal (Prompt B)
@@ -734,6 +735,7 @@ with st.sidebar:
 
             _NAV_PREDICTIVO = [
                 ("🎯", "Match Producto-Plaza"),
+                ("🧵", "Talla y Color"),
                 ("📊", "Planificación"),
             ]
 
@@ -4387,6 +4389,10 @@ Se calcula por cada combo **SKU × tienda** candidato:
                     if len(_propias_prod) > 0:
                         st.success(f"🏭 **{len(_propias_prod)} señales de marcas propias** — tienes control de producción para responder.")
 # ─── Rendimiento por Tienda ─────────────────────────────────
+
+elif nav_page == "🧵 Talla y Color":
+    # Vista aislada (S9 ingesta, 2026-09-05): stock y venta por talla × color × tienda.
+    vista_talla_color.render(st)
 
 elif nav_page == "📊 Planificación":
     # Toda la vista vive en vista_planificacion.py (módulo aislado): este

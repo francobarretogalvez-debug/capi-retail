@@ -10,7 +10,7 @@ from conftest import BASES_DIR, REPO
 
 VISTAS = ["🏠 Dashboard", "📲 Productos Venta Cero", "🔄 Transferencias", "📊 Gestión por Antigüedad",
           "🏆 Caso de Éxito", "🎯 Match Producto-Plaza", "📐 Rendimiento de Marca", "📦 Reposición",
-          "💰 Gestión de Precios", "🤝 Agente Terceras", "📊 Planificación"]
+          "💰 Gestión de Precios", "🤝 Agente Terceras", "🧵 Talla y Color", "📊 Planificación"]
 
 
 def _base_mas_reciente():
