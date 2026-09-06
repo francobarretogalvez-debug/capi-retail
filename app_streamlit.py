@@ -10,6 +10,7 @@ Lee la plantilla del cliente (4 pestañas) y muestra:
 
 import io
 import os
+import glob as _glob
 import sys
 import tempfile
 
