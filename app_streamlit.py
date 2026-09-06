@@ -2313,6 +2313,40 @@ if nav_page == "🏠 Dashboard":
                 _kp5 = {w: comparativo_semanal.kpis_semana(w) for w in _sems5}
                 st.markdown(render_foto.render_matriz(comparativo_semanal.KPIS, _kp5, _sems5, _cs_et_all(_sems5), _prev, _mes),
                             unsafe_allow_html=True)
+            # ── Sobrestock: KPI crítico con sección propia (pedido Franco 2026-09-06) ──
+            if len(_sems5) >= 2 and "estado" in df_cob.columns:
+                _sob = df_cob[df_cob["estado"] == "SOBRESTOCK"]
+                _cap_tot = float(df_cob["stock_valor_costo"].sum()) or 1.0
+                _pm = (_sob.groupby("marca")["stock_valor_costo"].sum().rename("capital").reset_index().rename(columns={"marca": "nombre"}))
+                _pm["pct"] = _pm["nombre"].map(_sob.groupby("marca")["stock_valor_costo"].sum() / df_cob.groupby("marca")["stock_valor_costo"].sum())
+                _pt2 = (_sob.groupby("tienda")["stock_valor_costo"].sum().rename("capital").reset_index().rename(columns={"tienda": "nombre"}))
+                _pt2["pct"] = _pt2["nombre"].map(_sob.groupby("tienda")["stock_valor_costo"].sum() / df_cob.groupby("tienda")["stock_valor_costo"].sum())
+                _serie_sob = [_kp5[w].get("capital_sobrestock") for w in _sems5]
+                st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+                st.markdown(f'<div class="section-header"><h3>🟤 Sobrestock: capital que vende, pero de más</h3><span class="live-badge">KPI CRÍTICO</span></div>', unsafe_allow_html=True)
+                st.markdown(render_foto.render_sobrestock(_serie_sob, _sems5, _cs_et_all(_sems5),
+                                                          _pm.sort_values("capital", ascending=False), _pt2.sort_values("capital", ascending=False),
+                                                          float(_sob["stock_valor_costo"].sum()) / _cap_tot, int(len(_sob)), int(_sob["sku"].nunique())),
+                            unsafe_allow_html=True)
+                with st.expander("Ver los SKUs que más pesan en el sobrestock y descargar", expanded=False):
+                    _top_sob = (_sob.groupby(["sku", "nombre", "marca"]).agg(capital=("stock_valor_costo", "sum"), tiendas=("tienda", "nunique"),
+                                                                            stock=("stock_total", "sum"), vta_sem=("prom_vta_uds", "sum"))
+                                .reset_index().sort_values("capital", ascending=False))
+                    _top_sob["cobertura_sem"] = _top_sob["stock"] / _top_sob["vta_sem"].replace(0, np.nan)
+                    st.dataframe(_top_sob.head(200).rename(columns={"sku": "SKU", "nombre": "Producto", "marca": "Marca", "capital": "Capital S/",
+                                                                     "tiendas": "Tiendas", "stock": "Stock", "vta_sem": "Vta/sem", "cobertura_sem": "Cob (sem)"})
+                                 .style.format({"Capital S/": "S/ {:,.0f}", "Stock": "{:,.0f}", "Vta/sem": "{:.1f}", "Cob (sem)": "{:.0f}"}, na_rep="—"),
+                                 use_container_width=True, hide_index=True, height=360)
+                    _sb_buf = io.BytesIO()
+                    with pd.ExcelWriter(_sb_buf, engine="openpyxl") as _wsb:
+                        vistas_excel._tabla_con_titulo(_wsb, "Por SKU", "Sobrestock (cobertura 26–52 sem) — SKUs por capital a costo", _top_sob, {"capital": "#,##0", "stock": "#,##0", "cobertura_sem": "0"})
+                        vistas_excel._tabla_con_titulo(_wsb, "Por marca", "Sobrestock por marca", _pm.sort_values("capital", ascending=False), {"capital": "#,##0", "pct": "0%"})
+                        vistas_excel._tabla_con_titulo(_wsb, "Por tienda", "Sobrestock por tienda", _pt2.sort_values("capital", ascending=False), {"capital": "#,##0", "pct": "0%"})
+                        _sob.to_excel(_wsb, sheet_name="Detalle SKU x tienda", index=False)
+                    _sb_buf.seek(0)
+                    st.download_button("📥 Excel — sobrestock por SKU, marca y tienda", _sb_buf.getvalue(), file_name="Capi_Sobrestock.xlsx",
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_sobrestock")
+                    st.caption("Acción típica: transferir a tiendas donde ese SKU sí rota (Transferencias) o frenar la reposición; no es liquidación, el producto vende.")
             st.caption("Cada fila tiene su propia escala (la barra más alta = el máximo de ese KPI en las 5 semanas); pasa el mouse por una barra para el número completo. "
                        "Capital inmovilizado = DORMIDO + ESTANCADO + LIQUIDAR + MUERTO (decisión Franco 06-sep; SOBRESTOCK va aparte porque sí vende). "
                        "Capital con venta cero = SKUs con stock que no vendieron esa semana. Pre-obsoleto 6–9 meses, obsoleto ≥9. On order solo desde el 30-ago.")

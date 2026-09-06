@@ -11,12 +11,13 @@ import math
 import pandas as pd
 
 GRUPOS = [
-    ("Dónde está el problema hoy", ["capital_inmovilizado", "pct_inmovilizado", "capital_preobsoleto", "capital_obsoleto",
+    ("Dónde está el problema hoy", ["capital_inmovilizado", "pct_inmovilizado", "capital_sobrestock", "capital_preobsoleto", "capital_obsoleto",
                                      "skus_quiebre", "pct_venta_cero", "capital_venta_cero", "cobertura_sem"]),
     ("Qué viene y dónde está la plata", ["capital_por_entrar", "capital_por_pasar", "capital_nuevo_sin_venta",
                                          "pct_capital_cd", "capital_liquidacion", "on_order_uds"]),
 ]
 NOMBRES = {"capital_inmovilizado": "Capital inmovilizado", "pct_inmovilizado": "% del capital inmovilizado",
+           "capital_sobrestock": "Sobrestock (vende, pero de más)",
            "capital_preobsoleto": "Pre-obsoleto (6–9 meses)", "capital_obsoleto": "Obsoleto (9 meses a más)",
            "skus_quiebre": "SKUs en quiebre", "pct_venta_cero": "% SKUs con stock sin venta",
            "capital_venta_cero": "Capital con venta cero la semana", "cobertura_sem": "Cobertura (semanas)",
@@ -129,3 +130,64 @@ def render_matriz(kpis_def: list, kp: dict, sems: list, etiquetas: dict, sem_pre
                        f'<div class="fi-bars">{bars}</div><div class="fi-d">{_chip(ds, better)}{_chip(dm, better)}</div></div>')
     out.append('</div>')
     return "".join(out)
+
+
+# ── Sección Sobrestock (pedido Franco 2026-09-06: KPI crítico con visual propia) ──────────────
+
+CSS_SOB = """
+<style>
+.sb-wrap{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:16px;align-items:start}
+.sb-hero{background:var(--capi-bg-surface,#fff);border:1px solid var(--capi-border,#E4E2EC);border-left:4px solid #8B5A2B;border-radius:12px;padding:14px 18px}
+.sb-hero .t{font-size:.75rem;color:var(--capi-text2,#5B5F73);font-weight:500}
+.sb-hero .v{font-size:1.7rem;font-weight:700;color:#8B5A2B;font-variant-numeric:tabular-nums}
+.sb-hero .s{font-size:.72rem;color:var(--capi-text2,#5B5F73)}
+.sb-trend{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;height:64px;align-items:end;margin-top:10px}
+.sb-bw{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;gap:2px}
+.sb-b{width:100%;max-width:44px;background:#D9C4AE;border-radius:4px 4px 0 0;min-height:2px}.sb-b.cur{background:#8B5A2B}
+.sb-v{font-size:10.5px;color:var(--capi-text2,#5B5F73);font-variant-numeric:tabular-nums;white-space:nowrap}
+.sb-tbl{background:var(--capi-bg-surface,#fff);border:1px solid var(--capi-border,#E4E2EC);border-radius:12px;padding:12px 14px}
+.sb-tbl h5{margin:0 0 8px;font-size:.8rem;color:var(--capi-text,#1F2337)}
+.sb-row{display:grid;grid-template-columns:110px 1fr 84px 52px;align-items:center;gap:8px;font-size:.78rem;padding:3px 0}
+.sb-row .n{color:var(--capi-text,#1F2337);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-row .bar{height:10px;background:#D9C4AE;border-radius:3px}.sb-row .bar i{display:block;height:100%;background:#8B5A2B;border-radius:3px}
+.sb-row .c{text-align:right;font-variant-numeric:tabular-nums;color:var(--capi-text,#1F2337)}.sb-row .p{text-align:right;color:var(--capi-text2,#5B5F73);font-variant-numeric:tabular-nums}
+@media (max-width:900px){.sb-wrap{grid-template-columns:1fr}}
+</style>
+"""
+
+
+def _bars_rows(df: pd.DataFrame, col_n: str, col_cap: str, col_pct: str | None, n: int = 8) -> str:
+    if df is None or df.empty:
+        return '<div class="sb-row"><span class="n">—</span></div>'
+    d = df.head(n)
+    mx = float(d[col_cap].max()) or 1.0
+    out = ""
+    for r in d.itertuples(index=False):
+        cap = float(getattr(r, col_cap)); pct = getattr(r, col_pct) if col_pct else None
+        w = cap / mx * 100
+        p = f"{pct*100:.0f}%" if (pct is not None and pct == pct) else ""
+        out += (f'<div class="sb-row"><span class="n" title="{getattr(r, col_n)}">{getattr(r, col_n)}</span>'
+                f'<span class="bar"><i style="width:{w:.0f}%"></i></span><span class="c">S/ {cap/1e3:,.0f}K</span><span class="p">{p}</span></div>')
+    return out
+
+
+def render_sobrestock(serie: list, sems: list, etiquetas: dict, por_marca: pd.DataFrame, por_tienda: pd.DataFrame,
+                      pct_total: float | None, n_combos: int, n_skus: int) -> str:
+    """serie = capital sobrestock por semana (mismo orden que sems). por_marca/por_tienda: columnas
+    nombre, capital, pct (share del capital de esa marca/tienda que está en sobrestock)."""
+    mx = max([v for v in serie if v is not None] or [1]) or 1
+    trend = ""
+    for i, (w, v) in enumerate(zip(sems, serie)):
+        cur = "cur" if i == len(sems) - 1 else ""
+        h = 0 if v is None else v / mx * 100
+        trend += f'<div class="sb-bw" title="{etiquetas.get(w, w)}: {_full(v, "soles")}"><div class="sb-b {cur}" style="height:{h:.0f}%"></div><div class="sb-v">{_fmt(v, "soles")}</div></div>'
+    hoy = serie[-1] if serie else None
+    dm = _delta(serie[0], hoy, "soles") if len(serie) >= 2 else None
+    ds = _delta(serie[-2], hoy, "soles") if len(serie) >= 2 else None
+    hero = (f'<div class="sb-hero"><div class="t">Capital en SOBRESTOCK (cobertura 26–52 semanas: vende, pero de más)</div>'
+            f'<div class="v">{_full(hoy, "soles")}</div>'
+            f'<div class="s">{(f"{pct_total*100:.1f}% del capital total · " if pct_total else "")}{n_combos:,} SKU×tienda · {n_skus:,} SKUs · '
+            f'Δ sem {_chip(ds, False)} · Δ mes {_chip(dm, False)}</div><div class="sb-trend">{trend}</div></div>')
+    marcas = f'<div class="sb-tbl"><h5>Por marca · S/ y % del capital de la marca</h5>{_bars_rows(por_marca, "nombre", "capital", "pct")}</div>'
+    tiendas = f'<div class="sb-tbl"><h5>Por tienda · S/ y % del capital de la tienda</h5>{_bars_rows(por_tienda, "nombre", "capital", "pct")}</div>'
+    return CSS_SOB + f'<div class="sb-wrap">{hero}{marcas}{tiendas}</div>'
