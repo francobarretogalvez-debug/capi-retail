@@ -35,6 +35,14 @@ ALIAS_TIENDA = {"Ripley Callao": "Callao", "Jiron Union": "Jiron de la Unión", 
                 "San Juan De Lurigancho": "SJL", "Pucallpa": "PUCALLPA I"}
 
 
+def _round_excel(x: float) -> int:
+    """ROUND de Excel (mitades hacia arriba). Python round(16.5) = 16 (a par) y Excel da 17;
+    el desvío apareció en 16 de 960 celdas al auditar contra el Excel del Pima (2026-09-06)."""
+    if x is None or (isinstance(x, float) and math.isnan(x)):
+        return 0
+    return int(math.floor(abs(x) + 0.5) * (1 if x >= 0 else -1))
+
+
 def _even(x: float) -> int:
     """EVEN de Excel: redondea hacia arriba al par más cercano (en magnitud)."""
     if x is None or (isinstance(x, float) and math.isnan(x)):
@@ -89,8 +97,8 @@ def reposicion_tt(df: pd.DataFrame, cubicajes: dict, cob_objetivo: float = 4.0, 
         cob_t = float(cfg.get("cob_objetivo_sem", cob_objetivo) or cob_objetivo)
         pcol, ctal = float(peso_color.get(r.color, 0)), float(curva_talla.get(r.talla, 0))
         oh, uu = float(r.stock_uds), float(r.vta_uds_3s)
-        si = _even(round(cub * pcol * ctal / div)) if cub > 0 else 0
-        vel = round(uu / ventana_sem)
+        si = _even(_round_excel(cub * pcol * ctal / div)) if cub > 0 else 0
+        vel = _round_excel(uu / ventana_sem)
         stock_ideal_vel = vel * cob_t
         adic = vel * adic_semanas
         cob = (oh / (uu / ventana_sem)) if uu > 0 else (np.inf if oh > 0 else 0.0)
