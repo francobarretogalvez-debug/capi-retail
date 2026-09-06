@@ -1969,10 +1969,10 @@ if nav_page == "🏠 Dashboard":
                         <div style="font-size:0.7rem; color:var(--capi-text2);">SKU×tienda · {_qr.get('n_tiendas_cob4', 0)} tiendas · {_qr.get('semanas_promedio', 0):.1f} sem en quiebre en promedio<br>{_dist_txt}</div>
                     </div>""", unsafe_allow_html=True)
                 _exc = _vps.get("quiebre", {}).get("exclusiones", {})
-                _temp_liq = next((k.split("_")[1] for k in _exc if k.startswith("temporada_")), "?")
                 st.caption(f"Regla (Franco 06-sep): quiebre = cobertura ≤ 4 semanas por SKU × tienda; se cuentan las semanas seguidas hasta que la reposición la sube. "
-                           f"Fuera del cálculo: liquidación (dscto ≥40%: {_exc.get('dscto_40', 0):,} SKUs), temporada en liquidación ({_temp_liq}: "
-                           f"{_exc.get('temporada_' + _temp_liq, 0):,}) y más de 6 meses ({_exc.get('obsoleto_6m', 0):,}) → {_exc.get('total', 0):,} SKUs excluidos. "
+                           f"Fuera del cálculo: más de 6 meses ({_exc.get('obsoleto_6m', 0):,} SKUs) y liquidación ({_exc.get('temporada_liq', '?')} o dscto ≥40%) "
+                           f"sin stock relevante en CD ({_exc.get('liquidacion_sin_cd', 0):,}; umbral {_exc.get('umbral_cd_pct', 0.1)*100:.0f}% del stock total y ≥{_exc.get('min_cd_uds', 6)} uds). "
+                           f"La liquidación que SÍ tiene stock en CD cuenta ({_exc.get('liquidacion_con_cd_cuenta', 0):,} SKUs) y su venta perdida se topa con ese stock. "
                            "La plata se pierde solo en las semanas en que la tienda cerró sin stock.")
                 with st.expander("Ver por tienda, tendencia de 4 semanas y detalle SKU × tienda", expanded=False):
                     try:

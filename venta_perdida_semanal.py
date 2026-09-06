@@ -28,6 +28,11 @@ IGV = 1.18
 COB_QUIEBRE_SEM = 4.0            # regla Franco 2026-09-06: quiebre = cobertura ≤ 4 semanas en la tienda
 DSCTO_LIQUIDACION = 0.40         # regla Majo: ≥40% = liquidación
 RANGOS_OBSOLETO = {"RANGO 6_9", "RANGO 9_12", "RANGO 12_99"}
+# Liquidación (temporada en liquidación o dscto ≥40%) SOLO cuenta como quiebre si el CD todavía tiene
+# stock relevante del SKU (regla Franco 2026-09-06): umbral anti-ripios = % del stock total (CD+tiendas)
+# y un mínimo de unidades. Para esos SKUs la venta perdida se topa con el stock del CD.
+UMBRAL_CD_PCT = 0.10
+MIN_CD_UDS = 6
 
 
 def temporada_en_liquidacion(semana: str | None = None, snapshot: pd.DataFrame | None = None) -> str:
@@ -50,28 +55,38 @@ def temporada_en_liquidacion(semana: str | None = None, snapshot: pd.DataFrame |
     return "PV" if 3 <= mes <= 8 else "OI"
 
 
-def exclusiones_quiebre(semana: str) -> tuple[set, dict]:
-    """SKUs que NO cuentan para quiebre (regla Franco 2026-09-06): liquidación (dscto ≥40%),
-    temporada en liquidación, y mercadería con más de 6 meses (pre-obsoleto + obsoleto).
-    Devuelve (set de skus, conteo por motivo)."""
+def exclusiones_quiebre(semana: str, umbral_cd_pct: float = UMBRAL_CD_PCT, min_cd_uds: int = MIN_CD_UDS) -> tuple[set, dict]:
+    """SKUs que NO cuentan para quiebre (regla Franco 2026-09-06):
+      - mercadería con más de 6 meses (pre-obsoleto + obsoleto): siempre fuera;
+      - liquidación (temporada en liquidación o dscto ≥40%): fuera SOLO si el CD ya no tiene stock
+        relevante del SKU (CD < umbral % del total CD+tiendas, o < mínimo de uds). Si el CD sí tiene,
+        el quiebre en tienda es evitable y cuenta.
+    Devuelve (set de skus excluidos, conteos). Además `liquidacion_con_cd` = dict sku → stock CD
+    para topar la venta perdida de esos SKUs."""
     s = load_snapshot(semana)
     sku = s["sku"].astype(str).str.strip()
     dsc = pd.to_numeric(s.get("pct_descuento"), errors="coerce").fillna(0)
     dsc = dsc / 100 if dsc.max() > 1.5 else dsc
-    liq = dsc >= DSCTO_LIQUIDACION
     obs = s.get("rango_antiguedad", pd.Series("", index=s.index)).astype(str).isin(RANGOS_OBSOLETO)
     temp_liq = temporada_en_liquidacion(semana, snapshot=s)
     temp = s.get("temporada", pd.Series("", index=s.index)).astype(str).str.upper().str.strip().eq(temp_liq)
-    excl = set(sku[liq | obs | temp])
-    return excl, {"dscto_40": int(liq.sum()), "obsoleto_6m": int(obs.sum()), f"temporada_{temp_liq}": int(temp.sum()), "total": len(excl)}
-
-
-def _num(w):
-    y, ww = w.split("-")
-    return int(y) * 100 + int(ww)
+    liq = (dsc >= DSCTO_LIQUIDACION) | temp
+    cd = pd.to_numeric(s.get("stock_cd"), errors="coerce").fillna(0)
+    tot = pd.to_numeric(s.get("stock_total"), errors="coerce").fillna(0)
+    cd_share = (cd / tot.replace(0, np.nan)).fillna(0)
+    cd_ok = (cd >= min_cd_uds) & (cd_share >= umbral_cd_pct)
+    liq_sin_cd = liq & ~cd_ok & ~obs
+    liq_con_cd = liq & cd_ok & ~obs
+    excl = set(sku[obs | liq_sin_cd])
+    conteo = {"obsoleto_6m": int(obs.sum()), "liquidacion_sin_cd": int(liq_sin_cd.sum()),
+              "liquidacion_con_cd_cuenta": int(liq_con_cd.sum()), "temporada_liq": temp_liq,
+              "umbral_cd_pct": umbral_cd_pct, "min_cd_uds": min_cd_uds, "total": len(excl)}
+    liquidacion_con_cd = dict(zip(sku[liq_con_cd], cd[liq_con_cd]))
+    return excl, {**conteo, "_liq_cd": liquidacion_con_cd}
 
 
 def _precio_margen(semana: str) -> pd.DataFrame:
+    """Precio realizado sin IGV y margen contable por SKU (snapshot de cadena de la semana)."""
     s = load_snapshot(semana)
     uds = pd.to_numeric(s.get("unidades_vendidas"), errors="coerce")
     sol = pd.to_numeric(s.get("venta_soles"), errors="coerce")
@@ -101,6 +116,7 @@ def venta_perdida_semana(semana: str | None = None, n_prev: int = 4, min_obs: in
     hist = pd.concat([_t.load_tienda(w).assign(_w=w) for w in prev], ignore_index=True)
     hist["sku"] = hist["sku"].astype(str)
     excl, excl_conteo = exclusiones_quiebre(semana)
+    liq_cd = excl_conteo.pop("_liq_cd", {})
     cur = cur[~cur["sku"].isin(excl)]
     hist = hist[~hist["sku"].isin(excl)]
     # velocidad por SKU×tienda: solo semanas donde la tienda tenía stock (venta observable)
@@ -154,6 +170,15 @@ def venta_perdida_semana(semana: str | None = None, n_prev: int = 4, min_obs: in
     q["vel_max"] = q[["vel_simple", "vel_reciente"]].max(axis=1)
     q["uds_min"] = (q["vel_min"] - q["vta_uds_sem"]).clip(lower=0)
     q["uds_max"] = (q["vel_max"] - q["vta_uds_sem"]).clip(lower=0)
+    # SKUs en liquidación: la venta perdida total del SKU (todas las tiendas) se topa con el stock del CD,
+    # repartido entre tiendas en proporción a su velocidad (no hay reorden: solo se pierde lo que se pudo mandar)
+    q["liquidacion"] = q["sku"].isin(set(liq_cd))
+    if q["liquidacion"].any():
+        for col in ("uds_min", "uds_max"):
+            tot_sku = q.groupby("sku")[col].transform("sum")
+            cap = q["sku"].map(liq_cd).astype(float)
+            factor = np.where((q["liquidacion"]) & (tot_sku > cap), cap / tot_sku.replace(0, np.nan), 1.0)
+            q[col] = q[col] * pd.Series(factor, index=q.index).fillna(1.0)
     pm = _precio_margen(semana)
     q = q.merge(pm, on="sku", how="left")
     q["precio"] = q["precio"].fillna(0)
@@ -172,7 +197,7 @@ def venta_perdida_semana(semana: str | None = None, n_prev: int = 4, min_obs: in
                                           evitables=("evitable", "sum"), neto_evitable=("neto_max", lambda x: x[q.loc[x.index, "evitable"]].sum()))
                     .reset_index().sort_values("neto_max", ascending=False))
     cols = ["tienda", "sku", "descripcion", "marca", "linea", "vel_min", "vel_max", "vta_uds_sem", "uds_min", "uds_max",
-            "precio", "margen", "neto_min", "neto_max", "margen_min", "margen_max", "stock_cd", "on_order", "evitable"]
+            "precio", "margen", "neto_min", "neto_max", "margen_min", "margen_max", "stock_cd", "on_order", "evitable", "liquidacion"]
     det = q[[c for c in cols if c in q.columns]].sort_values("neto_max", ascending=False).reset_index(drop=True)
     return {"semana": semana, "prev": prev, "n_combos": int(len(det)), "n_skus": int(det["sku"].nunique()),
             "n_tiendas": int(det["tienda"].nunique()), "detalle": det, "por_tienda": por_tienda,

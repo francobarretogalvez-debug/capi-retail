@@ -969,7 +969,7 @@ def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
         # Regla Franco 2026-09-06: liquidación (dscto ≥40%), temporada en liquidación y >6 meses NO cuentan como quiebre
         try:
             from venta_perdida_semanal import exclusiones_quiebre
-            _excl, _ = exclusiones_quiebre(sem_list[-1])
+            _excl, _c = exclusiones_quiebre(sem_list[-1])
             _mask = df_detalle['sku'].astype(str).str.strip().isin(_excl)
             n_excluidos_liq = int(_mask.sum())
             df_detalle = df_detalle[~_mask]
@@ -991,7 +991,7 @@ def estimate_lost_sales(hasta_semana: str = None, marcas: set = None,
         "Precio e ingreso SIN IGV (venta_soles/uds realizado); margen perdido = ingreso × margen contable (contribución/venta).",
         f"{n_excluidos} SKUs excluidos por historia o precio insuficientes." if n_excluidos else "Sin SKUs excluidos.",
         "Nivel SKU agregado cadena (el detalle por tienda usa la base actual).",
-        (f"Excluidos {n_excluidos_liq} SKUs en liquidación (dscto ≥40%), temporada en liquidación u >6 meses (regla 2026-09-06)."
+        (f"Excluidos {n_excluidos_liq} SKUs: >6 meses, o en liquidación sin stock relevante en CD (regla 2026-09-06; la liquidación con CD sí cuenta)."
          if excluir_liquidacion_obsoleto else "Sin exclusión de liquidación/obsoletos."),
     ]
 

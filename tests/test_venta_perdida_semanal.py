@@ -17,7 +17,13 @@ def test_ultima_semana_coherente():
     assert r["n_combos"] > 0 and r["n_tiendas"] >= 5
     q = r["quiebre"]
     assert q["n_combos_cob4"] >= r["n_combos"] and q["semanas_promedio"] >= 1.0
-    assert q["exclusiones"]["total"] > 0 and "temporada_OI" in q["exclusiones"]   # sep-2026: se liquida el OI
+    assert q["exclusiones"]["total"] > 0 and q["exclusiones"]["temporada_liq"] == "OI"   # sep-2026: se liquida el OI
+    assert q["exclusiones"]["liquidacion_con_cd_cuenta"] > 0
+    d = r["detalle"]
+    if d["liquidacion"].any():   # tope: la pérdida total de un SKU en liquidación no supera su stock en CD
+        tot = d[d["liquidacion"]].groupby("sku")["uds_max"].sum()
+        cd = d[d["liquidacion"]].drop_duplicates("sku").set_index("sku")["stock_cd"]
+        assert (tot <= cd.reindex(tot.index) + 1e-6).all()
     assert (r["en_quiebre"]["cobertura_sem"] <= 4).all()
     assert 0 < r["neto_min"] <= r["neto_max"] < r["bruto_max"]
     assert r["neto_max"] == pytest.approx(r["bruto_max"] * 0.7)
