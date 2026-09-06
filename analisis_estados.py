@@ -28,10 +28,10 @@ _LECTURA_SUBIDA = {
     "SOBRESTOCK": ("La cobertura crece en producto que sí vende. Acción: frenar "
                    "reposición de esos modelos y rebalancear entre tiendas antes de tocar precio."),
     "DORMIDO": ("SKUs que dejaron de vender. Acción: activar precio/exhibición ahora — "
-                "cada semana dormido acerca la mercadería a MUERTO."),
-    "MUERTO": ("Mercadería cruzó los 6 meses sin venta. Acción: liquidación directa "
+                "cada semana dormido acerca la mercadería a PRE-OBSOLETO."),
+    "OBSOLETO": ("Mercadería de 9 meses a más sin rotación. Acción: liquidación directa "
                "por pirámide de descuentos; cada semana parada es margen que se pierde."),
-    "LIQUIDAR": ("Producto maduro con rotación agotada. Acción: liquidación agresiva "
+    "PRE-OBSOLETO": ("Cruzó los 6 meses sin rotación (o con más de 52 sem de cobertura). Acción: descuento fuerte antes de los 9 meses "
                  "o negociación de devolución/rebate con el proveedor."),
     "QUIEBRE": ("Más capital en riesgo de venta perdida. Acción: revisar reposiciones "
                 "pendientes y transferencias desde tiendas con exceso."),
@@ -42,8 +42,8 @@ _LECTURA_SUBIDA = {
 }
 
 _LECTURA_BAJADA = {
-    "MUERTO": "Capital muerto liberado — la mejor noticia posible de la serie.",
-    "LIQUIDAR": "Liquidación avanzando — capital maduro saliendo del sistema.",
+    "OBSOLETO": "Capital obsoleto liberado — la mejor noticia posible de la serie.",
+    "PRE-OBSOLETO": "Pre-obsoleto bajando — se atacó antes de los 9 meses.",
     "DORMIDO": "Dormido bajando — mercadería reactivada o liquidada.",
     "ESTANCADO": "El producto joven empezó a rotar — el empuje/exhibición está funcionando.",
     "SOBRESTOCK": "Sobrestock drenando — la venta está alcanzando a la compra.",
@@ -52,11 +52,13 @@ _LECTURA_BAJADA = {
 
 # Flujos de migración con lectura propia (estado_a → estado_b)
 _LECTURA_FLUJOS = {
-    ("DORMIDO", "MUERTO"): ("⚠️ Deterioro, no mejora: S/ {cap:,.0f} migró de DORMIDO a "
-                            "MUERTO sin activarse. El dormido que no se toca, se muere."),
+    ("DORMIDO", "PRE-OBSOLETO"): ("⚠️ Deterioro, no mejora: S/ {cap:,.0f} migró de DORMIDO a "
+                            "PRE-OBSOLETO sin activarse. El dormido que no se toca, se vuelve obsoleto."),
+    ("PRE-OBSOLETO", "OBSOLETO"): ("⚠️ Deterioro: S/ {cap:,.0f} cruzó de PRE-OBSOLETO a OBSOLETO (9 meses). "
+                            "Ya no es descuento preventivo, es liquidación o negociación."),
     ("NUEVO SIN VENTA", "DORMIDO"): ("⚠️ S/ {cap:,.0f} de mercadería nueva terminó su ventana "
                                      "de lanzamiento sin vender — revisar exhibición/precio de entrada."),
-    ("ESTANCADO", "LIQUIDAR"): ("⚠️ S/ {cap:,.0f} de producto estancado maduró a LIQUIDAR — "
+    ("ESTANCADO", "PRE-OBSOLETO"): ("⚠️ S/ {cap:,.0f} de producto estancado maduró a PRE-OBSOLETO — "
                                 "el empuje no llegó a tiempo."),
 }
 _ESTADOS_VIVOS = {"ÓPTIMO", "PRE-SOBRESTOCK", "QUIEBRE", "PRE-QUIEBRE", "SOBRESTOCK"}
@@ -132,7 +134,7 @@ def conclusiones(sem_a: str, sem_b: str, acciones_df: pd.DataFrame = None) -> li
         drv = driver.get(est)
         drv_txt = (f" Impulsado por {drv[0]} (S/ {drv[1]/1e6:+.2f}M)."
                    if drv and (drv[1] > 0) == (d > 0) else "")
-        nivel = ("critico" if d > 0 and est in ("MUERTO", "LIQUIDAR")
+        nivel = ("critico" if d > 0 and est in ("OBSOLETO", "PRE-OBSOLETO")
                  else "atencion" if d > 0 else "positivo")
         out.append({"nivel": nivel,
                     "titulo": f"{est}: S/ {d/1e6:+.2f}M",
@@ -154,12 +156,12 @@ def conclusiones(sem_a: str, sem_b: str, acciones_df: pd.DataFrame = None) -> li
             if (ea, eb) in _LECTURA_FLUJOS:
                 out.append({"nivel": "atencion", "titulo": f"Migración {ea} → {eb}",
                             "detalle": _LECTURA_FLUJOS[(ea, eb)].format(cap=cap)})
-            elif ea in ("MUERTO", "DORMIDO", "LIQUIDAR") and eb == "NUEVO SIN VENTA":
+            elif ea in ("OBSOLETO", "DORMIDO", "PRE-OBSOLETO") and eb == "NUEVO SIN VENTA":
                 out.append({"nivel": "info", "titulo": f"Relanzamiento {ea} → {eb}",
                             "detalle": (f"S/ {cap:,.0f} reapareció como producto nuevo "
                                         "(recodificación de temporada) — no es mejora "
                                         "comercial ni deterioro; monitorear su tracción.")})
-            elif ea in ("MUERTO", "DORMIDO", "LIQUIDAR") and eb in _ESTADOS_VIVOS:
+            elif ea in ("OBSOLETO", "DORMIDO", "PRE-OBSOLETO") and eb in _ESTADOS_VIVOS:
                 out.append({"nivel": "positivo", "titulo": f"Reactivación {ea} → {eb}",
                             "detalle": f"S/ {cap:,.0f} volvió a tener venta — mejora REAL, no maquillaje."})
 
@@ -193,9 +195,9 @@ def conclusiones(sem_a: str, sem_b: str, acciones_df: pd.DataFrame = None) -> li
 
 # Escala de "salud de rotación": subir = el capital mejoró de estado.
 # QUIEBRE puntúa 4 (venta fuerte pero riesgo): ÓPTIMO→QUIEBRE es deterioro,
-# MUERTO→QUIEBRE es mejora (volvió a vender con fuerza).
+# OBSOLETO→QUIEBRE es mejora (volvió a vender con fuerza).
 SALUD_ESTADO = {
-    "MUERTO": 0, "LIQUIDAR": 1, "DORMIDO": 2, "ESTANCADO": 3,
+    "OBSOLETO": 0, "PRE-OBSOLETO": 1, "DORMIDO": 2, "ESTANCADO": 3,
     "NUEVO SIN VENTA": 3, "SOBRESTOCK": 4, "QUIEBRE": 4,
     "PRE-QUIEBRE": 5, "PRE-SOBRESTOCK": 5, "ÓPTIMO": 7,
 }
@@ -221,11 +223,11 @@ def matriz_migraciones(sem_a: str, sem_b: str) -> pd.DataFrame:
     _sb = out["estado_b"].map(SALUD_ESTADO).fillna(3)
     out["clase"] = np.where(_sb > _sa, "mejora",
                             np.where(_sb < _sa, "deterioro", "lateral"))
-    # Auditoría 2026-08-24: DORMIDO/MUERTO/LIQUIDAR → NUEVO SIN VENTA implica
+    # Auditoría 2026-08-24: DORMIDO/PRE-OBSOLETO/OBSOLETO → NUEVO SIN VENTA implica
     # edad reseteada (SKU recodificado/relanzado de temporada) — no es mejora
     # comercial ni deterioro; se clasifica aparte para no inflar los KPIs.
     _relanz = (out["estado_b"] == "NUEVO SIN VENTA") & \
-              out["estado_a"].isin(["DORMIDO", "MUERTO", "LIQUIDAR"])
+              out["estado_a"].isin(["DORMIDO", "PRE-OBSOLETO", "OBSOLETO"])
     out.loc[_relanz, "clase"] = "relanzamiento"
     return out.sort_values("capital", ascending=False).reset_index(drop=True)
 

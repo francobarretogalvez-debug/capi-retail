@@ -23,7 +23,7 @@ import agente_terceras
 
 # Orden de trabajo de Franco: primero lo muerto (liquidar), luego activar.
 ORDEN_CRITICIDAD = [
-    "MUERTO", "LIQUIDAR", "DORMIDO", "ESTANCADO", "SOBRESTOCK",
+    "OBSOLETO", "PRE-OBSOLETO", "DORMIDO", "ESTANCADO", "SOBRESTOCK",
     "PRE-SOBRESTOCK", "QUIEBRE", "PRE-QUIEBRE", "NUEVO SIN VENTA", "ÓPTIMO",
 ]
 
@@ -72,7 +72,7 @@ CENTRADO = Alignment(horizontal="center")
 
 # Colores por estado (idénticos a los chips del mockup)
 COLORES_ESTADO = {
-    "MUERTO": "A03028", "LIQUIDAR": "C25B2A", "DORMIDO": "B98514",
+    "OBSOLETO": "A03028", "PRE-OBSOLETO": "C25B2A", "DORMIDO": "B98514",
     "ESTANCADO": "8F6B1E", "SOBRESTOCK": "6E7D27", "PRE-SOBRESTOCK": "4A7D9E",
     "QUIEBRE": "5B4A9E", "PRE-QUIEBRE": "8577C2",
     "NUEVO SIN VENTA": "6B7280", "ÓPTIMO": "2E7D5B",
@@ -348,7 +348,7 @@ def hoja_cascada_dscto(writer, df: pd.DataFrame, nombre_hoja: str = "Cascada Dsc
     """Capital y # SKUs por estado crítico × banda de descuento actual."""
     if "pct_descuento" not in df.columns:
         return
-    criticos = df[df["estado"].isin(["MUERTO", "LIQUIDAR", "DORMIDO",
+    criticos = df[df["estado"].isin(["OBSOLETO", "PRE-OBSOLETO", "DORMIDO",
                                      "ESTANCADO", "SOBRESTOCK"])].copy()
     if criticos.empty:
         return

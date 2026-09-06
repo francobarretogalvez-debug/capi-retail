@@ -5,14 +5,14 @@ Tres piezas sobre el df de cobertura (SKU×tienda) del motor:
 1. ranking_por_tienda: capital obsoleto por tienda, de mayor a menor, con % del stock de la tienda.
 2. por_entrar: mercadería que cruza a obsoleto en las próximas N semanas (alerta preventiva)
    con el descuento sugerido de la pirámide para atacarla ANTES de que se congele.
-3. delta_marca: capital MUERTO por marca en la semana actual vs la anterior (snapshots).
+3. delta_marca: capital PRE-OBSOLETO+OBSOLETO (taxonomía) por marca, semana actual vs anterior (snapshots).
 
 Definición oficial (Franco, 2026-09-05):
 - PRE-OBSOLETO = 6 a 9 meses en tienda (RANGO 6_9 / 26–39 semanas), venda o no.
 - OBSOLETO     = 9 meses a más (RANGO 9_12 + 12_99 / >39 semanas), venda o no.
 - "Por entrar": lo que cruza a pre-obsoleto (llega a 26 sem) o a obsoleto (llega a 39 sem) en N semanas.
 Se usa rango_antiguedad cuando existe (misma fuente que la vista Gestión por Antigüedad) y
-edad_semanas como respaldo. La taxonomía (MUERTO = sin venta) queda para Salud del Stock, no para esto.
+edad_semanas como respaldo. La taxonomía (estados PRE-OBSOLETO/OBSOLETO = sin venta o cob >52, por edad) usa los mismos cortes.
 
 Sesgo del campo Costo (memoria 2026-08-26): en terceras nacionales `costo` subestima el
 margen ~11.7 pp. `capital_implicito` = stock × precio_vigente/1.18 × (1 − margen contable)
@@ -48,9 +48,9 @@ def _mask_nivel(df: pd.DataFrame, nivel: str) -> pd.Series:
 
 
 def _mask_obsoleto(df: pd.DataFrame, definicion: str = "rango") -> pd.Series:
-    """Compat: 'rango' = ambos niveles (más de 6 meses); 'taxonomia' = MUERTO (solo Salud del Stock)."""
+    """Compat: 'rango' = ambos niveles (más de 6 meses); 'taxonomia' = estados PRE-OBSOLETO/OBSOLETO."""
     if definicion == "taxonomia":
-        return df.get("estado", pd.Series("", index=df.index)).astype(str).eq("MUERTO")
+        return df.get("estado", pd.Series("", index=df.index)).astype(str).isin(["PRE-OBSOLETO", "OBSOLETO"])
     return _mask_nivel(df, "ambos")
 
 
@@ -161,7 +161,7 @@ def resumen_por_entrar(df_pe: pd.DataFrame) -> pd.DataFrame:
     return g.sort_values("capital", ascending=False).reset_index()
 
 
-def delta_marca(sem_a: str, sem_b: str, estados=("MUERTO",)) -> pd.DataFrame:
+def delta_marca(sem_a: str, sem_b: str, estados=("PRE-OBSOLETO", "OBSOLETO")) -> pd.DataFrame:
     """Capital en `estados` por marca en sem_a vs sem_b (snapshots, nivel cadena)."""
     from analisis_estados import _capital_por_estado_marca
     a, b = _capital_por_estado_marca(sem_a), _capital_por_estado_marca(sem_b)

@@ -1083,7 +1083,11 @@ def estimate_cd_reliability(umbral_volatil: float = 0.3, cd_min_relevante: int =
 #  es el capital en EXCESO, no el DORMIDO puro (ruidoso).
 # ─────────────────────────────────────────────────────────────
 
-ESTADOS_EXCESO = ["DORMIDO", "ESTANCADO", "SOBRESTOCK", "LIQUIDAR", "MUERTO"]
+# Definición Franco 2026-09-06: capital INMOVILIZADO = DORMIDO + ESTANCADO + PRE-OBSOLETO + OBSOLETO (antes LIQUIDAR/MUERTO).
+# SOBRESTOCK se trata aparte (es producto que finalmente tiene venta; no es inmovilizado "si somos papistas").
+ESTADOS_INMOVILIZADO = ["DORMIDO", "ESTANCADO", "PRE-OBSOLETO", "OBSOLETO"]
+ESTADOS_SOBRESTOCK = ["SOBRESTOCK"]
+ESTADOS_EXCESO = ESTADOS_INMOVILIZADO   # compat: "capital en exceso" del Caso de Éxito = inmovilizado
 
 
 def capital_por_estado(semana: str) -> pd.DataFrame:
@@ -1131,7 +1135,7 @@ def serie_capital_estados(desde: str = None, hasta: str = None) -> pd.DataFrame:
 
 def serie_capital_exceso(desde: str = None, hasta: str = None) -> pd.DataFrame:
     """Serie semanal de la métrica titular del caso de éxito:
-    capital en exceso (DORMIDO+ESTANCADO+SOBRESTOCK+LIQUIDAR+MUERTO)
+    capital inmovilizado (DORMIDO+ESTANCADO+PRE-OBSOLETO+OBSOLETO)
     vs capital total, con % y delta WoW."""
     serie = serie_capital_estados(desde, hasta)
     if serie.empty:

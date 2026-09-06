@@ -3,13 +3,13 @@
   "n_filas_cobertura": 965,
   "capital_total": 1049141.9,
   "capital_por_estado": {
-    "PRE-SOBRESTOCK": 118301.87,
     "DORMIDO": 270857.09,
     "ESTANCADO": 134301.34,
-    "LIQUIDAR": 6854.54,
-    "MUERTO": 45516.59,
     "NUEVO SIN VENTA": 156203.28,
+    "OBSOLETO": 12551.92,
+    "PRE-OBSOLETO": 39819.21,
     "PRE-QUIEBRE": 61581.04,
+    "PRE-SOBRESTOCK": 118301.87,
     "QUIEBRE": 18694.21,
     "SOBRESTOCK": 138788.97,
     "ÓPTIMO": 98042.97

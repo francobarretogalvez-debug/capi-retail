@@ -362,9 +362,9 @@ _RANGO_SIN_VENTA = {
     "RANGO 0":    "NUEVO SIN VENTA",  # recién llegado
     "RANGO 0_3":  "NUEVO SIN VENTA",  # 0-3 meses
     "RANGO 3_6":  "DORMIDO",          # 3-6 meses, ya debería vender
-    "RANGO 6_9":  "MUERTO",           # 6-9 meses, obsoleto
-    "RANGO 9_12": "MUERTO",           # 9-12 meses
-    "RANGO 12_99":"MUERTO",           # >12 meses
+    "RANGO 6_9":  "PRE-OBSOLETO",     # 6-9 meses
+    "RANGO 9_12": "OBSOLETO",         # 9-12 meses
+    "RANGO 12_99":"OBSOLETO",         # >12 meses
 }
 
 
@@ -518,7 +518,7 @@ def build_cobertura(df_maestro, df_ventas, df_stock, params):
         )
         result['sobrestock_aparente'] = (
             result['ratio_cd'] > 0.6
-        ) & result['estado'].isin({'SOBRESTOCK', 'LIQUIDAR', 'PRE-SOBRESTOCK'})
+        ) & result['estado'].isin({'SOBRESTOCK', 'PRE-OBSOLETO', 'OBSOLETO', 'PRE-SOBRESTOCK'})
     else:
         result['ratio_cd'] = 0.0
         result['sobrestock_aparente'] = False
@@ -624,8 +624,8 @@ def build_reposiciones(df_cobertura, params):
     # Todos los SKUs con cobertura por debajo del target que tienen venta
     # NOTA Sprint 1: agregado Estado.ESTANCADO (cob >52 sin venta es problema, no repo).
     _estados_excluir = {
-        Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.LIQUIDAR,
-        Estado.LANZAMIENTO, Estado.DORMIDO, Estado.MUERTO,
+        Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.PRE_OBSOLETO,
+        Estado.LANZAMIENTO, Estado.DORMIDO, Estado.OBSOLETO,
     }
     _mask = (
         (~df_cobertura['estado'].isin(_estados_excluir)) &
@@ -870,8 +870,8 @@ def build_transferencias(df_cobertura, params):
         # Fuentes: tiendas con exceso (SOBRESTOCK, ESTANCADO, LIQUIDAR, DORMIDO, MUERTO)
         fuentes  = df_sku[
             df_sku['estado'].isin([
-                Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.LIQUIDAR,
-                Estado.DORMIDO, Estado.MUERTO,
+                Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.PRE_OBSOLETO,
+                Estado.DORMIDO, Estado.OBSOLETO,
             ])
         ]
         # Destinos: tiendas que necesitan stock (QUIEBRE, BAJA)
@@ -1018,9 +1018,9 @@ def build_acciones_precio(df_cobertura, df_transferencias, df_maestro, params):
     # Candidatos: SOBRESTOCK, ESTANCADO, LIQUIDAR, y sin venta (DORMIDO/MUERTO) con stock > 0.
     # LANZAMIENTO (sin venta, <8 sem) se excluye: son recién llegados, necesitan tiempo.
     # DORMIDO y MUERTO sí califican para acción de precio.
-    _estados_sin_venta = {Estado.DORMIDO, Estado.MUERTO}
+    _estados_sin_venta = {Estado.DORMIDO, Estado.PRE_OBSOLETO, Estado.OBSOLETO}
     candidatos = df_cobertura[
-        df_cobertura['estado'].isin([Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.LIQUIDAR]) |
+        df_cobertura['estado'].isin([Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.PRE_OBSOLETO, Estado.OBSOLETO]) |
         ((df_cobertura['estado'].isin(_estados_sin_venta)) & (df_cobertura['stock_total'] > 0))
     ].copy()
 
@@ -1049,8 +1049,8 @@ def build_acciones_precio(df_cobertura, df_transferencias, df_maestro, params):
 
         if estado in _estados_sin_venta:
             motivos.append(f"PRODUCTO {estado} — {int(stk)} uds en stock, 0 ventas en 4 semanas")
-        elif estado == Estado.LIQUIDAR:
-            motivos.append(f"LIQUIDAR — {cob} sem cobertura + {edad} sem de antigüedad")
+        elif estado in (Estado.PRE_OBSOLETO, Estado.OBSOLETO):
+            motivos.append(f"{estado} — {cob} sem cobertura + {edad} sem de antigüedad")
         elif estado == Estado.ESTANCADO:
             motivos.append(f"ESTANCADO — {cob} sem de cobertura (>52), edad {edad} sem")
         elif uds_trans > 0 and cob_post is not None and cob_post > ua:
@@ -1282,8 +1282,8 @@ def build_alertas(df_cobertura, df_ventas, params, df_maestro=None):
     # gravedad operativa (más urgente = menor número).
     _estado_orden = {
         Estado.QUIEBRE: 0, Estado.LANZAMIENTO: 1, Estado.PRE_QUIEBRE: 2,
-        Estado.DORMIDO: 3, Estado.MUERTO: 4, Estado.OPTIMO: 5,
-        Estado.ALTO: 6, Estado.SOBRESTOCK: 7, Estado.ESTANCADO: 8, Estado.LIQUIDAR: 9,
+        Estado.DORMIDO: 3, Estado.OBSOLETO: 4, Estado.OPTIMO: 5,
+        Estado.ALTO: 6, Estado.SOBRESTOCK: 7, Estado.ESTANCADO: 8, Estado.PRE_OBSOLETO: 9,
     }
     _estado_sku = (df.assign(_ord=df['estado'].map(_estado_orden).fillna(99))
                      .sort_values('_ord')
@@ -1376,7 +1376,7 @@ def build_alertas(df_cobertura, df_ventas, params, df_maestro=None):
 
         # ── ALERTA 5: RIESGO QUIEBRE ──
         if (r['sem_hasta_critico'] is not None and 0 < r['sem_hasta_critico'] <= 3 and
-                r['estado'] not in (Estado.QUIEBRE, Estado.LANZAMIENTO, Estado.DORMIDO, Estado.MUERTO) and
+                r['estado'] not in (Estado.QUIEBRE, Estado.LANZAMIENTO, Estado.DORMIDO, Estado.PRE_OBSOLETO, Estado.OBSOLETO) and
                 r['prom_4sem'] >= vta_min_alerta):
             alertas_sku.append({
                 'tipo': '🔮 RIESGO QUIEBRE',
@@ -1566,7 +1566,7 @@ def _mensaje_oportunidad(stock_actual, vta_sem, cob_actual, stock_transito):
 
 def _mensaje_lento(stock_total, edad, capital_parado, estado):
     """Mensaje coloquial para 🔴 Mercadería lenta."""
-    if estado in (Estado.LANZAMIENTO, Estado.DORMIDO, Estado.MUERTO):
+    if estado in (Estado.LANZAMIENTO, Estado.DORMIDO, Estado.PRE_OBSOLETO, Estado.OBSOLETO):
         cuerpo = f"No ha registrado venta en las últimas 4 semanas. Tienes {int(stock_total)} uds en tienda"
     else:
         cuerpo = f"Lleva {int(edad)} semanas en catálogo y tienes {int(stock_total)} uds en tienda"
@@ -1582,11 +1582,11 @@ def _accion_sugerida(estado, edad, stock_transito, umbral_edad_liquidar=20):
         if stock_transito > 0:
             return "Refuerza exhibición en vitrina principal. Reposición en camino."
         return "Pide reposición urgente al CD."
-    if estado in (Estado.LIQUIDAR, Estado.ESTANCADO) or (edad is not None and edad >= umbral_edad_liquidar):
+    if estado in (Estado.PRE_OBSOLETO, Estado.OBSOLETO, Estado.ESTANCADO) or (edad is not None and edad >= umbral_edad_liquidar):
         return "Consulta al buyer si aplicamos marcado de precio."
     if estado == Estado.SOBRESTOCK:
         return "Reubica al piso de venta, zona de alto tráfico."
-    if estado in (Estado.LANZAMIENTO, Estado.DORMIDO, Estado.MUERTO):
+    if estado in (Estado.LANZAMIENTO, Estado.DORMIDO, Estado.PRE_OBSOLETO, Estado.OBSOLETO):
         return "Reubica al piso de venta. Si no mueve, consulta al buyer."
     # Fallback defensivo
     return "Revisa con el buyer."
@@ -1961,7 +1961,7 @@ def build_briefing(df_cobertura, df_ventas, summary, params):
     elif pct_critico > 0:
         situacion += f" {s['n_critico']} combo(s) en QUIEBRE requieren reposición inmediata."
     if pct_sobre > 30:
-        situacion += f" {pct_sobre:.0f}% en SOBRESTOCK/LIQUIDAR — capital inmovilizado importante."
+        situacion += f" {pct_sobre:.0f}% en SOBRESTOCK/OBSOLETO — capital inmovilizado importante."
 
     items.append({
         'prioridad': 0,
@@ -1979,7 +1979,7 @@ def build_briefing(df_cobertura, df_ventas, summary, params):
             vta_sem1=('prom_vta_uds', 'sum'),
             stock_valor=('stock_valor_costo', 'sum'),
             n_skus=('sku', 'nunique'),
-            n_sobrestock=('estado', lambda x: (x.isin(['SOBRESTOCK', 'LIQUIDAR'])).sum()),
+            n_sobrestock=('estado', lambda x: (x.isin(['SOBRESTOCK', 'PRE-OBSOLETO', 'OBSOLETO'])).sum()),
         ).reset_index()
         tienda_cob['cobertura_sem'] = (tienda_cob['stock_total'] / tienda_cob['vta_sem1']).round(1)
         tienda_cob = tienda_cob.sort_values('cobertura_sem', ascending=False).head(10)
@@ -3521,7 +3521,7 @@ _HEALTH_WEIGHTS = {
 
 # Estados que representan exceso de inventario (capital parado)
 _ESTADOS_EXCESO = {Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.DORMIDO,
-                   Estado.MUERTO, Estado.LIQUIDAR}
+                   Estado.OBSOLETO, Estado.PRE_OBSOLETO}
 
 
 def build_health_score(df_snapshot, grupo_cols=None, params=None):
@@ -3602,8 +3602,8 @@ def build_health_score(df_snapshot, grupo_cols=None, params=None):
     ).reset_index()
 
     # Capital parado: stock en estados problemáticos (sobrestock + estancado + liquidar + dormido + muerto)
-    _estados_capital_parado = {Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.LIQUIDAR,
-                                Estado.DORMIDO, Estado.MUERTO}
+    _estados_capital_parado = {Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.PRE_OBSOLETO,
+                                Estado.DORMIDO, Estado.OBSOLETO}
     capital_parado_series = df.assign(
         _cap_parado=lambda d: np.where(
             d['estado'].isin(_estados_capital_parado),
@@ -3789,7 +3789,7 @@ def run_analysis(path, params=None, formato='plantilla'):
         'n_liquidar':        int((df_cob['estado'] == Estado.LIQUIDAR).sum()),
         'n_nuevo_sv':        int((df_cob['estado'] == Estado.LANZAMIENTO).sum()),
         'n_dormido':         int((df_cob['estado'] == Estado.DORMIDO).sum()),
-        'n_muerto':          int((df_cob['estado'] == Estado.MUERTO).sum()),
+        'n_muerto':          int((df_cob['estado'] == Estado.OBSOLETO).sum()),
         'uds_reponer':       int(df_rep['a_reponer'].sum()) if not df_rep.empty else 0,
         'uds_transferir':    int(df_trans['uds_transferir'].sum()) if not df_trans.empty else 0,
         'n_acciones_precio': len(df_prec),
@@ -3797,7 +3797,7 @@ def run_analysis(path, params=None, formato='plantilla'):
         'n_anomalias':       len(df_anomalias),
         # Sobrestock aparente (proxy CD)
         'n_sobrestock_aparente': int(df_cob['sobrestock_aparente'].sum()) if 'sobrestock_aparente' in df_cob.columns else 0,
-        'capital_sobrestock': float(df_cob.loc[df_cob['estado'].isin({Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.LIQUIDAR}), 'stock_valor_costo'].sum()),
+        'capital_sobrestock': float(df_cob.loc[df_cob['estado'].isin({Estado.SOBRESTOCK, Estado.ESTANCADO, Estado.PRE_OBSOLETO, Estado.OBSOLETO}), 'stock_valor_costo'].sum()),
         'capital_sobrestock_aparente': float(df_cob.loc[df_cob.get('sobrestock_aparente', False) == True, 'stock_valor_costo'].sum()) if 'sobrestock_aparente' in df_cob.columns else 0,
     }
 
@@ -3948,7 +3948,7 @@ def snapshot_kpis(results, semana_label=None, output_dir=None):
     _n_obsoletos = s.get('n_dormido', 0) + s.get('n_muerto', 0) + s.get('n_liquidar', 0)
     _pct_obsoletos = _n_obsoletos / s['total_combos'] * 100 if s['total_combos'] > 0 else 0
     _capital_obsoleto = float(df_cob.loc[
-        df_cob['estado'].isin({'DORMIDO', 'MUERTO', 'LIQUIDAR'}), 'stock_valor_costo'
+        df_cob['estado'].isin({'DORMIDO', 'PRE-OBSOLETO', 'OBSOLETO'}), 'stock_valor_costo'
     ].sum()) if 'estado' in df_cob.columns else 0
 
     # Cobertura promedio

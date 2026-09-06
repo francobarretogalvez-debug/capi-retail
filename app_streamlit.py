@@ -564,10 +564,10 @@ BADGE_CSS = {
     "ÓPTIMO":           f"background:{STATUS_OPTIMO}; color:#FFFFFF",
     "PRE-SOBRESTOCK":             f"background:{STATUS_ALTO}; color:#FFFFFF",
     "SOBRESTOCK":       f"background:{STATUS_SOBRESTOCK}; color:#FFFFFF",
-    "LIQUIDAR":         f"background:{STATUS_LIQUIDAR}; color:#FFFFFF",
+    "PRE-OBSOLETO":     f"background:{STATUS_LIQUIDAR}; color:#FFFFFF",
     "NUEVO SIN VENTA":  f"background:{STATUS_NUEVO_SV}; color:#FFFFFF",
     "DORMIDO":          f"background:{STATUS_DORMIDO}; color:#FFFFFF",
-    "MUERTO":           f"background:{STATUS_MUERTO}; color:#FFFFFF",
+    "OBSOLETO":         f"background:{STATUS_MUERTO}; color:#FFFFFF",
     "ESTANCADO":        f"background:{STATUS_ESTANCADO}; color:#FFFFFF",
 }
 
@@ -584,10 +584,10 @@ def color_estado(val):
         "ÓPTIMO":           f"background-color:{STATUS_OPTIMO}; color:#FFFFFF",
         "PRE-SOBRESTOCK":             f"background-color:{STATUS_ALTO}; color:#FFFFFF",
         "SOBRESTOCK":       f"background-color:{STATUS_SOBRESTOCK}; color:#FFFFFF",
-        "LIQUIDAR":         f"background-color:{STATUS_LIQUIDAR}; color:#FFFFFF",
+        "PRE-OBSOLETO":     f"background-color:{STATUS_LIQUIDAR}; color:#FFFFFF",
         "NUEVO SIN VENTA":  f"background-color:{STATUS_NUEVO_SV}; color:#FFFFFF",
         "DORMIDO":          f"background-color:{STATUS_DORMIDO}; color:#FFFFFF",
-        "MUERTO":           f"background-color:{STATUS_MUERTO}; color:#FFFFFF",
+        "OBSOLETO":         f"background-color:{STATUS_MUERTO}; color:#FFFFFF",
         "ESTANCADO":        f"background-color:{STATUS_ESTANCADO}; color:#FFFFFF",
     }
     return colors.get(str(val), "")
@@ -1384,10 +1384,10 @@ s["n_precritico"]      = int((df_cob["estado"] == "PRE-QUIEBRE").sum()) if not d
 s["n_optimo"]          = int((df_cob["estado"] == "ÓPTIMO").sum()) if not df_cob.empty else 0
 s["n_alto"]            = int((df_cob["estado"] == "PRE-SOBRESTOCK").sum()) if not df_cob.empty else 0
 s["n_sobrestock"]      = int((df_cob["estado"] == "SOBRESTOCK").sum()) if not df_cob.empty else 0
-s["n_liquidar"]        = int((df_cob["estado"] == "LIQUIDAR").sum()) if not df_cob.empty else 0
+s["n_liquidar"]        = int((df_cob["estado"] == "PRE-OBSOLETO").sum()) if not df_cob.empty else 0   # pre-obsoleto
 s["n_nuevo_sv"]        = int((df_cob["estado"] == "NUEVO SIN VENTA").sum()) if not df_cob.empty else 0
 s["n_dormido"]         = int((df_cob["estado"] == "DORMIDO").sum()) if not df_cob.empty else 0
-s["n_muerto"]          = int((df_cob["estado"] == "MUERTO").sum()) if not df_cob.empty else 0
+s["n_muerto"]          = int((df_cob["estado"] == "OBSOLETO").sum()) if not df_cob.empty else 0   # obsoleto
 s["n_estancado"]       = int((df_cob["estado"] == "ESTANCADO").sum()) if not df_cob.empty else 0
 s["uds_reponer"]       = int(df_rep["a_reponer"].sum()) if not df_rep.empty else 0
 s["uds_desde_cd"]      = int(df_rep["desde_cd"].sum()) if (not df_rep.empty and "desde_cd" in df_rep.columns) else 0
@@ -1419,10 +1419,10 @@ _estado_color_map = {
     "PRE-SOBRESTOCK":         STATUS_ALTO,
     "SOBRESTOCK":   STATUS_SOBRESTOCK,
     "ESTANCADO":    STATUS_ESTANCADO,
-    "LIQUIDAR":     STATUS_LIQUIDAR,
+    "PRE-OBSOLETO": STATUS_LIQUIDAR,
     "NUEVO SIN VENTA":  STATUS_LANZAMIENTO,
     "DORMIDO":      STATUS_DORMIDO,
-    "MUERTO":       STATUS_MUERTO,
+    "OBSOLETO":     STATUS_MUERTO,
 }
 
 
@@ -1581,7 +1581,7 @@ if nav_page == "🏠 Dashboard":
         estado_counts.columns = ["Estado", "Cantidad"]
         estado_order = [
             "QUIEBRE", "PRE-QUIEBRE", "ÓPTIMO", "PRE-SOBRESTOCK", "SOBRESTOCK",
-            "ESTANCADO", "LIQUIDAR", "NUEVO SIN VENTA", "DORMIDO", "MUERTO",
+            "ESTANCADO", "NUEVO SIN VENTA", "DORMIDO", "PRE-OBSOLETO", "OBSOLETO",
         ]
         estado_counts["Estado"] = pd.Categorical(estado_counts["Estado"], categories=estado_order, ordered=True)
         estado_counts = estado_counts.sort_values("Estado").dropna(subset=["Estado"])
@@ -1638,10 +1638,10 @@ if nav_page == "🏠 Dashboard":
             "PRE-SOBRESTOCK":        {"color": STATUS_ALTO,       "icon": "🟡", "regla": "Cobertura 16–26 semanas"},
             "SOBRESTOCK":  {"color": STATUS_SOBRESTOCK, "icon": "🟤", "regla": "Cobertura 26–52 semanas"},
             "ESTANCADO":   {"color": STATUS_ESTANCADO,  "icon": "⬛", "regla": "Cob > 52 sem · edad ≤ 6 meses"},
-            "LIQUIDAR":    {"color": STATUS_LIQUIDAR,   "icon": "💀", "regla": "Cob > 52 sem · edad > 6 meses"},
+            "PRE-OBSOLETO": {"color": STATUS_LIQUIDAR,  "icon": "🟣", "regla": "6–9 meses en tienda · sin venta o cob > 52 sem"},
             "NUEVO SIN VENTA": {"color": STATUS_LANZAMIENTO,"icon": "🆕", "regla": "Sin venta · edad < 2 meses"},
             "DORMIDO":     {"color": STATUS_DORMIDO,    "icon": "😴", "regla": "Sin venta · edad 2–6 meses"},
-            "MUERTO":      {"color": STATUS_MUERTO,     "icon": "⚫", "regla": "Sin venta · edad > 6 meses"},
+            "OBSOLETO":    {"color": STATUS_MUERTO,     "icon": "⚫", "regla": "9 meses a más · sin venta o cob > 52 sem"},
         }
 
         st.markdown(f"""<div style="font-weight:600; color:var(--capi-text); font-size:0.95rem; margin-bottom:10px;">
@@ -2361,7 +2361,7 @@ if nav_page == "🏠 Dashboard":
                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_sobrestock")
                     st.caption("Acción típica: transferir a tiendas donde ese SKU sí rota (Transferencias) o frenar la reposición; no es liquidación, el producto vende.")
             st.caption("Cada fila tiene su propia escala (la barra más alta = el máximo de ese KPI en las 5 semanas); pasa el mouse por una barra para el número completo. "
-                       "Capital inmovilizado = DORMIDO + ESTANCADO + LIQUIDAR + MUERTO (decisión Franco 06-sep; SOBRESTOCK va aparte porque sí vende). "
+                       "Capital inmovilizado = DORMIDO + ESTANCADO + PRE-OBSOLETO + OBSOLETO (decisión Franco 06-sep; SOBRESTOCK va aparte porque sí vende). "
                        "Capital con venta cero = SKUs con stock que no vendieron esa semana. Pre-obsoleto 6–9 meses, obsoleto ≥9. On order solo desde el 30-ago.")
 
             with st.expander("Ver la serie completa (stock y venta) de las últimas 5 semanas", expanded=False):
@@ -2377,7 +2377,7 @@ if nav_page == "🏠 Dashboard":
                     _t_disp.columns = [f"{w}" + ("  ◀ hoy" if w == _act else "") for w in _t_disp.columns]
                     st.dataframe(_t_disp, use_container_width=True, height=440)
                     st.caption("Venta, contribución y margen van como contexto: semana a semana los mueven los eventos de precio, "
-                               "no las acciones sobre el inventario. Capital inmovilizado = DORMIDO + ESTANCADO + LIQUIDAR + MUERTO; sobrestock aparte (decisión Franco 06-sep). "
+                               "no las acciones sobre el inventario. Capital inmovilizado = DORMIDO + ESTANCADO + PRE-OBSOLETO + OBSOLETO; sobrestock aparte (decisión Franco 06-sep). "
                                "Pre-obsoleto = 6–9 meses en tienda · Obsoleto = 9 meses a más (definición Franco 2026-09-05, por antigüedad). Cuando haya más cortes, el comparativo mensual pasa a periodo comercial Ripley.")
                 try:
                     _rp = comparativo_semanal.resumen_pareto(_act)
@@ -3935,7 +3935,7 @@ elif nav_page == "📊 Gestión por Antigüedad":
                         if len(_wk) >= 2:
                             _dm = _obsm.delta_marca(_wk[-2], _wk[-1])
                             if not _dm.empty:
-                                with st.expander(f"📉 Capital MUERTO (sin venta >26 sem, taxonomía) por marca: {_wk[-1]} vs {_wk[-2]}", expanded=False):
+                                with st.expander(f"📉 Capital PRE-OBSOLETO + OBSOLETO (taxonomía) por marca: {_wk[-1]} vs {_wk[-2]}", expanded=False):
                                     st.dataframe(_dm.rename(columns={"marca": "Marca", "delta": "Δ S/", "delta_pct": "Δ %"})
                                                  .style.format({_wk[-2]: "S/ {:,.0f}", _wk[-1]: "S/ {:,.0f}", "Δ S/": "S/ {:+,.0f}", "Δ %": "{:+.1f}%"}, na_rep="—"),
                                                  use_container_width=True, hide_index=True, height=min(60 + 35 * len(_dm), 400))
@@ -5667,9 +5667,9 @@ elif nav_page == "🚚 Predistribución":
 # ─── CASO DE ÉXITO (Fase 1-2 auditoría 2026-08-23) ───────────
 
 elif nav_page == "🏆 Caso de Éxito":
-    st.markdown("#### 🏆 Caso de Éxito — capital inmovilizado (DORMIDO + ESTANCADO + LIQUIDAR + MUERTO), semana a semana")
+    st.markdown("#### 🏆 Caso de Éxito — capital inmovilizado (DORMIDO + ESTANCADO + PRE-OBSOLETO + OBSOLETO), semana a semana")
     st.caption("La métrica titular para gerencia: capital a costo en DORMIDO + ESTANCADO + "
-               "LIQUIDAR + MUERTO (sobrestock aparte, decisión Franco 06-sep). Cada acción registrada hace el delta atribuible.")
+               "PRE-OBSOLETO + OBSOLETO (sobrestock aparte, decisión Franco 06-sep). Cada acción registrada hace el delta atribuible.")
 
     if not _HAS_SNAPSHOTS:
         st.warning("Esta vista necesita el módulo de snapshots.")

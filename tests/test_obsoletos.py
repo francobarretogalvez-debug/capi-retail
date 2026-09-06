@@ -7,7 +7,7 @@ import obsoletos
 def _cob():
     return pd.DataFrame([
         # tienda A: obsoleto por rango 300 de 500 → 60%
-        dict(tienda="A", marca="MARQUIS", sku="1", nombre="p1", categoria="L", stock_total=10, stock_valor_costo=300, rango_antiguedad="RANGO 9_12", edad_semanas=40, prom_vta_uds=0, precio_vigente=59, costo=30, pct_descuento=0.3, margen_efectivo=0.4, estado="MUERTO"),
+        dict(tienda="A", marca="MARQUIS", sku="1", nombre="p1", categoria="L", stock_total=10, stock_valor_costo=300, rango_antiguedad="RANGO 9_12", edad_semanas=40, prom_vta_uds=0, precio_vigente=59, costo=30, pct_descuento=0.3, margen_efectivo=0.4, estado="OBSOLETO"),
         dict(tienda="A", marca="DOCKERS", sku="2", nombre="p2", categoria="L", stock_total=10, stock_valor_costo=200, rango_antiguedad="RANGO 3_6", edad_semanas=25, prom_vta_uds=0, precio_vigente=118, costo=20, pct_descuento=0.0, margen_efectivo=0.5, estado="DORMIDO"),
         # tienda B: nada obsoleto hoy, uno cruza en 3 semanas (edad 23) pero vende
         dict(tienda="B", marca="MARQUIS", sku="3", nombre="p3", categoria="L", stock_total=5, stock_valor_costo=100, rango_antiguedad="RANGO 3_6", edad_semanas=23, prom_vta_uds=2, precio_vigente=59, costo=30, pct_descuento=0.3, margen_efectivo=0.4, estado="OPTIMO"),

@@ -28,15 +28,17 @@ UMBRALES_DEFAULT = {
     'alto':      26,    # 16–26      → ALTO
     'sobrestock':52,    # 26–52      → SOBRESTOCK
     # >52 + edad ≤26     → ESTANCADO
-    # >52 + edad >26     → LIQUIDAR
+    # >52 + edad 26–39   → PRE-OBSOLETO · >52 + edad >39 → OBSOLETO (Franco 2026-09-06)
 
     # Edad (semanas) — para casos sin venta y para subdivisión >52 sem
     'edad_lanzamiento': 8,    # <8 sem sin venta → LANZAMIENTO (en rampa, esperar)
     'edad_dormido':    26,    # 8-26 sem sin venta → DORMIDO
-    # >26 sem sin venta → MUERTO
+    # 26–39 sem sin venta → PRE-OBSOLETO · >39 → OBSOLETO
 
     # LIQUIDAR exige cob >52 Y edad > este umbral
     'edad_maduro': 26,
+    # Frontera pre-obsoleto / obsoleto (9 meses)
+    'edad_obsoleto': 39,
 }
 
 
@@ -52,9 +54,9 @@ RANGO_SIN_VENTA_MAP = {
     "RANGO 0":     "NUEVO SIN VENTA",  # recién llegado (solo si no hay edad)
     "RANGO 0_3":   "NUEVO SIN VENTA",  # 0-3 meses (solo si no hay edad)
     "RANGO 3_6":   "DORMIDO",          # 3-6 meses, ya debería vender
-    "RANGO 6_9":   "MUERTO",           # 6-9 meses obsoleto
-    "RANGO 9_12":  "MUERTO",           # 9-12 meses
-    "RANGO 12_99": "MUERTO",           # >12 meses
+    "RANGO 6_9":   "PRE-OBSOLETO",     # 6-9 meses
+    "RANGO 9_12":  "OBSOLETO",         # 9-12 meses
+    "RANGO 12_99": "OBSOLETO",         # >12 meses
 }
 
 
@@ -69,10 +71,10 @@ COLOR_MAP = {
     "PRE-SOBRESTOCK":         "#F57F17",  # ámbar — vigilar
     "SOBRESTOCK":   "#BF360C",  # naranja-rojo — empuje
     "ESTANCADO":    "#424242",  # gris oscuro — capital parado, markdown evaluado
-    "LIQUIDAR":     "#880E4F",  # púrpura-rojo — markdown agresivo
+    "PRE-OBSOLETO": "#880E4F",  # púrpura-rojo — markdown agresivo
     "NUEVO SIN VENTA":  "#90CAF9",  # azul claro — recién llegado, sin movimiento todavía
     "DORMIDO":      "#5D4037",  # marrón — revisar exhibición
-    "MUERTO":       "#212121",  # gris muy oscuro — liquidar
+    "OBSOLETO":     "#212121",  # gris muy oscuro — liquidar
 }
 
 
@@ -88,8 +90,8 @@ ESTADO_ORDEN = {
     "PRE-SOBRESTOCK":         3,
     "SOBRESTOCK":   4,
     "ESTANCADO":    5,
-    "LIQUIDAR":     6,
+    "PRE-OBSOLETO": 6,
     "NUEVO SIN VENTA":  7,
     "DORMIDO":      8,
-    "MUERTO":       9,
+    "OBSOLETO":     9,
 }

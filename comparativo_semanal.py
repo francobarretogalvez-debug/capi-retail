@@ -15,8 +15,8 @@ Reglas:
 - Venta semanal = vta_u_sem_1ant (la venta de la semana), NUNCA `unidades_vendidas`
   (acumulado de temporada). Fix B1 auditoría 2026-08-23.
 - Soles semanales = uds semanales × precio realizado del SKU (venta_soles/uds acumulados).
-- Capital inmovilizado = estados DORMIDO+ESTANCADO+SOBRESTOCK+LIQUIDAR+MUERTO (ESTADOS_EXCESO).
-- Obsoleto (definición provisional hasta que Franco elija): estado MUERTO por taxonomía.
+- Capital inmovilizado = DORMIDO+ESTANCADO+PRE-OBSOLETO+OBSOLETO (decisión Franco 2026-09-06); SOBRESTOCK aparte.
+- Obsoleto/pre-obsoleto: por antigüedad (rango del maestro) en los KPIs de capital; la taxonomía usa los mismos cortes de edad.
 """
 from __future__ import annotations
 
@@ -24,10 +24,10 @@ import numpy as np
 import pandas as pd
 
 from snapshots_engine import api as _api
-from snapshots_engine.api import ESTADOS_EXCESO
+from snapshots_engine.api import ESTADOS_EXCESO, ESTADOS_SOBRESTOCK
 from snapshots_engine.storage import load_snapshot, list_available_weeks
 
-ESTADOS_OBSOLETO = ["MUERTO"]   # (taxonomía) — el panel usa la definición por antigüedad, ver abajo
+ESTADOS_OBSOLETO = ["PRE-OBSOLETO", "OBSOLETO"]   # estados de la taxonomía (sin venta o cob >52, por edad)
 
 # (clave, etiqueta, formato, "mayor es mejor")
 KPIS = [
@@ -38,6 +38,7 @@ KPIS = [
     ("capital_total",      "Capital total S/ (costo)",     "soles", None),
     ("capital_inmovilizado", "Capital inmovilizado S/",    "soles", False),
     ("pct_inmovilizado",   "% capital inmovilizado",       "pct",   False),
+    ("capital_sobrestock", "Sobrestock S/ (vende, pero de más)", "soles", False),
     ("capital_preobsoleto", "Pre-obsoleto S/ (6–9 meses)",  "soles", False),
     ("capital_obsoleto",   "Obsoleto S/ (9 meses a más)",  "soles", False),
     ("cobertura_sem",      "Cobertura (semanas)",          "num1",  False),
@@ -116,6 +117,7 @@ def kpis_semana(semana: str) -> dict:
         "precio_realizado": (float(soles_sem.sum() / venta_total_sem) if venta_total_sem else np.nan),
         "capital_total": float(capital.sum()),
         "capital_inmovilizado": float(capital[estado.isin(ESTADOS_EXCESO)].sum()),
+        "capital_sobrestock": float(capital[estado.isin(ESTADOS_SOBRESTOCK)].sum()),
         "pct_inmovilizado": (float(capital[estado.isin(ESTADOS_EXCESO)].sum() / capital.sum()) if capital.sum() else np.nan),
         "capital_preobsoleto": float(capital[pre_edad].sum()),
         "capital_obsoleto": float(capital[obsoleto_edad].sum()),

@@ -52,17 +52,20 @@ class Estado:
     PRE_SOBRESTOCK = "PRE-SOBRESTOCK"
     SOBRESTOCK   = "SOBRESTOCK"
     ESTANCADO    = "ESTANCADO"
-    LIQUIDAR     = "LIQUIDAR"
+    PRE_OBSOLETO = "PRE-OBSOLETO"   # edad 26–39 sem (6–9 meses) sin venta, o cob >52 (Franco 2026-09-06; antes LIQUIDAR/MUERTO)
     LANZAMIENTO  = "NUEVO SIN VENTA"
     DORMIDO      = "DORMIDO"
-    MUERTO       = "MUERTO"
+    OBSOLETO     = "OBSOLETO"       # edad >39 sem (9 meses a más) sin venta, o cob >52
+    # Alias de compatibilidad (código viejo): LIQUIDAR y MUERTO ya no existen como estados
+    LIQUIDAR     = "PRE-OBSOLETO"
+    MUERTO       = "OBSOLETO"
 
     @classmethod
     def todos(cls) -> list:
         return [
             cls.QUIEBRE, cls.PRE_QUIEBRE, cls.OPTIMO, cls.ALTO,
-            cls.SOBRESTOCK, cls.ESTANCADO, cls.LIQUIDAR,
-            cls.LANZAMIENTO, cls.DORMIDO, cls.MUERTO,
+            cls.SOBRESTOCK, cls.ESTANCADO, cls.PRE_OBSOLETO,
+            cls.LANZAMIENTO, cls.DORMIDO, cls.OBSOLETO,
         ]
 
     @classmethod
@@ -73,12 +76,12 @@ class Estado:
     @classmethod
     def problemas_markdown(cls) -> list:
         """Estados que potencialmente requieren markdown."""
-        return [cls.ESTANCADO, cls.LIQUIDAR, cls.MUERTO]
+        return [cls.ESTANCADO, cls.PRE_OBSOLETO, cls.OBSOLETO]
 
     @classmethod
     def sin_venta(cls) -> list:
         """Estados que indican que el SKU no vendió en últimas 4 sem."""
-        return [cls.LANZAMIENTO, cls.DORMIDO, cls.MUERTO]
+        return [cls.LANZAMIENTO, cls.DORMIDO, cls.PRE_OBSOLETO, cls.OBSOLETO]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -120,7 +123,7 @@ def classify(
             * 16–26                    → PRE-SOBRESTOCK (antes ALTO, Franco 2026-09-06)
             * 26–52                    → SOBRESTOCK
             * >52, edad ≤26            → ESTANCADO
-            * >52, edad >26            → LIQUIDAR
+            * >52, edad 26–39          → PRE-OBSOLETO · >52, edad >39 → OBSOLETO
     """
     u = umbrales if umbrales is not None else UMBRALES_DEFAULT
 
@@ -143,7 +146,7 @@ def classify(
         return Estado.SOBRESTOCK
     # >52 → subdividir por edad
     if edad_semanas is not None and edad_semanas > u['edad_maduro']:
-        return Estado.LIQUIDAR
+        return Estado.OBSOLETO if edad_semanas > u.get('edad_obsoleto', 39) else Estado.PRE_OBSOLETO
     return Estado.ESTANCADO
 
 
@@ -152,7 +155,7 @@ def _classify_sin_venta(
     rango_antiguedad: Optional[str],
     umbrales: dict,
 ) -> str:
-    """Asigna LANZAMIENTO / DORMIDO / MUERTO.
+    """Asigna LANZAMIENTO / DORMIDO / PRE-OBSOLETO / OBSOLETO.
 
     La EDAD EN SEMANAS manda y revalida cuando se conoce; el rango_antiguedad
     del maestro solo es fallback cuando no hay edad. (Antes el rango tenía
@@ -166,7 +169,9 @@ def _classify_sin_venta(
             return Estado.LANZAMIENTO
         if edad_semanas < umbrales['edad_dormido']:        # 8–26
             return Estado.DORMIDO
-        return Estado.MUERTO
+        if edad_semanas <= umbrales.get('edad_obsoleto', 39):  # 26–39 = 6–9 meses
+            return Estado.PRE_OBSOLETO
+        return Estado.OBSOLETO
 
     # Prioridad 2 (fallback, sin edad): rango_antiguedad del maestro
     sub = RANGO_SIN_VENTA_MAP.get(str(rango_antiguedad or '').strip(), None)
@@ -216,8 +221,8 @@ def classify_series(
 
     if edad is not None:
         # NaN edad: en classify() original, NaN < X es siempre False,
-        # así que la cascada if/elif/else cae al return MUERTO.
-        # Para replicar: tratamos NaN como edad=9999 → cae a MUERTO.
+        # así que la cascada if/elif/else cae al último return (OBSOLETO).
+        # Para replicar: tratamos NaN como edad=9999 → cae a OBSOLETO.
         ed = edad.fillna(9999).values
     else:
         ed = np.full(n, -1.0)
@@ -248,20 +253,26 @@ def classify_series(
         edad_conocida & (ed >= u['edad_lanzamiento']) & (ed < u['edad_dormido']),
         Estado.DORMIDO, sin_venta_estado
     )
+    _edad_obs = u.get('edad_obsoleto', 39)
     sin_venta_estado = np.where(
-        edad_conocida & (ed >= u['edad_dormido']),
-        Estado.MUERTO, sin_venta_estado
+        edad_conocida & (ed >= u['edad_dormido']) & (ed <= _edad_obs),
+        Estado.PRE_OBSOLETO, sin_venta_estado
+    )
+    sin_venta_estado = np.where(
+        edad_conocida & (ed > _edad_obs),
+        Estado.OBSOLETO, sin_venta_estado
     )
 
     # ── Con venta: cascada de cobertura ──
-    # Para LIQUIDAR: requiere edad real conocida (no NaN→9999) y > edad_maduro
+    # Para PRE-OBSOLETO/OBSOLETO con venta: cob >52 y edad real conocida > edad_maduro
     con_venta_estado = np.where(
         cob < u['critico'], Estado.QUIEBRE,
         np.where(cob < u['baja'], Estado.PRE_QUIEBRE,
         np.where(cob < u['optimo'], Estado.OPTIMO,
         np.where(cob < u['alto'], Estado.ALTO,
         np.where(cob < u['sobrestock'], Estado.SOBRESTOCK,
-        np.where(edad_conocida & (ed > u['edad_maduro']), Estado.LIQUIDAR,
+        np.where(edad_conocida & (ed > u['edad_maduro']),
+                 np.where(ed > _edad_obs, Estado.OBSOLETO, Estado.PRE_OBSOLETO),
                  Estado.ESTANCADO))))))
 
     # ── Combinar: sin venta vs con venta ──

@@ -51,10 +51,10 @@ _LEYENDA_ESTADOS = [
     ("PRE-SOBRESTOCK", "Cobertura entre 16 y 26 semanas — antesala del sobrestock (antes ALTO)."),
     ("SOBRESTOCK", "Cobertura entre 26 y 52 semanas — exceso claro de stock vs. su venta."),
     ("ESTANCADO", "Más de 52 semanas de cobertura con producto aún joven (≤26 sem) — rota muy lento."),
-    ("LIQUIDAR", "Más de 52 semanas de cobertura y producto maduro (>26 sem) — liquidación directa."),
+    ("PRE-OBSOLETO", "6–9 meses en tienda sin rotación (o >52 sem de cobertura) — descuento fuerte antes de los 9 meses."),
     ("NUEVO SIN VENTA", "Sin ventas y menos de 8 semanas en tienda — aún en ventana de lanzamiento."),
     ("DORMIDO", "Sin ventas entre 8 y 26 semanas — necesita acción de precio o exhibición."),
-    ("MUERTO", "Sin ventas y más de 26 semanas — capital inmovilizado, liquidar."),
+    ("OBSOLETO", "9 meses a más sin rotación — liquidación directa o negociación con la marca."),
 ]
 
 _PIRAMIDE = [
@@ -258,8 +258,8 @@ def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
 
         # ── 1. Liquidar / 2. Activar ──
         _hoja_precio(w, "1. Liquidar",
-                     f"{marca} — LIQUIDAR (sin venta +26 sem o rotación agotada) · corte {corte}",
-                     g_all[g_all["estado"].isin(["MUERTO", "LIQUIDAR"])])
+                     f"{marca} — LIQUIDAR: pre-obsoleto y obsoleto (más de 6 meses sin rotación) · corte {corte}",
+                     g_all[g_all["estado"].isin(["OBSOLETO", "PRE-OBSOLETO"])])
         _hoja_precio(w, "2. Activar",
                      f"{marca} — ACTIVAR precio/exhibición (dormido, estancado, sobrestock) · corte {corte}",
                      g_all[g_all["estado"].isin(["DORMIDO", "ESTANCADO", "SOBRESTOCK"])])

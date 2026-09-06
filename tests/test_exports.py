@@ -39,7 +39,7 @@ def ref_04_08():
     df = df.drop(columns=[c for c in ("Nuevo Precio", "Nuevo Margen") if c in df.columns])
     # el archivo de referencia (04.08) es anterior al renombre ALTO → PRE-SOBRESTOCK (2026-09-06)
     if "estado" in df.columns:
-        df["estado"] = df["estado"].replace({"ALTO": "PRE-SOBRESTOCK"})
+        df["estado"] = df["estado"].replace({"ALTO": "PRE-SOBRESTOCK", "MUERTO": "OBSOLETO", "LIQUIDAR": "PRE-OBSOLETO"})
     return dict(add_pricing=ns["_add_pricing_cols"], df=df,
                 df_rep=pd.read_excel(xl, "Reposiciones Detalle"),
                 df_trans=pd.read_excel(xl, "Transferencias"),

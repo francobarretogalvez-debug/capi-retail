@@ -96,7 +96,7 @@ def cargar_proveedores(path: str = None) -> dict:
 # Estados de inventario que SÍ son capital parado (no rota): sobrestock,
 # estancado/liquidar y stock sin venta (dormido/muerto). Excluye Óptimo,
 # Quiebre, Pre-quiebre (rotan) y Nuevo sin venta (recién ingresado).
-_ESTADOS_PARADO = {'SOBRESTOCK', 'ESTANCADO', 'LIQUIDAR', 'DORMIDO', 'MUERTO'}
+_ESTADOS_PARADO = {'SOBRESTOCK', 'ESTANCADO', 'PRE-OBSOLETO', 'DORMIDO', 'OBSOLETO'}
 
 
 def detectar_capital_parado(df_cob: pd.DataFrame, min_capital: float = 50000,
