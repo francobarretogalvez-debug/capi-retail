@@ -284,6 +284,28 @@ def transform(input_path, output_path=None, fecha_corte=None):
     # ════════════════════════════════════════════════════════════
     print('Despivoteando tiendas...')
 
+    # ── Velocidad REAL por tienda desde los snapshots por tienda (2026-09-06) ──
+    # Antes: la venta por tienda del Micro es solo la última semana; Sem 2-4 se repartían
+    # proporcionalmente a esa semana. Una tienda en quiebre vende 0 esa semana → 0 en las 4
+    # semanas → el motor la ve "sin venta" y NO la repone (punto ciego circular: 585 de 744
+    # quiebres con stock en CD quedaban fuera del plan al 30-ago). Con snapshots por tienda
+    # (snapshots_engine/tienda.py) se usan las semanas reales anteriores cuando existen.
+    _vel_real = {}
+    _marker_reales = ''
+    try:
+        from snapshots_engine import tienda as _tsnap
+        _sem_base = _tsnap.semana_de_nombre(os.path.basename(str(input_path))) or ''
+        _prev = [w for w in _tsnap.list_tienda_weeks() if _sem_base and w < _sem_base][-3:]
+        for _i, _w in enumerate(reversed(_prev), start=2):          # w-1 → Sem 2, w-2 → Sem 3, w-3 → Sem 4
+            _tw = _tsnap.load_tienda(_w)
+            for _sku, _tda, _v in zip(_tw['sku'].astype(str), _tw['tienda'], _tw['vta_uds_sem']):
+                _vel_real.setdefault((str(_sku), _tda), {})[_i] = int(_v or 0)
+        if _vel_real and len(_prev) == 3:
+            _marker_reales = ' · SEMANAS REALES POR TIENDA (' + ', '.join(_prev) + ')'
+            print(f'  → Venta real por tienda de {len(_prev)} semana(s) previa(s) ({", ".join(_prev)}) desde snapshots: {len(_vel_real):,} SKU×tienda')
+    except Exception as _e_vel:
+        print(f'  → Sin snapshots por tienda para semanas previas ({_e_vel}); Sem 2-4 se reparten proporcionalmente')
+
     rows_ventas = []
     rows_stock = []
 
@@ -308,26 +330,34 @@ def transform(input_path, output_path=None, fecha_corte=None):
             store_vtas[s] = v
             total_store_vta += v
 
+        _sku_key = str(sku).strip()
         for s in stores:
             stk = r.get(f'{s} Stk', 0) or 0
             oo = r.get(f'{s} On Order', 0) or 0
             vta_sem1 = store_vtas[s]
+            _real = _vel_real.get((_sku_key, s))
+            _vendio_antes = bool(_real) and sum(_real.values()) > 0
 
-            # Skip stores with no stock AND no sales
-            if stk == 0 and oo == 0 and vta_sem1 == 0:
+            # Skip stores with no stock AND no sales — salvo que hayan vendido en semanas previas
+            # (tienda en quiebre: debe existir la fila para que el motor la vea como QUIEBRE, no como ausente)
+            if stk == 0 and oo == 0 and vta_sem1 == 0 and not _vendio_antes:
                 continue
 
-            # Distribute Sem 2-4 proportionally based on Sem 1 share
-            if total_store_vta > 0:
-                share = vta_sem1 / total_store_vta
+            if _real:
+                # Semanas reales por tienda desde los snapshots (la que falte se reparte)
+                vta_sem2 = _real.get(2); vta_sem3 = _real.get(3); vta_sem4 = _real.get(4)
             else:
-                # No sales anywhere — if store has stock, give it equal share
-                active_stores_stk = sum(1 for s2 in stores if (r.get(f'{s2} Stk', 0) or 0) > 0)
-                share = (1 / active_stores_stk) if active_stores_stk > 0 and stk > 0 else 0
-
-            vta_sem2 = round(sem2_total * share)
-            vta_sem3 = round(sem3_total * share)
-            vta_sem4 = round(sem4_total * share)
+                vta_sem2 = vta_sem3 = vta_sem4 = None
+            if vta_sem2 is None or vta_sem3 is None or vta_sem4 is None:
+                # Distribute Sem 2-4 proportionally based on Sem 1 share (fallback)
+                if total_store_vta > 0:
+                    share = vta_sem1 / total_store_vta
+                else:
+                    active_stores_stk = sum(1 for s2 in stores if (r.get(f'{s2} Stk', 0) or 0) > 0)
+                    share = (1 / active_stores_stk) if active_stores_stk > 0 and stk > 0 else 0
+                vta_sem2 = round(sem2_total * share) if vta_sem2 is None else vta_sem2
+                vta_sem3 = round(sem3_total * share) if vta_sem3 is None else vta_sem3
+                vta_sem4 = round(sem4_total * share) if vta_sem4 is None else vta_sem4
 
             tienda_name = STORE_NAMES.get(s, s)
 
@@ -384,7 +414,7 @@ def transform(input_path, output_path=None, fecha_corte=None):
         ('', None),
         ('TAB 1 — MAESTRO: Completo desde Profundidad. Edad, precios y costo incluidos.', DATA_FONT),
         ('TAB 2 — HISTORIAL LY: Vacía. Llenar con transformar_ripley.py si tienes data LY.', DATA_FONT),
-        ('TAB 3 — VENTAS RECIENTES: Completo. Sem 1 real por tienda, Sem 2-4 distribuidas proporcionalmente.', DATA_FONT),
+        ('TAB 3 — VENTAS RECIENTES: Sem 1 real por tienda; Sem 2-4 reales desde snapshots por tienda cuando existen (si no, proporcionales).', DATA_FONT),
         ('TAB 4 — STOCK ACTUAL: Completo. Stock y On Order por tienda.', DATA_FONT),
     ]
     for i, (text, font) in enumerate(instructions, 1):
@@ -476,7 +506,7 @@ def transform(input_path, output_path=None, fecha_corte=None):
     ws3 = wb.create_sheet('3. Ventas Recientes (4 sem)')
     ws3.sheet_properties.tabColor = '548235'
     ws3.cell(row=1, column=1,
-        value='VENTAS RECIENTES — Últimas 4 semanas por SKU × Tienda').font = TITLE_FONT
+        value=f'VENTAS RECIENTES — Últimas 4 semanas por SKU × Tienda{_marker_reales}').font = TITLE_FONT
     ws3.merge_cells('A1:H1')
 
     headers3 = [

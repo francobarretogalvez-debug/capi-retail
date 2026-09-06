@@ -82,6 +82,9 @@ def _normalize_cols(df):
     return df
 
 
+_SEMANAS_REALES_TIENDA = False   # se fija en load_from_plantilla según la plantilla cargada
+
+
 def load_from_plantilla(path, params=None):
     """
     Lee el Excel de 4 pestañas del cliente.
@@ -100,6 +103,14 @@ def load_from_plantilla(path, params=None):
 
     # ── Tab 1: Maestro Productos ──────────────────────────────
     df_m = pd.read_excel(path, sheet_name='1. Maestro Productos', header=1)
+    # ¿La plantilla trae Sem 2-4 REALES por tienda (transform + snapshots por tienda)? Se lee del título de la hoja 3.
+    try:
+        _t3 = pd.read_excel(path, sheet_name='3. Ventas Recientes (4 sem)', header=None, nrows=1)
+        _semanas_reales_tienda = 'SEMANAS REALES POR TIENDA' in str(_t3.iat[0, 0])
+    except Exception:
+        _semanas_reales_tienda = False
+    global _SEMANAS_REALES_TIENDA
+    _SEMANAS_REALES_TIENDA = _semanas_reales_tienda   # lo lee build_cobertura (misma corrida)
     df_m = _normalize_cols(df_m)
     df_m = df_m.dropna(subset=[df_m.columns[0]])
     df_m = df_m[~df_m.iloc[:, 0].astype(str).str.startswith('=')]
@@ -290,10 +301,13 @@ def load_from_plantilla(path, params=None):
     for col in ['vta_uds_sem1', 'vta_uds_sem2', 'vta_uds_sem3', 'vta_uds_sem4']:
         df_v[col] = pd.to_numeric(df_v[col], errors='coerce').fillna(0)
 
-    # Promedio venta semanal = solo Sem 1 (dato REAL por tienda).
-    # Sem 2-4 por tienda son prorrateo estimado, no datos reales.
-    # Para alertas de tendencia se usan los totales (sem1-4) a nivel SKU.
-    df_v['prom_vta_uds'] = df_v['vta_uds_sem1'].astype(float)
+    # Promedio venta semanal por tienda:
+    #  - Plantilla con SEMANAS REALES POR TIENDA (transform + snapshots por tienda, 2026-09-06):
+    #    promedio de las 4 semanas reales. Evita el punto ciego circular: una tienda en quiebre
+    #    vende 0 la última semana y con solo Sem 1 quedaba como "sin venta" y fuera de la reposición.
+    #  - Plantilla vieja (Sem 2-4 prorrateadas): solo Sem 1, y más abajo se suaviza con el factor cadena.
+    df_v['prom_vta_uds'] = (df_v[['vta_uds_sem1', 'vta_uds_sem2', 'vta_uds_sem3', 'vta_uds_sem4']].mean(axis=1).astype(float)
+                            if _semanas_reales_tienda else df_v['vta_uds_sem1'].astype(float))
 
     df_v = df_v[['sku', 'tienda',
                  'vta_uds_sem1', 'vta_uds_sem2', 'vta_uds_sem3', 'vta_uds_sem4',
@@ -444,7 +458,7 @@ def build_cobertura(df_maestro, df_ventas, df_stock, params):
     # el Excel mostraba estado de 1 sem con cobertura de 4 sem al lado).
     _sem_cols = [c for c in ['vta_sem1_total', 'vta_sem2_total',
                              'vta_sem3_total', 'vta_sem4_total'] if c in df.columns]
-    if len(_sem_cols) == 4:
+    if len(_sem_cols) == 4 and not _SEMANAS_REALES_TIENDA:   # con semanas reales por tienda no hace falta suavizar
         _tot = df[_sem_cols].fillna(0)
         _prom4_cadena = _tot.sum(axis=1) / 4.0
         _sem1_cadena = _tot['vta_sem1_total']
