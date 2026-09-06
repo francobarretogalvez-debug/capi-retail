@@ -42,7 +42,21 @@ KPIS = [
     ("cobertura_sem",      "Cobertura (semanas)",          "num1",  False),
     ("skus_quiebre",       "SKUs en quiebre",              "int",   False),
     ("pct_venta_cero",     "% SKUs con stock sin venta",   "pct",   False),
+    # ── Segunda fila (revisión Franco 2026-09-05): ¿qué viene y dónde está la plata? ──
+    ("capital_por_entrar", "Por entrar a obsoleto en 4 sem S/", "soles", False),  # indicador adelantado
+    ("capital_nuevo_sin_venta", "Lanzamientos sin venta S/ (NUEVO SIN VENTA)", "soles", False),
+    ("pct_capital_cd",     "% del capital en CD (no en piso)", "pct",   False),
+    ("capital_liquidacion", "Capital con dscto ≥40% S/ (liquidación)", "soles", False),
+    ("on_order_uds",       "On order (uds en tránsito + colocadas)", "int", None),
 ]
+UMBRAL_OBSOLETO_SEM = 26
+
+
+def _col(d: pd.DataFrame, name: str) -> pd.Series:
+    """Columna numérica o ceros si el snapshot (viejo) no la trae."""
+    if name in d.columns:
+        return pd.to_numeric(d[name], errors="coerce").fillna(0)
+    return pd.Series(0.0, index=d.index)
 
 
 def _estado_series(df: pd.DataFrame) -> pd.Series:
@@ -72,6 +86,14 @@ def kpis_semana(semana: str) -> dict:
     estado = _estado_series(d) if "cobertura_sem" in d.columns else pd.Series("", index=d.index)
     con_stock = stock > 0
     venta_total_sem = float(uds_sem.sum())
+    edad = pd.to_numeric(d["edad_semanas"], errors="coerce") if "edad_semanas" in d.columns else pd.Series(np.nan, index=d.index)
+    vta4 = sum(_col(d, f"vta_u_sem_{i}ant") for i in (1, 2, 3, 4))
+    por_entrar = (edad > UMBRAL_OBSOLETO_SEM - 4) & (edad <= UMBRAL_OBSOLETO_SEM) & (vta4 == 0) & con_stock
+    dsc = _col(d, "pct_descuento")
+    dsc = dsc / 100 if dsc.max() > 1.5 else dsc
+    cd_uds = _col(d, "stock_cd")
+    costo_u = (capital / stock.replace(0, np.nan)).fillna(0)
+    oo = _col(d, "on_order_cd_tiendas") + _col(d, "on_order_ordenes")
     return {
         "semana": semana,
         "venta_uds": venta_total_sem,
@@ -86,6 +108,11 @@ def kpis_semana(semana: str) -> dict:
         "cobertura_sem": (float(stock.sum() / venta_total_sem) if venta_total_sem else np.nan),
         "skus_quiebre": int((estado == "QUIEBRE").sum()),
         "pct_venta_cero": (float(((uds_sem == 0) & con_stock).sum() / con_stock.sum()) if con_stock.sum() else np.nan),
+        "capital_por_entrar": float(capital[por_entrar].sum()),
+        "capital_nuevo_sin_venta": float(capital[estado == "NUEVO SIN VENTA"].sum()),
+        "pct_capital_cd": (float((cd_uds * costo_u).sum() / capital.sum()) if capital.sum() else np.nan),
+        "capital_liquidacion": float(capital[dsc >= 0.40].sum()),
+        "on_order_uds": (float(oo.sum()) if oo.sum() > 0 else np.nan),   # NaN en snapshots viejos sin on-order
         "n_skus": int(d["sku"].nunique()),
     }
 

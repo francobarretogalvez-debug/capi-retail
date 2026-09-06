@@ -2195,6 +2195,28 @@ if nav_page == "🏠 Dashboard":
                     _clr = "#6B7280" if pd.isna(_dmv) else ("#10b981" if _dmv < 0 else "#ef4444")
                     _col.markdown(f'<div style="font-size:0.72rem; color:{_clr}; margin-top:-8px;">mes: {_fmtd(_dm, _f)}</div>', unsafe_allow_html=True)
 
+            # Segunda fila (revisión Franco 2026-09-05): ¿qué viene y dónde está la plata?
+            _cards2 = [
+                ("Por entrar a obsoleto (4 sem)", "capital_por_entrar", "soles"),
+                ("Lanzamientos sin venta", "capital_nuevo_sin_venta", "soles"),
+                ("% del capital en CD", "pct_capital_cd", "pct"),
+                ("Capital en liquidación (≥40%)", "capital_liquidacion", "soles"),
+                ("On order (uds)", "on_order_uds", "int"),
+            ]
+            _cols2 = st.columns(len(_cards2))
+            for _col, (_lab, _key, _f) in zip(_cols2, _cards2):
+                _ds = _fa["delta_sem"].get(_key); _dm = _fa["delta_mes"].get(_key)
+                _col.metric(_lab, _fmtv(_k.get(_key), _f), _fmtd(_ds, _f) + " sem",
+                            delta_color=("off" if _key == "on_order_uds" else "inverse"),
+                            help=f"Δ semanal vs {_prev}" + (f" · Δ mensual vs {_mes}: {_fmtd(_dm, _f)}" if _mes else ""))
+                if _mes and _key != "on_order_uds":
+                    _dmv = _dm[1] if _dm else float("nan")
+                    _clr = "#6B7280" if pd.isna(_dmv) else ("#10b981" if _dmv < 0 else "#ef4444")
+                    _col.markdown(f'<div style="font-size:0.72rem; color:{_clr}; margin-top:-8px;">mes: {_fmtd(_dm, _f)}</div>', unsafe_allow_html=True)
+            st.caption("Fila 1: dónde está el problema hoy. Fila 2: qué viene (por entrar a obsoleto = 22–26 semanas sin venta en 4 semanas; "
+                       "lanzamientos sin venta = NUEVO SIN VENTA) y dónde está la plata (en CD sin bajar al piso, o ya en liquidación). "
+                       "On order solo existe en cortes desde el 30-ago.")
+
             with st.expander("Ver la serie completa (stock y venta) de las últimas 5 semanas", expanded=False):
                 _cs = comparativo_semanal.panel_4_semanas()
                 if len(_cs.get("semanas", [])) >= 2:
