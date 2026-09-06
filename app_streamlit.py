@@ -2151,78 +2151,72 @@ if nav_page == "🏠 Dashboard":
 if nav_page == "🏠 Dashboard":
 
     # ══════════════════════════════════════════════════════════
-    #  SEMANA vs 4 ANTERIORES — tracking de KPIs (S4, pedido Franco 2026-09-05)
-    #  Fuente: snapshots semanales (nivel cadena). Venta = vta_u_sem_1ant, nunca acumulado.
+    #  FOTO DEL INVENTARIO: HOY vs HACE 1 SEMANA vs HACE 1 MES (S4)
+    #  Decisión Franco 2026-09-05: lo que importa es la foto actual y si las
+    #  acciones la mueven. KPIs de stock con Δ semanal y Δ mensual; sin YoY
+    #  (no hay calendario de eventos ni stock 2025); la venta es contexto, sin flechas.
     # ══════════════════════════════════════════════════════════
     if _HAS_SNAPSHOTS and not _DEMO_MODE:
         try:
-            _cs = comparativo_semanal.panel_4_semanas()
+            _fa = comparativo_semanal.foto_actual()
         except Exception as _e_cs:
-            _cs = {"semanas": [], "tabla": pd.DataFrame(), "deltas": pd.DataFrame()}
+            _fa = {}
             st.caption(f"Comparativo semanal no disponible: {_e_cs}")
-        if len(_cs.get("semanas", [])) >= 2:
+        if _fa and _fa.get("semana_prev"):
             st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
-            st.markdown(f'<div class="section-header"><h3>📈 Semana vs 4 anteriores</h3><span class="live-badge">TRACKING</span></div>', unsafe_allow_html=True)
-            _cs_sems = _cs["semanas"]
-            _cs_et = {w: analisis_estados.etiqueta_semana(w, corta=True) for w in _cs_sems}
-            st.caption("Cortes: " + " → ".join(f"{w} ({_cs_et[w]})" for w in _cs_sems)
-                       + ("" if _cs.get("consecutivas") else "  ·  ⚠️ los cortes no son consecutivos, los Δ cubren más de una semana"))
-
-            # Tarjetas: KPI actual + Δ vs W−1 (flecha) — 6 KPIs de titular
-            _cs_k = _cs["kpis"]; _cs_act = _cs_sems[-1]; _cs_prev = _cs_sems[-2]
-            _cs_cards = [
-                ("Venta S/ semana", "venta_soles", "soles", True),
-                ("Contribución S/", "contribucion_soles", "soles", True),
-                ("Margen %", "margen_pct", "pct", True),
-                ("Capital inmovilizado", "capital_inmovilizado", "soles", False),
-                ("Cobertura (sem)", "cobertura_sem", "num1", False),
-                ("SKUs en quiebre", "skus_quiebre", "int", False),
+            st.markdown(f'<div class="section-header"><h3>📈 Foto del inventario: ¿se mueve?</h3><span class="live-badge">SEMANAL · MENSUAL</span></div>', unsafe_allow_html=True)
+            _act, _prev, _mes = _fa["actual"], _fa["semana_prev"], _fa.get("semana_mes")
+            _et = lambda w: analisis_estados.etiqueta_semana(w, corta=True) if w else "—"
+            st.caption(f"Hoy: **{_act}** ({_et(_act)}) · hace 1 semana: {_prev} ({_et(_prev)})"
+                       + (f" · hace ~1 mes: {_mes} ({_et(_mes)})" if _mes else " · aún no hay snapshot de hace un mes")
+                       + ". Verde = la foto mejoró. Fuente: snapshots semanales a nivel cadena.")
+            _k = _fa["kpis"][_act]
+            _cards = [
+                ("Capital inmovilizado", "capital_inmovilizado", "soles"),
+                ("% del capital inmovilizado", "pct_inmovilizado", "pct"),
+                ("Capital obsoleto (MUERTO)", "capital_obsoleto", "soles"),
+                ("SKUs en quiebre", "skus_quiebre", "int"),
+                ("% SKUs con stock sin venta", "pct_venta_cero", "pct"),
+                ("Cobertura (semanas)", "cobertura_sem", "num1"),
             ]
-            _cs_cols = st.columns(len(_cs_cards))
-            for _col, (_lab, _key, _fmt, _better) in zip(_cs_cols, _cs_cards):
-                _a, _b = _cs_k[_cs_prev].get(_key), _cs_k[_cs_act].get(_key)
-                if _fmt == "soles": _txt = f"S/ {_b:,.0f}"
-                elif _fmt == "pct": _txt = f"{_b*100:.1f}%"
-                elif _fmt == "num1": _txt = f"{_b:.1f}"
-                else: _txt = f"{_b:,.0f}"
-                if _fmt == "pct" and pd.notna(_a) and pd.notna(_b):
-                    _d = (_b - _a) * 100; _dtxt = f"{_d:+.1f} pp"
-                elif pd.notna(_a) and _a and pd.notna(_b):
-                    _d = (_b - _a) / _a * 100; _dtxt = f"{_d:+.1f}%"
-                else:
-                    _d = None; _dtxt = "—"
-                _col.metric(_lab, _txt, _dtxt, delta_color=("normal" if _better else "inverse") if _better is not None else "off",
-                            help=f"vs {_cs_prev}")
+            def _fmtv(v, f):
+                if pd.isna(v): return "—"
+                return f"S/ {v:,.0f}" if f == "soles" else f"{v*100:.1f}%" if f == "pct" else f"{v:.1f}" if f == "num1" else f"{v:,.0f}"
+            def _fmtd(d, f):
+                if not d or pd.isna(d[1]): return "—"
+                return f"{d[1]:+.1f} pp" if f == "pct" else f"{d[1]:+.1f}%"
+            _cols = st.columns(len(_cards))
+            for _col, (_lab, _key, _f) in zip(_cols, _cards):
+                _ds = _fa["delta_sem"].get(_key); _dm = _fa["delta_mes"].get(_key)
+                _col.metric(_lab, _fmtv(_k.get(_key), _f), _fmtd(_ds, _f) + " sem", delta_color="inverse",
+                            help=f"Δ semanal vs {_prev}" + (f" · Δ mensual vs {_mes}: {_fmtd(_dm, _f)}" if _mes else ""))
+                if _mes:
+                    _dmv = _dm[1] if _dm else float("nan")
+                    _clr = "#6B7280" if pd.isna(_dmv) else ("#10b981" if _dmv < 0 else "#ef4444")
+                    _col.markdown(f'<div style="font-size:0.72rem; color:{_clr}; margin-top:-8px;">mes: {_fmtd(_dm, _f)}</div>', unsafe_allow_html=True)
 
-            with st.expander("Ver los 11 KPIs contra W−1 · W−2 · W−3 · W−4", expanded=False):
-                _t = _cs["tabla"].copy()
-                _fmt_map = {l: f for _, l, f, _ in comparativo_semanal.KPIS}
-                def _fmt_row(row):
-                    f = _fmt_map.get(row.name, "num1")
-                    out = []
-                    for v in row:
-                        if pd.isna(v): out.append("—")
-                        elif f == "soles": out.append(f"S/ {v:,.0f}")
-                        elif f == "soles2": out.append(f"S/ {v:,.2f}")
-                        elif f == "pct": out.append(f"{v*100:.1f}%")
-                        elif f == "int": out.append(f"{v:,.0f}")
-                        else: out.append(f"{v:.1f}")
-                    return pd.Series(out, index=row.index)
-                _t_disp = _t.apply(_fmt_row, axis=1)
-                _t_disp.columns = [f"{w}" + ("  ◀ actual" if w == _cs_act else "") for w in _t_disp.columns]
-                _d = _cs["deltas"].copy()
-                _d_disp = _d.apply(lambda r: pd.Series([("—" if pd.isna(v) else (f"{v:+.1f} pp" if _fmt_map.get(r.name) == "pct" else f"{v:+.1f}%")) for v in r], index=r.index), axis=1)
-                st.dataframe(pd.concat([_t_disp, _d_disp], axis=1), use_container_width=True, height=440)
-                st.caption("Δ en % sobre la semana comparada (en puntos porcentuales para los KPIs en %). "
-                           "Capital inmovilizado = DORMIDO + ESTANCADO + SOBRESTOCK + LIQUIDAR + MUERTO. "
-                           "Obsoleto = MUERTO por taxonomía (definición provisional). Nivel cadena: el snapshot no tiene tienda.")
+            with st.expander("Ver la serie completa (stock y venta) de las últimas 5 semanas", expanded=False):
+                _cs = comparativo_semanal.panel_4_semanas()
+                if len(_cs.get("semanas", [])) >= 2:
+                    _t = _cs["tabla"].copy()
+                    _fmt_map = {l: f for _, l, f, _ in comparativo_semanal.KPIS}
+                    def _fmt_row(row):
+                        f = _fmt_map.get(row.name, "num1")
+                        return pd.Series([("—" if pd.isna(v) else f"S/ {v:,.0f}" if f == "soles" else f"S/ {v:,.2f}" if f == "soles2"
+                                           else f"{v*100:.1f}%" if f == "pct" else f"{v:,.0f}" if f == "int" else f"{v:.1f}") for v in row], index=row.index)
+                    _t_disp = _t.apply(_fmt_row, axis=1)
+                    _t_disp.columns = [f"{w}" + ("  ◀ hoy" if w == _act else "") for w in _t_disp.columns]
+                    st.dataframe(_t_disp, use_container_width=True, height=440)
+                    st.caption("Venta, contribución y margen van como contexto: semana a semana los mueven los eventos de precio, "
+                               "no las acciones sobre el inventario. Capital inmovilizado = DORMIDO + ESTANCADO + SOBRESTOCK + LIQUIDAR + MUERTO. "
+                               "Obsoleto = MUERTO por taxonomía (definición provisional). Cuando haya más cortes, el comparativo mensual pasa a periodo comercial Ripley.")
                 try:
-                    _rp = comparativo_semanal.resumen_pareto(_cs_act)
+                    _rp = comparativo_semanal.resumen_pareto(_act)
                     if _rp:
-                        st.markdown(f"**Pareto del capital inmovilizado ({_cs_act}):** {_rp['n_skus_top80']:,} SKUs "
+                        st.markdown(f"**Pareto del capital inmovilizado ({_act}):** {_rp['n_skus_top80']:,} SKUs "
                                     f"({_rp['pct_skus_top80']*100:.0f}% de los {_rp['n_skus_exceso']:,} en exceso) concentran "
                                     f"S/ {_rp['capital_top80']:,.0f} de S/ {_rp['capital_exceso']:,.0f}.")
-                        _pdf = comparativo_semanal.pareto_inmovilizado(_cs_act)
+                        _pdf = comparativo_semanal.pareto_inmovilizado(_act)
                         _pdf = _pdf[_pdf["top_80"] != ""].head(300)
                         st.dataframe(_pdf.style.format({"capital": "S/ {:,.0f}", "share": "{:.1%}", "pct_acum": "{:.0%}",
                                                         "cobertura_sem": "{:.1f}"}, na_rep="—"),

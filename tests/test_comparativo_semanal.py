@@ -39,3 +39,14 @@ def test_pareto_inmovilizado():
     assert 0.75 <= r["capital_top80"] / r["capital_exceso"] <= 0.85 + 0.15  # ≥80% por construcción
     p = cs.pareto_inmovilizado("2026-34")
     assert p.iloc[0]["top_80"].startswith("⭐") and p["pct_acum"].iloc[-1] == pytest.approx(1.0)
+
+
+def test_foto_actual_semanal_y_mensual():
+    f = cs.foto_actual(hasta="2026-35")
+    assert f["actual"] == "2026-35" and f["semana_prev"] == "2026-34" and f["semana_mes"] == "2026-31"
+    d = f["delta_mes"]["capital_inmovilizado"]
+    assert d[0] == pytest.approx(f["kpis"]["2026-35"]["capital_inmovilizado"] - f["kpis"]["2026-31"]["capital_inmovilizado"])
+    # el Δ de un KPI en % viene en puntos porcentuales
+    pp = f["delta_sem"]["pct_inmovilizado"][1]
+    assert abs(pp) < 20
+    assert cs.semana_mensual(["2026-30", "2026-33", "2026-34", "2026-35"], "2026-35") == "2026-30"

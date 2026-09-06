@@ -1,5 +1,11 @@
 """
-Comparativo semanal — S4 (2026-09-05, pedido Franco FR6 + tracking de KPIs).
+Comparativo semanal y mensual — S4 (2026-09-05, pedido Franco FR6 + tracking de KPIs).
+
+Decisión de producto (Franco, 2026-09-05 noche): lo que importa es la FOTO ACTUAL del
+inventario y si las acciones la mueven. Por eso el panel compara la foto de hoy contra
+la de hace una semana (Δ semanal) y la de hace ~un mes (Δ mensual), sobre KPIs de stock.
+No se compara contra el año pasado (sin calendario de eventos de precio, el YoY engaña y
+además no hay snapshots de stock de 2025). La venta queda como contexto, sin flechas.
 
 Panel "semana actual vs W−1 / W−2 / W−3 / W−4" construido SOLO desde los snapshots
 semanales (nivel SKU agregado cadena). Reusa `compare_weeks` / `capital_por_estado`
@@ -84,6 +90,47 @@ def kpis_semana(semana: str) -> dict:
     }
 
 
+def _num(w: str) -> int:
+    y, ww = w.split("-")
+    return int(y) * 100 + int(ww)
+
+
+def semana_mensual(sems: list[str], actual: str, semanas_atras: int = 4) -> str | None:
+    """El snapshot más cercano a `semanas_atras` semanas antes de `actual` (mínimo 3 atrás)."""
+    cands = [w for w in sems if w < actual and (_num(actual) - _num(w)) >= 3]
+    if not cands:
+        return None
+    return min(cands, key=lambda w: abs((_num(actual) - _num(w)) - semanas_atras))
+
+
+def foto_actual(hasta: str | None = None) -> dict:
+    """KPIs de la última semana + Δ semanal (vs snapshot anterior) + Δ mensual (vs ~4 sem atrás).
+    Devuelve {'actual', 'semana_prev', 'semana_mes', 'kpis': {sem: dict}, 'delta_sem': {kpi: (abs, pct)}, 'delta_mes': {...}}."""
+    weeks = list_available_weeks()
+    if hasta:
+        weeks = [w for w in weeks if w <= hasta]
+    if not weeks:
+        return {}
+    actual = weeks[-1]
+    prev = weeks[-2] if len(weeks) >= 2 else None
+    mes = semana_mensual(weeks, actual)
+    kp = {w: kpis_semana(w) for w in {actual, prev, mes} if w}
+
+    def _d(a, b):
+        out = {}
+        for key, _l, fmt, _b in KPIS:
+            va, vb = (kp.get(a) or {}).get(key, np.nan), (kp.get(b) or {}).get(key, np.nan)
+            if pd.isna(va) or pd.isna(vb):
+                out[key] = (np.nan, np.nan)
+            elif fmt == "pct":
+                out[key] = (vb - va, (vb - va) * 100)          # abs en fracción, "pct" en puntos
+            else:
+                out[key] = (vb - va, ((vb - va) / va * 100) if va else np.nan)
+        return out
+    return {"actual": actual, "semana_prev": prev, "semana_mes": mes, "kpis": kp,
+            "delta_sem": _d(prev, actual) if prev else {}, "delta_mes": _d(mes, actual) if mes else {}}
+
+
 def semanas_panel(hasta: str | None = None, n: int = 5) -> list[str]:
     """Las últimas n semanas con snapshot (no necesariamente consecutivas)."""
     weeks = list_available_weeks()
@@ -123,9 +170,6 @@ def panel_4_semanas(hasta: str | None = None) -> dict:
         deltas[col] = vals
     deltas = pd.DataFrame(deltas, index=[l for _, l, _, _ in KPIS])
 
-    def _num(w):
-        y, ww = w.split("-")
-        return int(y) * 100 + int(ww)
     consecutivas = all(_num(sems[i + 1]) - _num(sems[i]) == 1 for i in range(len(sems) - 1))
     return {"semanas": sems, "tabla": tabla, "deltas": deltas, "kpis": kp, "consecutivas": consecutivas}
 
