@@ -79,7 +79,8 @@ def pesos_desde_venta(df: pd.DataFrame) -> tuple[dict, dict]:
 
 def reposicion_tt(df: pd.DataFrame, cubicajes: dict, cob_objetivo: float = 4.0, ventana_sem: int = 3,
                   adic_semanas: int = 2, regla: str = "cubicaje", peso_color: dict | None = None,
-                  curva_talla: dict | None = None, divisor: float | None = None) -> pd.DataFrame:
+                  curva_talla: dict | None = None, divisor: float | None = None,
+                  semilla_sin_stock: str = "excel") -> pd.DataFrame:
     """Una fila por variación × tienda con la reposición sugerida. `df` = salida de stock_variacion
     (un modelo/programa). Tiendas sin cubicaje configurado → cubicaje 0 (solo regla velocidad)."""
     if df is None or df.empty:
@@ -105,7 +106,10 @@ def reposicion_tt(df: pd.DataFrame, cubicajes: dict, cob_objetivo: float = 4.0, 
         if oh > 0:
             repo_vel = max(0.0, stock_ideal_vel - oh + adic)
         else:
-            repo_vel = ctal * 3 if uu > 0 or cub > 0 else 0.0
+            # Hallazgo auditoría 2026-09-06: en el Excel de Franco la rama "sin stock → curva × 3"
+            # está muerta (el IF exterior devuelve 0 cuando OH ≤ 0). "excel" replica eso (0);
+            # "curva3" activa la semilla que la fórmula pretendía.
+            repo_vel = (ctal * 3 if (uu > 0 or cub > 0) else 0.0) if semilla_sin_stock == "curva3" else 0.0
         repo_cub = max(0.0, si - oh)
         repo = repo_cub if regla == "cubicaje" else repo_vel if regla == "velocidad" else max(repo_cub, repo_vel)
         rows.append(dict(cod_modelo=r.cod_modelo, modelo=r.modelo, cod_variacion=r.cod_variacion, variacion=r.variacion,
