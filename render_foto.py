@@ -173,6 +173,8 @@ def _bars_rows(df: pd.DataFrame, col_n: str, col_cap: str, col_pct: str | None, 
 
 def render_sobrestock(serie: list, sems: list, etiquetas: dict, por_marca: pd.DataFrame, por_tienda: pd.DataFrame,
                       pct_total: float | None, n_combos: int, n_skus: int) -> str:
+    """por_marca / por_tienda traen columnas nombre, capital, pct. El pie de cada cuadro muestra el promedio
+    simple de los % (pedido Franco 2026-09-06: "cuánto % de capital con sobrestock tienen las tiendas en promedio")."""
     """serie = capital sobrestock por semana (mismo orden que sems). por_marca/por_tienda: columnas
     nombre, capital, pct (share del capital de esa marca/tienda que está en sobrestock)."""
     mx = max([v for v in serie if v is not None] or [1]) or 1
@@ -188,6 +190,15 @@ def render_sobrestock(serie: list, sems: list, etiquetas: dict, por_marca: pd.Da
             f'<div class="v">{_full(hoy, "soles")}</div>'
             f'<div class="s">{(f"{pct_total*100:.1f}% del capital total · " if pct_total else "")}{n_combos:,} SKU×tienda · {n_skus:,} SKUs · '
             f'Δ sem {_chip(ds, False)} · Δ mes {_chip(dm, False)}</div><div class="sb-trend">{trend}</div></div>')
-    marcas = f'<div class="sb-tbl"><h5>Por marca · S/ y % del capital de la marca</h5>{_bars_rows(por_marca, "nombre", "capital", "pct")}</div>'
-    tiendas = f'<div class="sb-tbl"><h5>Por tienda · S/ y % del capital de la tienda</h5>{_bars_rows(por_tienda, "nombre", "capital", "pct")}</div>'
+    def _pie(df):
+        if df is None or df.empty or "pct" not in df.columns:
+            return ""
+        p = pd.to_numeric(df["pct"], errors="coerce").dropna()
+        if p.empty:
+            return ""
+        return (f'<div class="sb-row" style="border-top:1px solid var(--capi-border,#E4E2EC);margin-top:6px;padding-top:6px">'
+                f'<span class="n" style="font-weight:600">Promedio ({len(p)})</span><span></span><span class="c" style="color:var(--capi-text2,#5B5F73)">min {p.min()*100:.0f}% · máx {p.max()*100:.0f}%</span>'
+                f'<span class="p" style="font-weight:700;color:#8B5A2B">{p.mean()*100:.1f}%</span></div>')
+    marcas = f'<div class="sb-tbl"><h5>Por marca · S/ y % del capital de la marca</h5>{_bars_rows(por_marca, "nombre", "capital", "pct")}{_pie(por_marca)}</div>'
+    tiendas = f'<div class="sb-tbl"><h5>Por tienda · S/ y % del capital de la tienda</h5>{_bars_rows(por_tienda, "nombre", "capital", "pct")}{_pie(por_tienda)}</div>'
     return CSS_SOB + f'<div class="sb-wrap">{hero}{marcas}{tiendas}</div>'

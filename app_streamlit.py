@@ -90,6 +90,11 @@ import comparativo_semanal
 import render_foto
 import otb_terceras
 import venta_perdida_semanal
+# Streamlit recarga el script principal pero mantiene en memoria los módulos importados; tras un deploy
+# el app puede correr con un módulo viejo (visto 2026-09-06: "sin dato" en Sobrestock). Recargar los
+# módulos propios que cambian seguido, como ya se hace con vista_planificacion.
+for _mod in (comparativo_semanal, render_foto, otb_terceras, venta_perdida_semanal, analisis_estados):
+    importlib.reload(_mod)
 import rendimiento_tienda as rend_t
 import reporte_semanal as rep_sem
 import agente_reporte as ag_rep
