@@ -16,7 +16,7 @@ def test_ultima_semana_coherente():
     assert r["prev"] == ["2026-31", "2026-32", "2026-33", "2026-34"]
     assert r["n_combos"] > 0 and r["n_tiendas"] >= 5
     q = r["quiebre"]
-    assert q["n_combos_cob4"] >= r["n_combos"] and q["semanas_promedio"] >= 1.0
+    assert q["n_combos_cob4"] == r["n_en_quiebre"] >= r["n_combos"] and q["semanas_promedio"] >= 1.0
     assert q["exclusiones"]["total"] > 0 and q["exclusiones"]["temporada_liq"] == "OI"   # sep-2026: se liquida el OI
     assert q["exclusiones"]["liquidacion_con_cd_cuenta"] > 0
     d = r["detalle"]
@@ -30,11 +30,9 @@ def test_ultima_semana_coherente():
     assert r["margen_max"] < r["neto_max"]
     d = r["detalle"]
     assert (d["uds_max"] >= d["uds_min"]).all() and (d["uds_max"] > 0).all()
-    # cada combo en quiebre cerró la semana sin stock en esa tienda
-    from snapshots_engine import tienda
-    cur = tienda.load_tienda("2026-35"); cur["sku"] = cur["sku"].astype(str)
-    con_stock = cur[cur["stock_uds"] > 0].set_index(["sku", "tienda"]).index
-    assert not d.set_index(["sku", "tienda"]).index.isin(con_stock).any()
+    # todo combo con pérdida está en quiebre (cob ≤ 4) y perdió = velocidad − venta (nunca negativo)
+    assert (d["cobertura_sem"] <= 4).all() and (d["uds_max"] <= d["vel_max"] + 1e-9).all()
+    assert d["cerro_en_cero"].sum() <= len(d)
     assert r["por_tienda"]["neto_max"].sum() == pytest.approx(r["neto_max"])
 
 

@@ -161,15 +161,21 @@ def venta_perdida_semana(semana: str | None = None, n_prev: int = 4, min_obs: in
         "dist_semanas": (en_q["semanas_en_quiebre"].clip(upper=4).value_counts().sort_index().to_dict() if len(en_q) else {}),
         "exclusiones": excl_conteo,
     }
-    q = m[m["stock_uds"] <= 0].copy()
+    # Regla Franco 2026-09-06 (segunda vuelta): TODO lo que está en quiebre (cob ≤ 4 sem en la tienda)
+    # entra al cálculo, no solo lo que cerró en 0. La pérdida es lo que la tienda dejó de vender
+    # respecto a su velocidad: max(0, velocidad − venta real de la semana). Si aun con poco stock
+    # vendió su velocidad, esa semana no pierde plata (pero sigue contando como semana en quiebre).
+    q = en_q.copy()
+    q["cerro_en_cero"] = q["stock_uds"] <= 0
     if q.empty:
         return {"semana": semana, "prev": prev, "n_combos": 0, "detalle": pd.DataFrame(), "por_tienda": pd.DataFrame(),
                 "bruto_min": 0.0, "bruto_max": 0.0, "neto_min": 0.0, "neto_max": 0.0, "margen_min": 0.0, "margen_max": 0.0,
                 "quiebre": quiebre_resumen, "en_quiebre": en_q}
     q["vel_min"] = q[["vel_simple", "vel_reciente"]].min(axis=1)
     q["vel_max"] = q[["vel_simple", "vel_reciente"]].max(axis=1)
-    q["uds_min"] = (q["vel_min"] - q["vta_uds_sem"]).clip(lower=0)
-    q["uds_max"] = (q["vel_max"] - q["vta_uds_sem"]).clip(lower=0)
+    _vta_pos = q["vta_uds_sem"].clip(lower=0)     # devoluciones (venta negativa) no inflan la pérdida
+    q["uds_min"] = (q["vel_min"] - _vta_pos).clip(lower=0)
+    q["uds_max"] = (q["vel_max"] - _vta_pos).clip(lower=0)
     # SKUs en liquidación: la venta perdida total del SKU (todas las tiendas) se topa con el stock del CD,
     # repartido entre tiendas en proporción a su velocidad (no hay reorden: solo se pierde lo que se pudo mandar)
     q["liquidacion"] = q["sku"].isin(set(liq_cd))
@@ -179,6 +185,7 @@ def venta_perdida_semana(semana: str | None = None, n_prev: int = 4, min_obs: in
             cap = q["sku"].map(liq_cd).astype(float)
             factor = np.where((q["liquidacion"]) & (tot_sku > cap), cap / tot_sku.replace(0, np.nan), 1.0)
             q[col] = q[col] * pd.Series(factor, index=q.index).fillna(1.0)
+        q["uds_min"] = np.minimum(q["uds_min"], q["uds_max"])   # el tope por CD no puede invertir la banda
     pm = _precio_margen(semana)
     q = q.merge(pm, on="sku", how="left")
     q["precio"] = q["precio"].fillna(0)
@@ -190,16 +197,18 @@ def venta_perdida_semana(semana: str | None = None, n_prev: int = 4, min_obs: in
     q["margen_min"], q["margen_max"] = q["neto_min"] * q["margen"], q["neto_max"] * q["margen"]
     # evitable = hay stock en el CD para despachar o ya viene en camino a esa tienda
     q["evitable"] = (q["on_order"] > 0) | (q["stock_cd"].fillna(0) > 0)
+    n_en_quiebre = int(len(q))
     q = q[q["uds_max"] > 0]
-    por_tienda = (q.groupby("tienda").agg(combos=("sku", "size"), uds_min=("uds_min", "sum"), uds_max=("uds_max", "sum"),
+    por_tienda = (q.groupby("tienda").agg(combos=("sku", "size"), en_cero=("cerro_en_cero", "sum"), sem_quiebre_prom=("semanas_en_quiebre", "mean"),
+                                          uds_min=("uds_min", "sum"), uds_max=("uds_max", "sum"),
                                           neto_min=("neto_min", "sum"), neto_max=("neto_max", "sum"),
                                           margen_min=("margen_min", "sum"), margen_max=("margen_max", "sum"),
                                           evitables=("evitable", "sum"), neto_evitable=("neto_max", lambda x: x[q.loc[x.index, "evitable"]].sum()))
                     .reset_index().sort_values("neto_max", ascending=False))
-    cols = ["tienda", "sku", "descripcion", "marca", "linea", "vel_min", "vel_max", "vta_uds_sem", "uds_min", "uds_max",
+    cols = ["tienda", "sku", "descripcion", "marca", "linea", "semanas_en_quiebre", "cobertura_sem", "stock_uds", "cerro_en_cero", "vel_min", "vel_max", "vta_uds_sem", "uds_min", "uds_max",
             "precio", "margen", "neto_min", "neto_max", "margen_min", "margen_max", "stock_cd", "on_order", "evitable", "liquidacion"]
     det = q[[c for c in cols if c in q.columns]].sort_values("neto_max", ascending=False).reset_index(drop=True)
-    return {"semana": semana, "prev": prev, "n_combos": int(len(det)), "n_skus": int(det["sku"].nunique()),
+    return {"semana": semana, "prev": prev, "n_combos": int(len(det)), "n_en_quiebre": n_en_quiebre, "n_skus": int(det["sku"].nunique()),
             "n_tiendas": int(det["tienda"].nunique()), "detalle": det, "por_tienda": por_tienda,
             "bruto_min": float(q["bruto_min"].sum()), "bruto_max": float(q["bruto_max"].sum()),
             "neto_min": float(q["neto_min"].sum()), "neto_max": float(q["neto_max"].sum()),

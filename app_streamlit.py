@@ -1961,7 +1961,7 @@ if nav_page == "🏠 Dashboard":
                     <div style="background:#FEF2F2; border-radius:12px; padding:16px 20px; border-left:4px solid #DC2626;">
                         <div style="font-size:0.75rem; color:var(--capi-text2); font-weight:500;">Venta perdida NETA de la semana</div>
                         <div style="font-size:1.6rem; font-weight:700; color:#DC2626;">S/ {_vps['neto_min']:,.0f} – S/ {_vps['neto_max']:,.0f}</div>
-                        <div style="font-size:0.7rem; color:var(--capi-text2);">{_vps['n_combos']:,} SKU×tienda que cerraron en 0 y vendían ahí · {_vps['n_tiendas']} tiendas · bruto S/ {_vps['bruto_min']:,.0f} – {_vps['bruto_max']:,.0f}</div>
+                        <div style="font-size:0.7rem; color:var(--capi-text2);">{_vps['n_combos']:,} de {_vps.get('n_en_quiebre', _vps['n_combos']):,} SKU×tienda en quiebre vendieron menos que su velocidad · {_vps['n_tiendas']} tiendas · bruto S/ {_vps['bruto_min']:,.0f} – {_vps['bruto_max']:,.0f}</div>
                     </div>""", unsafe_allow_html=True)
                 with _w2:
                     st.markdown(f"""
@@ -1992,8 +1992,19 @@ if nav_page == "🏠 Dashboard":
                            f"Fuera del cálculo: más de 6 meses ({_exc.get('obsoleto_6m', 0):,} SKUs) y liquidación ({_exc.get('temporada_liq', '?')} o dscto ≥40%) "
                            f"sin stock relevante en CD ({_exc.get('liquidacion_sin_cd', 0):,}; umbral {_exc.get('umbral_cd_pct', 0.1)*100:.0f}% del stock total y ≥{_exc.get('min_cd_uds', 6)} uds). "
                            f"La liquidación que SÍ tiene stock en CD cuenta ({_exc.get('liquidacion_con_cd_cuenta', 0):,} SKUs) y su venta perdida se topa con ese stock. "
-                           "La plata se pierde solo en las semanas en que la tienda cerró sin stock.")
-                with st.expander("Ver por tienda, tendencia de 4 semanas y detalle SKU × tienda", expanded=False):
+                           "Todo lo que está en quiebre entra al cálculo; la plata perdida es lo que la tienda dejó de vender respecto a su velocidad.")
+                st.markdown("**Venta perdida por tienda** (todas las SKU × tienda en quiebre; ordenado por lo que más pierde)")
+                _pt_top = _pt.head(12).rename(columns={"tienda": "Tienda", "combos": "SKU×tienda con pérdida", "en_cero": "Cerraron en 0",
+                                                        "sem_quiebre_prom": "Sem en quiebre (prom)", "uds_max": "Uds perdidas máx",
+                                                        "neto_min": "Neto mín S/", "neto_max": "Neto máx S/", "margen_max": "Margen máx S/",
+                                                        "evitables": "Evitables", "neto_evitable": "Neto evitable S/"})
+                _pt_cols = [c for c in ["Tienda", "SKU×tienda con pérdida", "Cerraron en 0", "Sem en quiebre (prom)", "Uds perdidas máx", "Neto mín S/", "Neto máx S/",
+                                        "Margen máx S/", "Evitables", "Neto evitable S/"] if c in _pt_top.columns]
+                st.dataframe(_pt_top[_pt_cols].style.format({"SKU×tienda con pérdida": "{:,.0f}", "Cerraron en 0": "{:,.0f}", "Sem en quiebre (prom)": "{:.1f}",
+                                                             "Uds perdidas máx": "{:,.0f}", "Neto mín S/": "S/ {:,.0f}", "Neto máx S/": "S/ {:,.0f}",
+                                                             "Margen máx S/": "S/ {:,.0f}", "Evitables": "{:,.0f}", "Neto evitable S/": "S/ {:,.0f}"}, na_rep="—"),
+                             use_container_width=True, hide_index=True, height=min(60 + 35 * len(_pt_top), 480))
+                with st.expander("Ver todas las tiendas, tendencia de 4 semanas y detalle SKU × tienda", expanded=False):
                     try:
                         _ser = venta_perdida_semanal.serie_semanas(5)
                         if len(_ser) >= 2:
@@ -2028,7 +2039,7 @@ if nav_page == "🏠 Dashboard":
                                      .head(400).style.format({"Vel/sem": "{:.1f}", "Cob (sem)": "{:.1f}", "Stock": "{:,.0f}", "Vendió": "{:,.0f}", "On order": "{:,.0f}"}, na_rep="—"),
                                      use_container_width=True, hide_index=True, height=340)
                     st.caption("Velocidad = venta semanal del SKU en esa tienda en las últimas 4 semanas con stock (mín. 2). "
-                               "Perdió = velocidad − lo que alcanzó a vender antes de quebrar. Precio realizado sin IGV y margen contable del SKU. "
+                               "Entra todo lo que está en quiebre (cob ≤ 4 sem); perdió = velocidad − lo que vendió esa semana (0 si vendió su velocidad). Precio realizado sin IGV y margen contable del SKU. "
                                "Neto = bruto × (1 − 30% sustitución).")
                 st.markdown("<h5 style='margin:14px 0 6px 0;'>Acumulado desde abril (nivel cadena: stock 0 en toda la cadena)</h5>", unsafe_allow_html=True)
 
