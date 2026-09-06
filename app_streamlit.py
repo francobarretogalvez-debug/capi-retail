@@ -1601,16 +1601,24 @@ if nav_page == "🏠 Dashboard":
             values=estado_counts["Capital"],
             hole=0.55,
             marker=dict(colors=[_estado_color_map.get(e, "#CBD5E1") for e in estado_counts["Estado"]]),
+            # Feedback Franco 2026-09-06: las etiquetas de afuera salían cortadas. Ahora van ADENTRO,
+            # horizontales, solo en porciones ≥6% del capital; las chicas se nombran en la leyenda y el hover.
             textinfo="label+percent",
+            textposition=["inside" if (_c / max(float(estado_counts["Capital"].sum()), 1) >= 0.06) else "none"
+                          for _c in estado_counts["Capital"]],
+            insidetextorientation="horizontal",
             textfont=dict(size=11),
             customdata=estado_counts[["Cantidad"]].values,
             hovertemplate="<b>%{label}</b><br>Capital: S/ %{value:,.0f}<br>%{percent} del capital<br>%{customdata[0]:,} combos SKU×tienda<extra></extra>",
+            sort=False,
         )])
         fig_donut.update_layout(
-            **_plotly_layout,
+            **{k: v for k, v in _plotly_layout.items() if k != "margin"},
             title=dict(text=_donut_title, font=dict(size=14, color=TH_TEXT_PY)),
-            showlegend=False,
-            height=380,
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="top", y=-0.02, xanchor="center", x=0.5, font=dict(size=10)),
+            margin=dict(l=10, r=10, t=40, b=10),
+            height=430,
         )
         total_donut = len(_df_donut)
         _cap_donut = float(_df_donut["stock_valor_costo"].sum()) if not _df_donut.empty else 0.0
