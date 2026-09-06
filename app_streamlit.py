@@ -2174,7 +2174,7 @@ if nav_page == "🏠 Dashboard":
             _cards = [
                 ("Capital inmovilizado", "capital_inmovilizado", "soles"),
                 ("% del capital inmovilizado", "pct_inmovilizado", "pct"),
-                ("Capital obsoleto (MUERTO)", "capital_obsoleto", "soles"),
+                ("Capital obsoleto (>26 sem)", "capital_obsoleto", "soles"),
                 ("SKUs en quiebre", "skus_quiebre", "int"),
                 ("% SKUs con stock sin venta", "pct_venta_cero", "pct"),
                 ("Cobertura (semanas)", "cobertura_sem", "num1"),
@@ -2213,7 +2213,7 @@ if nav_page == "🏠 Dashboard":
                     _dmv = _dm[1] if _dm else float("nan")
                     _clr = "#6B7280" if pd.isna(_dmv) else ("#10b981" if _dmv < 0 else "#ef4444")
                     _col.markdown(f'<div style="font-size:0.72rem; color:{_clr}; margin-top:-8px;">mes: {_fmtd(_dm, _f)}</div>', unsafe_allow_html=True)
-            st.caption("Fila 1: dónde está el problema hoy. Fila 2: qué viene (por entrar a obsoleto = 22–26 semanas sin venta en 4 semanas; "
+            st.caption("Fila 1: dónde está el problema hoy. Fila 2: qué viene (por entrar a obsoleto = mercadería de 22–26 semanas que cruza las 26 en 4 semanas; "
                        "lanzamientos sin venta = NUEVO SIN VENTA) y dónde está la plata (en CD sin bajar al piso, o ya en liquidación). "
                        "On order solo existe en cortes desde el 30-ago.")
 
@@ -2231,7 +2231,7 @@ if nav_page == "🏠 Dashboard":
                     st.dataframe(_t_disp, use_container_width=True, height=440)
                     st.caption("Venta, contribución y margen van como contexto: semana a semana los mueven los eventos de precio, "
                                "no las acciones sobre el inventario. Capital inmovilizado = DORMIDO + ESTANCADO + SOBRESTOCK + LIQUIDAR + MUERTO. "
-                               "Obsoleto = MUERTO por taxonomía (definición provisional). Cuando haya más cortes, el comparativo mensual pasa a periodo comercial Ripley.")
+                               "Obsoleto = más de 26 semanas en tienda (definición por antigüedad, provisional hasta que Franco elija). Cuando haya más cortes, el comparativo mensual pasa a periodo comercial Ripley.")
                 try:
                     _rp = comparativo_semanal.resumen_pareto(_act)
                     if _rp:

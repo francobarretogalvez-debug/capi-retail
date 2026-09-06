@@ -27,7 +27,7 @@ from snapshots_engine import api as _api
 from snapshots_engine.api import ESTADOS_EXCESO
 from snapshots_engine.storage import load_snapshot, list_available_weeks
 
-ESTADOS_OBSOLETO = ["MUERTO"]
+ESTADOS_OBSOLETO = ["MUERTO"]   # (taxonomía) — el panel usa la definición por antigüedad, ver abajo
 
 # (clave, etiqueta, formato, "mayor es mejor")
 KPIS = [
@@ -38,12 +38,12 @@ KPIS = [
     ("capital_total",      "Capital total S/ (costo)",     "soles", None),
     ("capital_inmovilizado", "Capital inmovilizado S/",    "soles", False),
     ("pct_inmovilizado",   "% capital inmovilizado",       "pct",   False),
-    ("capital_obsoleto",   "Capital obsoleto S/ (MUERTO)", "soles", False),
+    ("capital_obsoleto",   "Capital obsoleto S/ (>26 sem en tienda)", "soles", False),
     ("cobertura_sem",      "Cobertura (semanas)",          "num1",  False),
     ("skus_quiebre",       "SKUs en quiebre",              "int",   False),
     ("pct_venta_cero",     "% SKUs con stock sin venta",   "pct",   False),
     # ── Segunda fila (revisión Franco 2026-09-05): ¿qué viene y dónde está la plata? ──
-    ("capital_por_entrar", "Por entrar a obsoleto en 4 sem S/", "soles", False),  # indicador adelantado
+    ("capital_por_entrar", "Por entrar a obsoleto en 4 sem S/ (22–26 sem)", "soles", False),  # indicador adelantado
     ("capital_nuevo_sin_venta", "Lanzamientos sin venta S/ (NUEVO SIN VENTA)", "soles", False),
     ("pct_capital_cd",     "% del capital en CD (no en piso)", "pct",   False),
     ("capital_liquidacion", "Capital con dscto ≥40% S/ (liquidación)", "soles", False),
@@ -88,7 +88,10 @@ def kpis_semana(semana: str) -> dict:
     venta_total_sem = float(uds_sem.sum())
     edad = pd.to_numeric(d["edad_semanas"], errors="coerce") if "edad_semanas" in d.columns else pd.Series(np.nan, index=d.index)
     vta4 = sum(_col(d, f"vta_u_sem_{i}ant") for i in (1, 2, 3, 4))
-    por_entrar = (edad > UMBRAL_OBSOLETO_SEM - 4) & (edad <= UMBRAL_OBSOLETO_SEM) & (vta4 == 0) & con_stock
+    # Definición por antigüedad (la de la vista Gestión por Antigüedad: >6 meses en tienda),
+    # provisional hasta que Franco elija entre "rango" y "MUERTO". Misma regla para obsoleto y por entrar.
+    obsoleto_edad = (edad > UMBRAL_OBSOLETO_SEM) & con_stock
+    por_entrar = (edad > UMBRAL_OBSOLETO_SEM - 4) & (edad <= UMBRAL_OBSOLETO_SEM) & con_stock
     dsc = _col(d, "pct_descuento")
     dsc = dsc / 100 if dsc.max() > 1.5 else dsc
     cd_uds = _col(d, "stock_cd")
@@ -104,7 +107,8 @@ def kpis_semana(semana: str) -> dict:
         "capital_total": float(capital.sum()),
         "capital_inmovilizado": float(capital[estado.isin(ESTADOS_EXCESO)].sum()),
         "pct_inmovilizado": (float(capital[estado.isin(ESTADOS_EXCESO)].sum() / capital.sum()) if capital.sum() else np.nan),
-        "capital_obsoleto": float(capital[estado.isin(ESTADOS_OBSOLETO)].sum()),
+        "capital_obsoleto": float(capital[obsoleto_edad].sum()),
+        "capital_muerto": float(capital[estado.isin(ESTADOS_OBSOLETO)].sum()),
         "cobertura_sem": (float(stock.sum() / venta_total_sem) if venta_total_sem else np.nan),
         "skus_quiebre": int((estado == "QUIEBRE").sum()),
         "pct_venta_cero": (float(((uds_sem == 0) & con_stock).sum() / con_stock.sum()) if con_stock.sum() else np.nan),
