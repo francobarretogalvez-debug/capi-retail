@@ -43,6 +43,7 @@ KPIS = [
     ("cobertura_sem",      "Cobertura (semanas)",          "num1",  False),
     ("skus_quiebre",       "SKUs en quiebre",              "int",   False),
     ("pct_venta_cero",     "% SKUs con stock sin venta",   "pct",   False),
+    ("capital_venta_cero", "Capital con venta cero la semana S/", "soles", False),
     # ── Segunda fila (revisión Franco 2026-09-05): ¿qué viene y dónde está la plata? ──
     ("capital_por_entrar", "Por entrar a pre-obsoleto en 4 sem S/", "soles", False),  # indicador adelantado
     ("capital_por_pasar",  "Por pasar a obsoleto en 4 sem S/", "soles", False),
@@ -122,6 +123,7 @@ def kpis_semana(semana: str) -> dict:
         "cobertura_sem": (float(stock.sum() / venta_total_sem) if venta_total_sem else np.nan),
         "skus_quiebre": int((estado == "QUIEBRE").sum()),
         "pct_venta_cero": (float(((uds_sem == 0) & con_stock).sum() / con_stock.sum()) if con_stock.sum() else np.nan),
+        "capital_venta_cero": float(capital[(uds_sem == 0) & con_stock].sum()),
         "capital_por_entrar": float(capital[por_entrar].sum()),
         "capital_por_pasar": float(capital[por_pasar].sum()),
         "capital_nuevo_sin_venta": float(capital[estado == "NUEVO SIN VENTA"].sum()),

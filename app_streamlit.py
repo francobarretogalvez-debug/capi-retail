@@ -87,6 +87,7 @@ import reportes_marcas
 import acciones_log
 import analisis_estados
 import comparativo_semanal
+import render_foto
 import otb_terceras
 import venta_perdida_semanal
 import rendimiento_tienda as rend_t
@@ -2296,57 +2297,20 @@ if nav_page == "🏠 Dashboard":
             st.markdown(f'<div class="section-header"><h3>📈 Foto del inventario: ¿se mueve?</h3><span class="live-badge">SEMANAL · MENSUAL</span></div>', unsafe_allow_html=True)
             _act, _prev, _mes = _fa["actual"], _fa["semana_prev"], _fa.get("semana_mes")
             _et = lambda w: analisis_estados.etiqueta_semana(w, corta=True) if w else "—"
+            _cs_et_all = lambda ws: {w: analisis_estados.etiqueta_semana(w, corta=True) for w in ws}
             st.caption(f"Hoy: **{_act}** ({_et(_act)}) · hace 1 semana: {_prev} ({_et(_prev)})"
                        + (f" · hace ~1 mes: {_mes} ({_et(_mes)})" if _mes else " · aún no hay snapshot de hace un mes")
                        + ". Verde = la foto mejoró. Fuente: snapshots semanales a nivel cadena.")
-            _k = _fa["kpis"][_act]
-            _cards = [
-                ("Capital inmovilizado", "capital_inmovilizado", "soles"),
-                ("% del capital inmovilizado", "pct_inmovilizado", "pct"),
-                ("Pre-obsoleto (6–9 meses)", "capital_preobsoleto", "soles"),
-                ("Obsoleto (9 meses a más)", "capital_obsoleto", "soles"),
-                ("SKUs en quiebre", "skus_quiebre", "int"),
-                ("% SKUs con stock sin venta", "pct_venta_cero", "pct"),
-                ("Cobertura (semanas)", "cobertura_sem", "num1"),
-            ]
-            def _fmtv(v, f):
-                if pd.isna(v): return "—"
-                return f"S/ {v:,.0f}" if f == "soles" else f"{v*100:.1f}%" if f == "pct" else f"{v:.1f}" if f == "num1" else f"{v:,.0f}"
-            def _fmtd(d, f):
-                if not d or pd.isna(d[1]): return "—"
-                return f"{d[1]:+.1f} pp" if f == "pct" else f"{d[1]:+.1f}%"
-            _cols = st.columns(len(_cards))
-            for _col, (_lab, _key, _f) in zip(_cols, _cards):
-                _ds = _fa["delta_sem"].get(_key); _dm = _fa["delta_mes"].get(_key)
-                _col.metric(_lab, _fmtv(_k.get(_key), _f), _fmtd(_ds, _f) + " sem", delta_color="inverse",
-                            help=f"Δ semanal vs {_prev}" + (f" · Δ mensual vs {_mes}: {_fmtd(_dm, _f)}" if _mes else ""))
-                if _mes:
-                    _dmv = _dm[1] if _dm else float("nan")
-                    _clr = "#6B7280" if pd.isna(_dmv) else ("#10b981" if _dmv < 0 else "#ef4444")
-                    _col.markdown(f'<div style="font-size:0.72rem; color:{_clr}; margin-top:-8px;">mes: {_fmtd(_dm, _f)}</div>', unsafe_allow_html=True)
-
-            # Segunda fila (revisión Franco 2026-09-05): ¿qué viene y dónde está la plata?
-            _cards2 = [
-                ("Entra a pre-obsoleto en 4 sem", "capital_por_entrar", "soles"),
-                ("Pasa a obsoleto en 4 sem", "capital_por_pasar", "soles"),
-                ("Lanzamientos sin venta", "capital_nuevo_sin_venta", "soles"),
-                ("% del capital en CD", "pct_capital_cd", "pct"),
-                ("Capital en liquidación (≥40%)", "capital_liquidacion", "soles"),
-                ("On order (uds)", "on_order_uds", "int"),
-            ]
-            _cols2 = st.columns(len(_cards2))
-            for _col, (_lab, _key, _f) in zip(_cols2, _cards2):
-                _ds = _fa["delta_sem"].get(_key); _dm = _fa["delta_mes"].get(_key)
-                _col.metric(_lab, _fmtv(_k.get(_key), _f), _fmtd(_ds, _f) + " sem",
-                            delta_color=("off" if _key == "on_order_uds" else "inverse"),
-                            help=f"Δ semanal vs {_prev}" + (f" · Δ mensual vs {_mes}: {_fmtd(_dm, _f)}" if _mes else ""))
-                if _mes and _key != "on_order_uds":
-                    _dmv = _dm[1] if _dm else float("nan")
-                    _clr = "#6B7280" if pd.isna(_dmv) else ("#10b981" if _dmv < 0 else "#ef4444")
-                    _col.markdown(f'<div style="font-size:0.72rem; color:{_clr}; margin-top:-8px;">mes: {_fmtd(_dm, _f)}</div>', unsafe_allow_html=True)
-            st.caption("Fila 1: dónde está el problema hoy. Fila 2: qué viene (entra a pre-obsoleto = llega a 6 meses en 4 semanas; pasa a obsoleto = llega a 9 meses en 4 semanas; "
-                       "lanzamientos sin venta = NUEVO SIN VENTA) y dónde está la plata (en CD sin bajar al piso, o ya en liquidación). "
-                       "On order solo existe en cortes desde el 30-ago.")
+            # Propuesta A (Franco 2026-09-06): matriz de barras por semana, cabecera compartida, Δ en una fila
+            _cs5 = comparativo_semanal.panel_4_semanas()
+            _sems5 = _cs5.get("semanas", [])
+            if len(_sems5) >= 2:
+                _kp5 = {w: comparativo_semanal.kpis_semana(w) for w in _sems5}
+                st.markdown(render_foto.render_matriz(comparativo_semanal.KPIS, _kp5, _sems5, _cs_et_all(_sems5), _prev, _mes),
+                            unsafe_allow_html=True)
+            st.caption("Cada fila tiene su propia escala (la barra más alta = el máximo de ese KPI en las 5 semanas); pasa el mouse por una barra para el número completo. "
+                       "Capital inmovilizado = DORMIDO + ESTANCADO + SOBRESTOCK + LIQUIDAR + MUERTO (por cobertura y antigüedad, no por venta cero). "
+                       "Capital con venta cero = SKUs con stock que no vendieron esa semana. Pre-obsoleto 6–9 meses, obsoleto ≥9. On order solo desde el 30-ago.")
 
             with st.expander("Ver la serie completa (stock y venta) de las últimas 5 semanas", expanded=False):
                 _cs = comparativo_semanal.panel_4_semanas()
