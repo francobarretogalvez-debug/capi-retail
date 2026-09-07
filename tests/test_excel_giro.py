@@ -47,3 +47,22 @@ def test_matriz_giro_no_supera_stock_cd():
     assert int(piv["TOTAL"].sum()) == int(rep["desde_cd"].sum())
     assert (piv["TOTAL"] > 0).all()
     assert "PENDIENTE (sin CD)" in piv.columns
+
+
+def test_reparto_fair_share_misma_cobertura():
+    """Fair share: con CD insuficiente, las tiendas salen con cobertura post pareja y la que más vende recibe más."""
+    import pandas as pd
+    import motor_v2
+    df = pd.DataFrame({"sku": [1, 1, 1], "tienda": ["Jockey", "Plaza Norte", "Ica"],
+                       "prom_vta_sem": [30.0, 10.0, 5.0], "stock_actual": [60, 20, 40],
+                       "a_reponer": [300, 100, 20], "stock_cd": [90, 90, 90]})
+    d = motor_v2._reparto_fair_share(df, 12)
+    assert int(d.sum()) == 90                                   # usa todo el CD, no lo supera
+    cob = (df["stock_actual"] + d) / df["prom_vta_sem"]
+    assert d["Jockey" == df["tienda"]].iloc[0] > d["Plaza Norte" == df["tienda"]].iloc[0]   # la que más vende recibe más
+    recibio = d > 0
+    assert cob[recibio].max() - cob[recibio].min() <= 1.0       # las que reciben salen parejas (±1 sem por enteros)
+    assert (cob[~recibio] >= cob[recibio].max() - 1.0).all()    # la que no recibe ya estaba por encima del nivel
+    # CD suficiente para todos → cada una su necesidad
+    df2 = df.assign(stock_cd=1000)
+    assert list(motor_v2._reparto_fair_share(df2, 12)) == [300, 100, 20]

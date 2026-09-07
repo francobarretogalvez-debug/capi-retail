@@ -62,6 +62,7 @@ DEFAULT_PARAMS = {
     "horizonte_transf_sem": 8,    # semanas para proyectar venta en destino
     "uds_min_trans":     3,    # mínimo de unidades para generar transferencia
     "cob_target":       12,    # semanas objetivo post-reposición (centro del rango ÓPTIMO)
+    "reparto_cd":       "fair_share",  # reparto del CD entre tiendas: fair_share (misma cobertura post) | prioridad (legacy)
     # — Alertas para tiendas (reporte accionable por personal de piso) —
     "alertas_tienda_cob_min":  16,   # cobertura mín (sem) para disparar alerta (≥ sobrestock)
     "alertas_tienda_edad_min":  2,   # edad mín (sem) — leadtime de llegada/exhibición
@@ -806,15 +807,67 @@ def build_reposiciones(df_cobertura, params):
             ['sku', '_urg', 'cobertura_actual'],
             ascending=[True, False, True],
         )
-        _ya_asignado = df_rep.groupby('sku')['a_reponer'].cumsum() - df_rep['a_reponer']
-        _disponible_cd = (df_rep['stock_cd'] - _ya_asignado).clip(lower=0)
-        df_rep['desde_cd'] = np.minimum(df_rep['a_reponer'], _disponible_cd).astype(int)
+        if params.get('reparto_cd', 'fair_share') == 'fair_share':
+            # Decisión Franco 06-sep-2026 (backtest sem 31-35, tienda.parquet): FAIR SHARE.
+            # Todas las tiendas del SKU salen con la MISMA cobertura post (nivel L en semanas):
+            # cada una recibe max(0, L·vel − stock), topado a su necesidad; L sube hasta agotar
+            # el CD o llegar al target. Premia venta y cubre quiebre en una sola regla.
+            # Backtest vs regla anterior (urgencia → menor cobertura, llenado completo):
+            # venta perdida a 2 sem −44 %, a 4 sem −34 %; tiendas atendidas por SKU 2.0 → 3.1.
+            df_rep['desde_cd'] = _reparto_fair_share(df_rep, cob_target)
+        else:
+            # Regla anterior: llenado completo por prioridad (urgencia → menor cobertura)
+            _ya_asignado = df_rep.groupby('sku')['a_reponer'].cumsum() - df_rep['a_reponer']
+            _disponible_cd = (df_rep['stock_cd'] - _ya_asignado).clip(lower=0)
+            df_rep['desde_cd'] = np.minimum(df_rep['a_reponer'], _disponible_cd).astype(int)
         df_rep['pendiente'] = (df_rep['a_reponer'] - df_rep['desde_cd']).astype(int)
         df_rep = df_rep.drop(columns=['_urg'])
 
         df_rep = df_rep.sort_values('cobertura_actual').reset_index(drop=True)
     return df_rep
 
+
+
+def _reparto_fair_share(df_rep, cob_target):
+    """Reparte el stock del CD (único por SKU) entre las tiendas con necesidad de modo que todas
+    salgan con la misma cobertura post. Devuelve la Serie `desde_cd` alineada a df_rep.
+    Unidades enteras: se asigna floor(L·vel − stock) y el resto de a 1 por menor cobertura."""
+    out = pd.Series(0, index=df_rep.index, dtype=int)
+    for sku, g in df_rep.groupby('sku', sort=False):
+        c = int(max(0, g['stock_cd'].iloc[0]))
+        if c <= 0:
+            continue
+        vel = g['prom_vta_sem'].clip(lower=0).to_numpy(dtype=float)
+        stk = g['stock_actual'].clip(lower=0).to_numpy(dtype=float)
+        need = g['a_reponer'].clip(lower=0).to_numpy(dtype=float)
+        if need.sum() <= c:                       # alcanza para todos → nadie queda corto
+            out.loc[g.index] = need.astype(int)
+            continue
+        def _req(L):
+            return np.minimum(np.maximum(0.0, L * vel - stk), need).sum()
+        lo, hi = 0.0, float(cob_target)
+        if _req(hi) <= c:
+            L = hi
+        else:
+            for _ in range(40):
+                mid = (lo + hi) / 2
+                if _req(mid) <= c:
+                    lo = mid
+                else:
+                    hi = mid
+            L = lo
+        asig = np.minimum(np.floor(np.maximum(0.0, L * vel - stk)), need).astype(int)
+        rem = c - int(asig.sum())
+        if rem > 0:                               # unidades sueltas: a las de menor cobertura post
+            cob_post = np.where(vel > 0, (stk + asig) / np.where(vel > 0, vel, 1), np.inf)
+            for k in np.argsort(cob_post, kind='stable'):
+                if rem <= 0:
+                    break
+                extra = int(min(need[k] - asig[k], rem))
+                asig[k] += extra
+                rem -= extra
+        out.loc[g.index] = asig
+    return out
 
 # ─────────────────────────────────────────────────────────────
 #  3. TRANSFERENCIAS (sin matriz logística)
