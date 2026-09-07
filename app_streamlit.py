@@ -3188,7 +3188,7 @@ elif nav_page == "📦 Reposición":
         st.dataframe(_rp_disp.style.format({'Vta/sem': '{:.1f}', 'Cob (sem)': '{:.1f}', 'Cob post': '{:.1f}', 'Dscto': '{:.0%}'}, na_rep="—"),
                      use_container_width=True, hide_index=True, height=440)
         # ── Matriz SKU×Tienda (rescatada de la Reposición clásica, C3) ──
-        with st.expander("🗺️ Matriz SKU × Tienda (unidades a reponer)", expanded=False):
+        with st.expander("🗺️ Matriz SKU × Tienda (unidades a reponer) — formato de giro", expanded=True):
             if not df_rep_pivot.empty and 'sku' in df_rep_pivot.columns:
                 _mx = df_rep_pivot[df_rep_pivot['sku'].isin(_rp_v['sku'])]
                 if not _mx.empty:
@@ -3204,13 +3204,21 @@ elif nav_page == "📦 Reposición":
             else:
                 st.info("La matriz de reposición no está disponible con la base actual.")
 
+        # Excel de giro — formato oficial (Franco, 06-sep-2026): hoja 1 matriz SKU × tienda,
+        # hoja 2 lista de sustento con el porqué. Es lo que reciben los inventories.
         _rp_buf = io.BytesIO()
+        _mx_dl = (df_rep_pivot[df_rep_pivot['sku'].isin(_rp_v['sku'])]
+                  if not df_rep_pivot.empty and 'sku' in df_rep_pivot.columns else pd.DataFrame())
         with pd.ExcelWriter(_rp_buf, engine='openpyxl') as _w:
-            _rp_v[_rp_cols].to_excel(_w, sheet_name=f'Reposicion {_uni_rp}', index=False)
+            if not _mx_dl.empty:
+                vistas_excel.hoja_giro(_w, _mx_dl, _rp_disp)
+            else:
+                _rp_disp.to_excel(_w, sheet_name='Sustento', index=False)
         _rp_buf.seek(0)
-        st.download_button(f"📥 Descargar reposición {_uni_rp.lower()} (.xlsx)", data=_rp_buf.getvalue(),
-                           file_name=f"Capi_Reposicion_{_uni_rp}.xlsx",
+        st.download_button(f"📥 Excel de giro {_uni_rp.lower()} — matriz SKU × tienda (.xlsx)", data=_rp_buf.getvalue(),
+                           file_name=f"Capi_Giro_{_uni_rp}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_repo_uni")
+        st.caption("Hoja **Giro**: una fila por SKU, una columna por tienda, TOTAL al final. Hoja **Sustento**: el porqué de cada línea (stock, venta, cobertura, CD).")
 
 
 elif nav_page == "🔄 Transferencias":

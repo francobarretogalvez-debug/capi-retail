@@ -694,3 +694,39 @@ def hoja_venta_cero(writer, df_vc: pd.DataFrame, hoja: str = "Venta Cero x Tiend
                         "(concentran el 80% del capital sin venta de tu tienda)")
     out = df_vc[[c for c in COLS_VENTA_CERO if c in df_vc.columns]].rename(columns=REN_VENTA_CERO)
     return _tabla_con_titulo(writer, hoja, titulo, out, FMT_VENTA_CERO, anchos={"Producto": 34})
+
+# ── Excel de giro (formato oficial de Franco, 06-sep-2026): matriz SKU × tienda ─────────
+_META_GIRO = ("sku", "nombre", "categoria", "marca", "stock_cd", "TOTAL", "CD", "Total Repo")
+
+
+def hoja_giro(writer, matriz: pd.DataFrame, sustento: pd.DataFrame | None = None,
+              nombre_giro: str = "Giro", nombre_sustento: str = "Sustento") -> None:
+    """Escribe el Excel que se manda a los inventories: hoja 1 = matriz (una fila por SKU,
+    una columna por tienda con las uds a reponer, TOTAL al final), encabezado en la fila 1,
+    autofiltro y panel congelado; hoja 2 = lista SKU × tienda con el porqué (opcional)."""
+    from openpyxl.utils import get_column_letter
+    m = matriz.copy()
+    tiendas = [c for c in m.columns if c not in _META_GIRO]
+    if "TOTAL" not in m.columns and tiendas:
+        m["TOTAL"] = m[tiendas].sum(axis=1)
+    front = [c for c in ("sku", "nombre", "categoria", "marca", "stock_cd") if c in m.columns]
+    m = m[front + tiendas + (["TOTAL"] if "TOTAL" in m.columns else [])]
+    m = m.rename(columns={"sku": "SKU", "nombre": "Producto", "categoria": "Línea",
+                          "marca": "Marca", "stock_cd": "Stock CD"})
+    m.to_excel(writer, sheet_name=nombre_giro, index=False)
+    ws = writer.sheets[nombre_giro]
+    ws.freeze_panes = "F2" if "Stock CD" in m.columns else "E2"
+    ws.auto_filter.ref = ws.dimensions
+    anchos = {"SKU": 11, "Producto": 34, "Línea": 16, "Marca": 14, "Stock CD": 9}
+    for i, c in enumerate(m.columns, 1):
+        ws.column_dimensions[get_column_letter(i)].width = anchos.get(c, max(7, min(14, len(str(c)) + 1)))
+    for col in ws.iter_cols(min_row=2, min_col=len(front) + 1, max_col=len(m.columns)):
+        for cell in col:
+            cell.number_format = "#,##0"
+    if sustento is not None and not sustento.empty:
+        sustento.to_excel(writer, sheet_name=nombre_sustento, index=False)
+        ws2 = writer.sheets[nombre_sustento]
+        ws2.freeze_panes = "A2"
+        ws2.auto_filter.ref = ws2.dimensions
+        for i, c in enumerate(sustento.columns, 1):
+            ws2.column_dimensions[get_column_letter(i)].width = max(9, min(34, len(str(c)) + 3))
