@@ -115,7 +115,7 @@ st.set_page_config(
 
 # Versión visible (S1 robustez, 2026-09-05): se muestra en el sidebar junto al corte
 # de la base cargada, para que cualquier número citado sea trazable a una versión.
-CAPI_VERSION = "2.1.0"
+CAPI_VERSION = "2.2.0"
 
 # ── Paleta de colores Capi (Clean Corporate: navy + light) ──
 TEAL_600 = "#6D3B8E"     # Morado Ripley — primary accent (Franco 2026-08-26)
@@ -1392,7 +1392,8 @@ s["n_nuevo_sv"]        = int((df_cob["estado"] == "NUEVO SIN VENTA").sum()) if n
 s["n_dormido"]         = int((df_cob["estado"] == "DORMIDO").sum()) if not df_cob.empty else 0
 s["n_muerto"]          = int((df_cob["estado"] == "OBSOLETO").sum()) if not df_cob.empty else 0   # obsoleto
 s["n_estancado"]       = int((df_cob["estado"] == "ESTANCADO").sum()) if not df_cob.empty else 0
-s["uds_reponer"]       = int(df_rep["a_reponer"].sum()) if not df_rep.empty else 0
+s["uds_reponer"]       = int(df_rep["desde_cd"].sum()) if (not df_rep.empty and "desde_cd" in df_rep.columns) else (int(df_rep["a_reponer"].sum()) if not df_rep.empty else 0)
+s["uds_necesidad"]     = int(df_rep["a_reponer"].sum()) if not df_rep.empty else 0
 s["uds_desde_cd"]      = int(df_rep["desde_cd"].sum()) if (not df_rep.empty and "desde_cd" in df_rep.columns) else 0
 s["uds_pendiente_cd"]  = int(df_rep["pendiente"].sum()) if (not df_rep.empty and "pendiente" in df_rep.columns) else 0
 s["uds_transferir"]    = int(df_trans["uds_transferir"].sum()) if not df_trans.empty else 0
@@ -3174,7 +3175,11 @@ elif nav_page == "📦 Reposición":
                 _rp['margen_efectivo'] = (_rp['sku'].map(_mgp).fillna(0) * 100).round(1)
             if 'edad_semanas' in df_cob.columns:
                 _rp['edad'] = _rp['sku'].map(df_cob.groupby('sku')['edad_semanas'].max())
-        st.caption(f"{len(_rp):,} líneas en {_rp['marca'].nunique()} marcas · {int(_rp['a_reponer'].sum()):,} uds a reponer")
+        if 'desde_cd' in _rp.columns:
+            st.caption(f"{len(_rp):,} líneas en {_rp['marca'].nunique()} marcas · necesidad {int(_rp['a_reponer'].sum()):,} uds · "
+                       f"**a girar hoy desde el CD {int(_rp['desde_cd'].sum()):,} uds** · pendiente sin CD {int(_rp['pendiente'].sum()):,} uds")
+        else:
+            st.caption(f"{len(_rp):,} líneas en {_rp['marca'].nunique()} marcas · {int(_rp['a_reponer'].sum()):,} uds a reponer")
         _rp_sel = st.selectbox("Marca", ["Todas"] + sorted(_rp['marca'].unique().tolist()), key="rp_marca")
         _rp_v = _rp if _rp_sel == "Todas" else _rp[_rp['marca'] == _rp_sel]
         _rp_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'tienda', 'edad', 'stock_actual',

@@ -276,18 +276,24 @@ def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
                     stock_cadena=("stock_actual", "sum"), stock_cd=("stock_cd", "first"),
                     a_reponer=("a_reponer", "sum"))
                 _cols_rep = ["SKU", "Modelo", "Línea", "Urgencia", "Vta sem (uds)",
-                             "Stock cadena", "Stock CD", "Uds sugeridas"]
+                             "Stock cadena", "Stock CD", "Necesidad (uds)"]
+                # Auditoría 06-sep-2026: la necesidad puede superar el CD; se muestra aparte lo que
+                # el CD puede servir hoy (fair share) y lo pendiente (reabastecer CD / orden).
+                if "desde_cd" in rep_m.columns:
+                    _agg_rep["desde_cd"] = ("desde_cd", "sum"); _cols_rep.append("A girar hoy (uds)")
+                if "pendiente" in rep_m.columns:
+                    _agg_rep["pendiente"] = ("pendiente", "sum"); _cols_rep.append("Pendiente sin CD (uds)")
                 if "temporada" in rep_m.columns:
                     _agg_rep = {"temporada": ("temporada", "first"), **_agg_rep}
                     _cols_rep.insert(3, "Temporada")
                 rg = rep_m.groupby(["sku", "nombre", "categoria"], as_index=False).agg(**_agg_rep)
-                rg = rg.sort_values("a_reponer", ascending=False)
+                rg = rg.sort_values("desde_cd" if "desde_cd" in rg.columns else "a_reponer", ascending=False)
                 rg.columns = _cols_rep
                 _escribir_tabla(
                     w, "3. Reponer",
                     f"{marca} — Guía de reposición para priorizar OTB (no es orden de compra) · corte {corte}",
-                    rg, {"Vta sem (uds)": _FMT_C, "Stock cadena": _FMT_S,
-                         "Stock CD": _FMT_S, "Uds sugeridas": _FMT_S})
+                    rg, {"Vta sem (uds)": _FMT_C, "Stock cadena": _FMT_S, "Stock CD": _FMT_S,
+                         "Necesidad (uds)": _FMT_S, "A girar hoy (uds)": _FMT_S, "Pendiente sin CD (uds)": _FMT_S})
 
         # ── 4. Transferir (agregado por modelo, umbral) ──
         if df_trans is not None and not df_trans.empty:
