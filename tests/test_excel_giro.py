@@ -31,3 +31,19 @@ def test_hoja_giro_respeta_total_existente():
     wb = load_workbook(io.BytesIO(buf.getvalue()))
     assert wb.sheetnames == ["Giro"]
     assert [c.value for c in wb["Giro"][1]] == ["SKU", "Jockey Plaza", "TOTAL"]
+
+
+def test_matriz_giro_no_supera_stock_cd():
+    """Auditoría 06-sep-2026: la matriz de giro pivotea lo despachable (desde_cd); la suma por SKU
+    nunca puede superar el stock del CD, y TOTAL debe cuadrar con Σ desde_cd de la lista."""
+    import os
+    import motor_v2
+    fx = os.path.join(os.path.dirname(__file__), "fixtures", "base_mini.xlsx")
+    res = motor_v2.run_analysis(fx)
+    piv, rep = res["reposiciones_pivot"], res["reposiciones"]
+    if piv.empty:
+        return
+    assert (piv["TOTAL"] <= piv["stock_cd"]).all()
+    assert int(piv["TOTAL"].sum()) == int(rep["desde_cd"].sum())
+    assert (piv["TOTAL"] > 0).all()
+    assert "PENDIENTE (sin CD)" in piv.columns

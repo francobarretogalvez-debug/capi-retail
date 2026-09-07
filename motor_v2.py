@@ -1155,10 +1155,15 @@ def pivot_reposiciones(df_reposiciones, df_cobertura):
         # stock_cd es por SKU, tomar el primero (todos iguales por SKU)
         stock_cd_map = df_reposiciones.drop_duplicates('sku').set_index('sku')['stock_cd'].to_dict()
 
+    # Auditoría 06-sep-2026: la matriz es el Excel de giro que reciben los inventories,
+    # así que pivotea lo DESPACHABLE desde el CD (`desde_cd`, suma por SKU ≤ stock_cd),
+    # no la necesidad total (`a_reponer`). Con la base 30-ago la necesidad era 57,270 uds
+    # y el CD solo podía servir 16,859: el archivo pedía 40K uds inexistentes.
+    _val_col = 'desde_cd' if 'desde_cd' in df_reposiciones.columns else 'a_reponer'
     pivot = df_reposiciones.pivot_table(
         index=idx_cols,
         columns='tienda',
-        values='a_reponer',
+        values=_val_col,
         aggfunc='sum',
         fill_value=0
     )
@@ -1187,6 +1192,12 @@ def pivot_reposiciones(df_reposiciones, df_cobertura):
         fijas = ['sku', 'nombre', 'categoria', 'marca']
         otras = [c for c in pivot.columns if c not in fijas]
         pivot = pivot[fijas + otras]
+    # Lo que falta y el CD no puede servir hoy (reabastecer CD / orden a proveedor)
+    if 'pendiente' in df_reposiciones.columns:
+        _pend = df_reposiciones.groupby('sku')['pendiente'].sum()
+        pivot['PENDIENTE (sin CD)'] = pivot['sku'].map(_pend).fillna(0).astype(int)
+    # Solo SKUs con algo que girar hoy
+    pivot = pivot[pivot['TOTAL'] > 0].reset_index(drop=True)
 
     # Convertir columnas numéricas a int
     for col in pivot.columns:

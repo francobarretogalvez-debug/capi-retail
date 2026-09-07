@@ -696,7 +696,7 @@ def hoja_venta_cero(writer, df_vc: pd.DataFrame, hoja: str = "Venta Cero x Tiend
     return _tabla_con_titulo(writer, hoja, titulo, out, FMT_VENTA_CERO, anchos={"Producto": 34})
 
 # ── Excel de giro (formato oficial de Franco, 06-sep-2026): matriz SKU × tienda ─────────
-_META_GIRO = ("sku", "nombre", "categoria", "marca", "stock_cd", "TOTAL", "CD", "Total Repo")
+_META_GIRO = ("sku", "nombre", "categoria", "marca", "stock_cd", "TOTAL", "PENDIENTE (sin CD)", "CD", "Total Repo")
 
 
 def hoja_giro(writer, matriz: pd.DataFrame, sustento: pd.DataFrame | None = None,
@@ -710,7 +710,7 @@ def hoja_giro(writer, matriz: pd.DataFrame, sustento: pd.DataFrame | None = None
     if "TOTAL" not in m.columns and tiendas:
         m["TOTAL"] = m[tiendas].sum(axis=1)
     front = [c for c in ("sku", "nombre", "categoria", "marca", "stock_cd") if c in m.columns]
-    m = m[front + tiendas + (["TOTAL"] if "TOTAL" in m.columns else [])]
+    m = m[front + tiendas + [c for c in ("TOTAL", "PENDIENTE (sin CD)") if c in m.columns]]
     m = m.rename(columns={"sku": "SKU", "nombre": "Producto", "categoria": "Línea",
                           "marca": "Marca", "stock_cd": "Stock CD"})
     m.to_excel(writer, sheet_name=nombre_giro, index=False)

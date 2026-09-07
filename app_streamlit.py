@@ -3178,12 +3178,12 @@ elif nav_page == "📦 Reposición":
         _rp_sel = st.selectbox("Marca", ["Todas"] + sorted(_rp['marca'].unique().tolist()), key="rp_marca")
         _rp_v = _rp if _rp_sel == "Todas" else _rp[_rp['marca'] == _rp_sel]
         _rp_cols = [c for c in ['marca', 'sku', 'nombre', 'categoria', 'tienda', 'edad', 'stock_actual',
-                                'prom_vta_sem', 'cobertura_actual', 'a_reponer', 'cob_post_rep', 'stock_cd',
+                                'prom_vta_sem', 'cobertura_actual', 'a_reponer', 'desde_cd', 'pendiente', 'cob_post_rep', 'stock_cd',
                                 'pct_descuento', 'margen_efectivo', 'urgencia'] if c in _rp_v.columns]
         _rp_disp = _rp_v[_rp_cols].rename(columns={
             'marca': 'Marca', 'sku': 'SKU', 'nombre': 'Producto', 'categoria': 'Línea', 'edad': 'Edad (sem)',
             'tienda': 'Tienda', 'stock_actual': 'Stock', 'prom_vta_sem': 'Vta/sem', 'cobertura_actual': 'Cob (sem)',
-            'a_reponer': 'A reponer (uds)', 'cob_post_rep': 'Cob post', 'stock_cd': 'Stock CD',
+            'a_reponer': 'Necesidad (uds)', 'desde_cd': 'A girar hoy (uds)', 'pendiente': 'Pendiente sin CD', 'cob_post_rep': 'Cob post', 'stock_cd': 'Stock CD',
             'pct_descuento': 'Dscto', 'margen_efectivo': 'Margen efect. %', 'urgencia': 'Urgencia'})
         st.dataframe(_rp_disp.style.format({'Vta/sem': '{:.1f}', 'Cob (sem)': '{:.1f}', 'Cob post': '{:.1f}', 'Dscto': '{:.0%}'}, na_rep="—"),
                      use_container_width=True, hide_index=True, height=440)
@@ -3193,7 +3193,7 @@ elif nav_page == "📦 Reposición":
                 _mx = df_rep_pivot[df_rep_pivot['sku'].isin(_rp_v['sku'])]
                 if not _mx.empty:
                     _mx_tcols = [c for c in _mx.columns if c not in
-                                 ('sku', 'nombre', 'categoria', 'marca', 'CD', 'Total Repo')]
+                                 ('sku', 'nombre', 'categoria', 'marca', 'stock_cd', 'TOTAL', 'PENDIENTE (sin CD)', 'CD', 'Total Repo')]
                     _rk = _mx[_mx_tcols].sum().sort_values(ascending=False).head(10)
                     st.caption("Top tiendas por unidades a reponer: " +
                                " · ".join(f"{t} ({int(u):,})" for t, u in _rk.items()))
@@ -3218,7 +3218,7 @@ elif nav_page == "📦 Reposición":
         st.download_button(f"📥 Excel de giro {_uni_rp.lower()} — matriz SKU × tienda (.xlsx)", data=_rp_buf.getvalue(),
                            file_name=f"Capi_Giro_{_uni_rp}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_repo_uni")
-        st.caption("Hoja **Giro**: una fila por SKU, una columna por tienda, TOTAL al final. Hoja **Sustento**: el porqué de cada línea (stock, venta, cobertura, CD).")
+        st.caption("Hoja **Giro**: una fila por SKU, una columna por tienda con lo que el CD puede servir hoy (la suma por SKU nunca supera el stock CD), TOTAL y PENDIENTE (lo que falta y no hay en CD). Hoja **Sustento**: el porqué de cada línea.")
 
 
 elif nav_page == "🔄 Transferencias":
