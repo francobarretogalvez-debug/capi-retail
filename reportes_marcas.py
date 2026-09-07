@@ -189,10 +189,13 @@ def _hoja_precio(writer, hoja, titulo, g):
 
 
 def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
-                          df_prec=None, df_alertas=None, corte: str = None) -> bytes:
+                          df_prec=None, df_alertas=None, corte: str = None,
+                          df_vp=None) -> bytes:
     """Genera el Excel de una marca. df_cob a nivel SKU×tienda con columnas
     del motor (prom_vta_uds, precio_blanco, etc.). `corte` es la fecha de la
-    BASE (no la de generación) — pasar siempre que se conozca."""
+    BASE (no la de generación) — pasar siempre que se conozca.
+    `df_vp` es el detalle de venta perdida de la semana (venta_perdida_semanal.venta_perdida_semana()["detalle"]),
+    ya a nivel SKU × tienda para todas las marcas; acá se filtra por marca (hoja 6)."""
     m_up = str(marca).upper().strip()
     dfm = df_cob[df_cob["marca"].str.upper().str.strip() == m_up].copy()
     corte = corte or f"{date.today():%d.%m.%Y}"
@@ -334,6 +337,32 @@ def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
                 titulo=f"{marca} — SKUs con stock y SIN venta la última semana, por tienda "
                        f"(⭐ TOP 80% = concentran el 80% del capital sin venta de esa tienda) · corte {corte}")
 
+        # ── 6. Venta perdida de la semana (pedido Franco 06-sep-2026): el proveedor ve qué
+        #    combos SKU × tienda están en quiebre (≤ 4 sem de cobertura), cuánto se perdió y
+        #    qué hacer (reponer / outlet / reorden). Misma regla que el Dashboard. ──
+        if df_vp is not None and not df_vp.empty and "marca" in df_vp.columns:
+            _vp = df_vp[df_vp["marca"].astype(str).str.upper().str.strip() == m_up].copy()
+            if not _vp.empty:
+                _vp = _vp.sort_values("neto_max", ascending=False)
+                _vp_cols = [c for c in ["tienda", "sku", "descripcion", "departamento", "linea", "semanas_en_quiebre",
+                                        "cobertura_sem", "stock_uds", "vta_uds_sem", "uds_max", "neto_min", "neto_max",
+                                        "margen_max", "stock_cd", "on_order", "accion"] if c in _vp.columns]
+                _vp_out = _vp[_vp_cols].rename(columns={
+                    "tienda": "Tienda", "sku": "SKU", "descripcion": "Modelo", "departamento": "Depto", "linea": "Línea",
+                    "semanas_en_quiebre": "Sem en quiebre", "cobertura_sem": "Cob (sem)", "stock_uds": "Stock tienda",
+                    "vta_uds_sem": "Vendió (uds)", "uds_max": "Perdió (uds, máx)", "neto_min": "Venta perdida S/ (mín)",
+                    "neto_max": "Venta perdida S/ (máx)", "margen_max": "Margen perdido S/ (máx)", "stock_cd": "Stock CD",
+                    "on_order": "On order", "accion": "Acción"})
+                _n_ev = int(_vp["evitable"].sum()) if "evitable" in _vp.columns else 0
+                vistas_excel._tabla_con_titulo(
+                    w, "6. Venta Perdida", 
+                    f"{marca} — venta perdida de la última semana por SKU × tienda: {len(_vp)} combos en quiebre "
+                    f"(cobertura ≤ 4 sem) · S/ {_vp['neto_min'].sum():,.0f} – {_vp['neto_max'].sum():,.0f} · "
+                    f"{_n_ev} evitables con stock en CD · corte {corte}",
+                    _vp_out, {"Cob (sem)": "0.0", "Stock tienda": "#,##0", "Vendió (uds)": "#,##0", "Perdió (uds, máx)": "#,##0",
+                              "Venta perdida S/ (mín)": "#,##0", "Venta perdida S/ (máx)": "#,##0", "Margen perdido S/ (máx)": "#,##0",
+                              "Stock CD": "#,##0", "On order": "#,##0", "Sem en quiebre": "0"})
+
         # ── Tendencias (alertas del motor para la marca) ──
         if df_alertas is not None and not df_alertas.empty and "marca" in df_alertas.columns:
             al = df_alertas[df_alertas["marca"].str.upper().str.strip() == m_up]
@@ -403,14 +432,21 @@ def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
 
 
 def generar_zip_reportes(df_cob, df_rep=None, df_trans=None,
-                         df_prec=None, df_alertas=None, corte: str = None) -> bytes:
-    """Zip con un Excel por marca del universo de reporte."""
+                         df_prec=None, df_alertas=None, corte: str = None, df_vp=None) -> bytes:
+    """Zip con un Excel por marca del universo de reporte. Si no se pasa `df_vp`, se calcula una vez
+    la venta perdida de la última semana (snapshots por tienda) para la hoja 6 de cada marca."""
     zbuf = io.BytesIO()
     corte = corte or f"{date.today():%d.%m.%Y}"
+    if df_vp is None:
+        try:
+            import venta_perdida_semanal as _vps
+            df_vp = _vps.venta_perdida_semana().get("detalle")
+        except Exception:
+            df_vp = None
     with zipfile.ZipFile(zbuf, "w", zipfile.ZIP_DEFLATED) as z:
         for marca in marcas_reporte(df_cob):
             data = generar_reporte_marca(marca, df_cob, df_rep, df_trans,
-                                         df_prec, df_alertas, corte=corte)
+                                         df_prec, df_alertas, corte=corte, df_vp=df_vp)
             nombre = marca.title().replace(" ", "_")
             z.writestr(f"Reporte_{nombre}_al_{corte}.xlsx", data)
     zbuf.seek(0)
