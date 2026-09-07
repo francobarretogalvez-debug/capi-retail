@@ -96,7 +96,7 @@ def _precio_margen(semana: str) -> pd.DataFrame:
     precio = precio.fillna(pv / IGV)
     margen = (con / sol).where(sol > 0).clip(0, 0.9)
     out = pd.DataFrame({"sku": s["sku"].astype(str).str.strip(), "precio": precio, "margen": margen,
-                        "marca": s.get("marca"), "descripcion": s.get("descripcion"), "linea": s.get("linea"),
+                        "marca": s.get("marca"), "descripcion": s.get("descripcion"), "linea": s.get("linea"), "departamento": s.get("categoria"),
                         "stock_cd": pd.to_numeric(s.get("stock_cd"), errors="coerce").fillna(0)})
     return out.drop_duplicates("sku")
 
@@ -206,7 +206,7 @@ def venta_perdida_semana(semana: str | None = None, n_prev: int = 4, min_obs: in
                                           margen_min=("margen_min", "sum"), margen_max=("margen_max", "sum"),
                                           evitables=("evitable", "sum"), neto_evitable=("neto_max", lambda x: x[q.loc[x.index, "evitable"]].sum()))
                     .reset_index().sort_values("neto_max", ascending=False))
-    cols = ["tienda", "sku", "descripcion", "marca", "linea", "semanas_en_quiebre", "cobertura_sem", "stock_uds", "cerro_en_cero", "vel_min", "vel_max", "vta_uds_sem", "uds_min", "uds_max",
+    cols = ["tienda", "sku", "descripcion", "marca", "departamento", "linea", "semanas_en_quiebre", "cobertura_sem", "stock_uds", "cerro_en_cero", "vel_min", "vel_max", "vta_uds_sem", "uds_min", "uds_max",
             "precio", "margen", "neto_min", "neto_max", "margen_min", "margen_max", "stock_cd", "on_order", "evitable", "liquidacion", "accion"]
     det = q[[c for c in cols if c in q.columns]].sort_values("neto_max", ascending=False).reset_index(drop=True)
     return {"semana": semana, "prev": prev, "n_combos": int(len(det)), "n_en_quiebre": n_en_quiebre, "n_skus": int(det["sku"].nunique()),

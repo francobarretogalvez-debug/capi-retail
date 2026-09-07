@@ -2023,11 +2023,11 @@ if nav_page == "🏠 Dashboard":
                                  .style.format({"Uds mín": "{:,.0f}", "Uds máx": "{:,.0f}", "Neto mín S/": "S/ {:,.0f}", "Neto máx S/": "S/ {:,.0f}",
                                                 "Margen mín S/": "S/ {:,.0f}", "Margen máx S/": "S/ {:,.0f}", "Evitables": "{:,.0f}", "Neto evitable S/": "S/ {:,.0f}"}),
                                  use_container_width=True, hide_index=True, height=min(60 + 35 * len(_pt), 420))
-                    _det = _vps["detalle"].head(300).rename(columns={"tienda": "Tienda", "sku": "SKU", "descripcion": "Producto", "marca": "Marca",
+                    _det = _vps["detalle"].head(300).rename(columns={"tienda": "Tienda", "sku": "SKU", "descripcion": "Producto", "marca": "Marca", "departamento": "Depto",
                                                                      "linea": "Línea", "vel_min": "Vel mín", "vel_max": "Vel máx", "vta_uds_sem": "Vendió",
                                                                      "uds_min": "Perdió mín", "uds_max": "Perdió máx", "precio": "Precio", "margen": "Margen",
                                                                      "neto_max": "Neto máx S/", "stock_cd": "Stock CD", "on_order": "On order", "evitable": "Evitable"})
-                    st.dataframe(_det[[c for c in ["Tienda", "SKU", "Producto", "Marca", "Línea", "Vel máx", "Vendió", "Perdió máx", "Precio", "Margen",
+                    st.dataframe(_det[[c for c in ["Tienda", "SKU", "Producto", "Marca", "Depto", "Línea", "Vel máx", "Vendió", "Perdió máx", "Precio", "Margen",
                                                    "Neto máx S/", "Stock CD", "On order", "Evitable"] if c in _det.columns]]
                                  .style.format({"Vel máx": "{:.1f}", "Vendió": "{:,.0f}", "Perdió máx": "{:.1f}", "Precio": "S/ {:,.2f}", "Margen": "{:.0%}",
                                                 "Neto máx S/": "S/ {:,.0f}", "Stock CD": "{:,.0f}", "On order": "{:,.0f}"}, na_rep="—"),
@@ -2035,9 +2035,9 @@ if nav_page == "🏠 Dashboard":
                     _enq = _vps.get("en_quiebre")
                     if _enq is not None and len(_enq):
                         st.markdown("**En quiebre por cobertura (≤ 4 sem), con semanas seguidas en quiebre**")
-                        _enq_d = _enq.merge(_vps["detalle"][["sku", "tienda", "descripcion", "marca"]].drop_duplicates(), on=["sku", "tienda"], how="left") if "descripcion" not in _enq.columns else _enq
-                        st.dataframe(_enq_d[[c for c in ["tienda", "sku", "descripcion", "marca", "semanas_en_quiebre", "stock_uds", "vel_ref", "cobertura_sem", "vta_uds_sem", "on_order"] if c in _enq_d.columns]]
-                                     .rename(columns={"tienda": "Tienda", "sku": "SKU", "descripcion": "Producto", "marca": "Marca", "semanas_en_quiebre": "Sem en quiebre",
+                        _enq_d = _enq.merge(_vps["detalle"][["sku", "tienda", "descripcion", "marca", "departamento", "linea"]].drop_duplicates(), on=["sku", "tienda"], how="left") if "descripcion" not in _enq.columns else _enq
+                        st.dataframe(_enq_d[[c for c in ["tienda", "sku", "descripcion", "marca", "departamento", "linea", "semanas_en_quiebre", "stock_uds", "vel_ref", "cobertura_sem", "vta_uds_sem", "on_order"] if c in _enq_d.columns]]
+                                     .rename(columns={"tienda": "Tienda", "sku": "SKU", "descripcion": "Producto", "marca": "Marca", "departamento": "Depto", "semanas_en_quiebre": "Sem en quiebre",
                                                       "stock_uds": "Stock", "vel_ref": "Vel/sem", "cobertura_sem": "Cob (sem)", "vta_uds_sem": "Vendió", "on_order": "On order"})
                                      .head(400).style.format({"Vel/sem": "{:.1f}", "Cob (sem)": "{:.1f}", "Stock": "{:,.0f}", "Vendió": "{:,.0f}", "On order": "{:,.0f}"}, na_rep="—"),
                                      use_container_width=True, hide_index=True, height=340)
@@ -3136,7 +3136,7 @@ elif nav_page == "📦 Reposición":
                                                        "uds_OPLN": "→ OPLN", "uds_OSI": "→ OSI"})
                 st.dataframe(_pm.style.format({"SKUs": "{:,.0f}", "Uds en CD": "{:,.0f}", "Capital CD S/": "S/ {:,.0f}", "→ OPLN": "{:,.0f}", "→ OSI": "{:,.0f}"}),
                              use_container_width=True, hide_index=True, height=min(60 + 35 * len(_pm), 380))
-                _pl = _po["plan"].rename(columns={"sku": "SKU", "descripcion": "Producto", "marca": "Marca", "linea": "Línea", "temporada": "Temp",
+                _pl = _po["plan"].rename(columns={"sku": "SKU", "descripcion": "Producto", "marca": "Marca", "departamento": "Depto", "linea": "Línea", "temporada": "Temp",
                                                   "edad_semanas": "Edad", "pct_descuento": "Dscto", "precio_vigente": "Precio", "stock_cd": "Uds CD",
                                                   "stock_tiendas": "Uds tiendas", "capital_cd": "Capital CD S/", "uds_OPLN": "→ OPLN", "uds_OSI": "→ OSI",
                                                   "base_reparto": "Base del reparto"})
