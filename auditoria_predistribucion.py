@@ -27,6 +27,7 @@ from snapshots_engine.storage import load_snapshot
 
 CAUSAS = {
     "1_cd": ("1 · El CD tenía stock (no bajó a la tienda)", "Reposición / bajada a tienda"),
+    "1b_liq_outlet": ("1b · Liquidación con stock en CD (va a outlet, no a tienda regular)", "Despacho a outlet (OPLN / OSI)"),
     "2_transito": ("2 · Viene en camino (llegó tarde)", "Tránsito CD → tienda"),
     "3_otras": ("3 · Otras tiendas tienen stock (mal distribuido)", "Matriz de predistribución / transferencia"),
     "4_nac": ("4 · Cadena sin stock · nacional (reorden posible)", "Compra / proveedor"),
@@ -53,7 +54,7 @@ def enriquecer(detalle: pd.DataFrame, semana: str) -> pd.DataFrame:
 
     def _causa(x):
         if float(x.get("stock_cd", 0) or 0) > 0:
-            return "1_cd"
+            return "1b_liq_outlet" if bool(x.get("liquidacion", False)) else "1_cd"
         if float(x.get("on_order", 0) or 0) > 0:
             return "2_transito"
         if float(x.get("stock_otras_tiendas", 0) or 0) > 0:
@@ -116,6 +117,7 @@ def indice_acierto(d: pd.DataFrame, df_cob: pd.DataFrame) -> pd.DataFrame:
     base cargada). Diagnóstico preliminar hasta tener la curva plan y los clusters."""
     if d is None or d.empty or df_cob is None or df_cob.empty:
         return pd.DataFrame()
+    # la liquidación con CD (1b) no es "faltó" de predistribución: su acción es outlet
     falto = (d[d["causa_key"].isin(["1_cd", "3_otras"])].groupby(["tienda", "linea"])
                .agg(falto_neto=("neto_max", "sum"), combos_falto=("sku", "size"), recurrentes=("recurrente", "sum")).reset_index())
     c = df_cob.copy()

@@ -198,6 +198,7 @@ def venta_perdida_semana(semana: str | None = None, n_prev: int = 4, min_obs: in
     # evitable = hay stock en el CD para despachar o ya viene en camino a esa tienda
     q["evitable"] = (q["on_order"] > 0) | (q["stock_cd"].fillna(0) > 0)
     n_en_quiebre = int(len(q))
+    q["accion"] = np.where(q["liquidacion"], "→ outlet (liquidación con CD)", np.where(q["evitable"], "reponer / transferir", "reorden / próxima compra"))
     q = q[q["uds_max"] > 0]
     por_tienda = (q.groupby("tienda").agg(combos=("sku", "size"), en_cero=("cerro_en_cero", "sum"), sem_quiebre_prom=("semanas_en_quiebre", "mean"),
                                           uds_min=("uds_min", "sum"), uds_max=("uds_max", "sum"),
@@ -206,7 +207,7 @@ def venta_perdida_semana(semana: str | None = None, n_prev: int = 4, min_obs: in
                                           evitables=("evitable", "sum"), neto_evitable=("neto_max", lambda x: x[q.loc[x.index, "evitable"]].sum()))
                     .reset_index().sort_values("neto_max", ascending=False))
     cols = ["tienda", "sku", "descripcion", "marca", "linea", "semanas_en_quiebre", "cobertura_sem", "stock_uds", "cerro_en_cero", "vel_min", "vel_max", "vta_uds_sem", "uds_min", "uds_max",
-            "precio", "margen", "neto_min", "neto_max", "margen_min", "margen_max", "stock_cd", "on_order", "evitable", "liquidacion"]
+            "precio", "margen", "neto_min", "neto_max", "margen_min", "margen_max", "stock_cd", "on_order", "evitable", "liquidacion", "accion"]
     det = q[[c for c in cols if c in q.columns]].sort_values("neto_max", ascending=False).reset_index(drop=True)
     return {"semana": semana, "prev": prev, "n_combos": int(len(det)), "n_en_quiebre": n_en_quiebre, "n_skus": int(det["sku"].nunique()),
             "n_tiendas": int(det["tienda"].nunique()), "detalle": det, "por_tienda": por_tienda,

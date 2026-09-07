@@ -36,6 +36,7 @@ importlib.reload(etl_profundidad)
 import vista_planificacion as vista_plan
 import vista_talla_color
 import vista_auditoria_predist
+import outlets
 importlib.reload(vista_plan)
 
 # Snapshots Engine — histórico semanal (Prompt B)
@@ -94,7 +95,7 @@ import venta_perdida_semanal
 # Streamlit recarga el script principal pero mantiene en memoria los módulos importados; tras un deploy
 # el app puede correr con un módulo viejo (visto 2026-09-06: "sin dato" en Sobrestock). Recargar los
 # módulos propios que cambian seguido, como ya se hace con vista_planificacion.
-for _mod in (comparativo_semanal, render_foto, otb_terceras, venta_perdida_semanal, analisis_estados, vista_auditoria_predist):
+for _mod in (comparativo_semanal, render_foto, otb_terceras, venta_perdida_semanal, analisis_estados, vista_auditoria_predist, outlets):
     importlib.reload(_mod)
 import rendimiento_tienda as rend_t
 import reporte_semanal as rep_sem
@@ -3118,6 +3119,38 @@ elif nav_page == "🩺 Salud del Stock":
 
 elif nav_page == "📦 Reposición":
     st.markdown(f'<div class="section-header"><h3>📦 Reposición</h3><span class="live-badge">POR MARCA</span></div>', unsafe_allow_html=True)
+
+    # ── Liquidación con stock en CD → outlet (regla Franco 2026-09-06): no se repone a tienda regular ──
+    if _HAS_SNAPSHOTS:
+        try:
+            _po = outlets.plan_outlet()
+        except Exception as _e_po:
+            _po = {}
+            st.caption(f"Plan a outlet no disponible: {_e_po}")
+        if _po and _po.get("n_skus", 0) > 0:
+            with st.expander(f"🏬 Liquidación con stock en CD → enviar a outlet (OPLN, OSI): {_po['n_skus']:,} SKUs · {_po['uds']:,} uds · S/ {_po['capital']:,.0f} a costo", expanded=False):
+                st.caption(f"Mercadería en liquidación (temporada {_po.get('temporada_liq', '?')} o dscto ≥40%) que aún tiene stock en el CD. "
+                           "No se repone a tienda regular: va a outlet. Reparto entre OPLN y OSI según lo que cada outlet vendió de ese SKU "
+                           "(o de esa marca × línea) en las últimas 4 semanas; sin historia, mitades.")
+                _pm = _po["por_marca"].rename(columns={"marca": "Marca", "skus": "SKUs", "uds_cd": "Uds en CD", "capital_cd": "Capital CD S/",
+                                                       "uds_OPLN": "→ OPLN", "uds_OSI": "→ OSI"})
+                st.dataframe(_pm.style.format({"SKUs": "{:,.0f}", "Uds en CD": "{:,.0f}", "Capital CD S/": "S/ {:,.0f}", "→ OPLN": "{:,.0f}", "→ OSI": "{:,.0f}"}),
+                             use_container_width=True, hide_index=True, height=min(60 + 35 * len(_pm), 380))
+                _pl = _po["plan"].rename(columns={"sku": "SKU", "descripcion": "Producto", "marca": "Marca", "linea": "Línea", "temporada": "Temp",
+                                                  "edad_semanas": "Edad", "pct_descuento": "Dscto", "precio_vigente": "Precio", "stock_cd": "Uds CD",
+                                                  "stock_tiendas": "Uds tiendas", "capital_cd": "Capital CD S/", "uds_OPLN": "→ OPLN", "uds_OSI": "→ OSI",
+                                                  "base_reparto": "Base del reparto"})
+                st.dataframe(_pl.head(300).style.format({"Edad": "{:.0f}", "Dscto": "{:.0%}", "Precio": "S/ {:,.2f}", "Uds CD": "{:,.0f}", "Uds tiendas": "{:,.0f}",
+                                                         "Capital CD S/": "S/ {:,.0f}", "→ OPLN": "{:,.0f}", "→ OSI": "{:,.0f}"}, na_rep="—"),
+                             use_container_width=True, hide_index=True, height=380)
+                _ob2 = io.BytesIO()
+                with pd.ExcelWriter(_ob2, engine="openpyxl") as _wo2:
+                    vistas_excel._tabla_con_titulo(_wo2, "A girar a outlet", f"Liquidación con stock en CD → outlet · corte {_po['semana']}", _pl,
+                                                   {"Capital CD S/": "#,##0", "Uds CD": "#,##0", "→ OPLN": "#,##0", "→ OSI": "#,##0", "Dscto": "0%", "Precio": "#,##0.00"})
+                    vistas_excel._tabla_con_titulo(_wo2, "Por marca", "Liquidación con CD → outlet, por marca", _pm, {"Capital CD S/": "#,##0", "Uds en CD": "#,##0", "→ OPLN": "#,##0", "→ OSI": "#,##0"})
+                _ob2.seek(0)
+                st.download_button("📥 Excel — a girar a outlet (OPLN / OSI)", _ob2.getvalue(), file_name=f"Capi_Liquidacion_a_Outlet_{_po['semana']}.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_outlet")
     _uni_rp = st.radio("Universo", ["Propias", "Terceras", "Todas"], horizontal=True, key="uni_repo")
     _SET_P = {m.upper() for m in agente_terceras.MARCAS_PROPIAS_SET}
     _SET_T = {m.upper() for m in agente_terceras.MARCAS_AGENTE}

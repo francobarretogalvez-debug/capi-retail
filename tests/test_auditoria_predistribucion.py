@@ -17,7 +17,8 @@ def test_causa_raiz_precedencia():
     r = vp.venta_perdida_semana("2026-35")
     d = ap.enriquecer(r["detalle"], "2026-35")
     assert set(d["causa_key"]) <= set(ap.CAUSAS)
-    assert (d.loc[d["stock_cd"] > 0, "causa_key"] == "1_cd").all()                       # el CD manda
+    assert d.loc[d["stock_cd"] > 0, "causa_key"].isin(["1_cd", "1b_liq_outlet"]).all()      # el CD manda
+    assert (d.loc[(d["stock_cd"] > 0) & d["liquidacion"], "causa_key"] == "1b_liq_outlet").all()   # liquidación con CD → outlet
     assert (d.loc[(d["stock_cd"] <= 0) & (d["on_order"] > 0), "causa_key"] == "2_transito").all()
     pc = ap.por_causa(d)
     assert abs(pc["pct"].sum() - 1) < 1e-9 and pc["neto_max"].sum() == pytest.approx(d["neto_max"].sum())
