@@ -20,3 +20,10 @@ Descuadres_Inventario_para_Planificacion.xlsx
 _archivo/
 data2/bases antiguas/*.xlsx
 *.xlsb
+
+# Credenciales locales (el token de Notion va en .env o aquí, nunca al repo)
+.streamlit/secrets.toml
+.env
+
+# Detalle de lotes del log de acciones (caché local; la fuente es Notion)
+acciones/lotes/

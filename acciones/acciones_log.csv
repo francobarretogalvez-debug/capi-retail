@@ -1,1 +1,2 @@
-fecha_registro,semana_iso,tipo,marca,sku,descripcion,magnitud,origen,estado
+fecha_registro,semana_iso,tipo,marca,sku,descripcion,magnitud,origen,estado,vista,lote,filas,unidades,tienda,corte_base,notion_url
+2026-09-12 22:40,2026-35,Reposición / Empuje,,,Giro casual generado el 07-sep sobre la base 30.08 y enviado a inventories el jueves 10-sep (registro retroactivo 12-sep),"1,437 combos · 18,612 uds",Sugerida por Capi,Ejecutada,Reposición,giro-2026-35-casual-07sep,1437,18612,,Base al 30.08.xlsx,

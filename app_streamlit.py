@@ -58,6 +58,20 @@ if _HAS_SNAPSHOTS and not st.session_state.get("_snapshots_initialized"):
     except Exception:
         st.session_state["_snapshots_initialized"] = True
 
+# Cortes guardados en Notion (🗂️ Cortes Capi): en la nube el disco se borra en cada reinicio,
+# así que al arrancar se bajan las semanas que falten (decisión Franco 2026-09-12).
+if _HAS_SNAPSHOTS and not st.session_state.get("_cortes_restaurados"):
+    st.session_state["_cortes_restaurados"] = True
+    try:
+        import notion_store as _ns_boot
+        if _ns_boot.disponible():
+            from snapshots_engine import nube as _nube_boot
+            _rest = _nube_boot.restaurar_faltantes()
+            if _rest:
+                st.session_state["_cortes_restaurados_msg"] = f"☁️ {len(_rest)} corte(s) restaurado(s) desde Notion: {', '.join(_rest)}"
+    except Exception as _e_rest:
+        st.session_state["_cortes_restaurados_msg"] = f"⚠️ No se pudieron restaurar cortes desde Notion: {_e_rest}"
+
 # Cargar .env antes de importar agente_terceras
 try:
     from dotenv import load_dotenv
@@ -82,11 +96,19 @@ try:
         os.environ["ANTHROPIC_API_KEY"] = str(st.secrets["ANTHROPIC_API_KEY"])
 except Exception:
     pass
+# Persistencia en Notion (decisión Franco 2026-09-12): el token va en st.secrets en la nube.
+try:
+    if "NOTION_TOKEN" in st.secrets and not os.getenv("NOTION_TOKEN"):
+        os.environ["NOTION_TOKEN"] = str(st.secrets["NOTION_TOKEN"])
+except Exception:
+    pass
 
 import agente_terceras
 import vistas_excel
 import reportes_marcas
 import acciones_log
+import notion_store
+import kpi_venta_cero
 import analisis_estados
 import comparativo_semanal
 import render_foto
@@ -115,7 +137,7 @@ st.set_page_config(
 
 # Versión visible (S1 robustez, 2026-09-05): se muestra en el sidebar junto al corte
 # de la base cargada, para que cualquier número citado sea trazable a una versión.
-CAPI_VERSION = "2.2.0"
+CAPI_VERSION = "2.3.0"
 
 # ── Paleta de colores Capi (Clean Corporate: navy + light) ──
 TEAL_600 = "#6D3B8E"     # Morado Ripley — primary accent (Franco 2026-08-26)
@@ -681,6 +703,9 @@ with st.sidebar:
         except Exception:
             _corte_txt = os.path.basename(_bp)
     st.caption(f"Capi v{CAPI_VERSION} · {_corte_txt}")
+    st.caption("☁️ Notion: conectado" if notion_store.disponible() else "☁️ Notion: sin token (el log y los cortes de la nube no persisten)")
+    if st.session_state.get("_cortes_restaurados_msg"):
+        st.caption(st.session_state["_cortes_restaurados_msg"])
 
     if _DEMO_MODE:
         st.caption("🎬 Modo demo activo")
@@ -966,6 +991,67 @@ def _is_base_profundidad(path):
 #  EJECUCIÓN DEL ANÁLISIS
 # ══════════════════════════════════════════════════════════════
 
+def _subir_corte_notion(semana_iso, base_nombre=""):
+    """Sube el corte recién guardado a 🗂️ Cortes Capi. Si no hay token o falla, avisa y sigue."""
+    if not semana_iso or not notion_store.disponible():
+        return
+    try:
+        from snapshots_engine import nube as _nube
+        _r = _nube.subir_corte(semana_iso, base_nombre=base_nombre)
+        if _r.get("ok"):
+            st.toast(f"☁️ Corte {semana_iso} guardado en Notion ({_r.get('mb', 0)} MB)")
+        else:
+            st.warning(f"⚠️ El corte {semana_iso} no se subió a Notion: {_r.get('error')}")
+    except Exception as _e_nube:
+        st.warning(f"⚠️ El corte {semana_iso} no se subió a Notion: {_e_nube}")
+
+
+def _semana_base():
+    """Semana ISO de la base cargada (del nombre del archivo); si no, el último snapshot; si no, hoy."""
+    _bp = st.session_state.get("_base_profundidad_path")
+    if _bp and _HAS_SNAPSHOTS:
+        try:
+            from snapshots_engine import tienda as _t_sem
+            _w = _t_sem.semana_de_nombre(os.path.basename(_bp))
+            if _w:
+                return _w
+        except Exception:
+            pass
+    if _HAS_SNAPSHOTS:
+        try:
+            _ws = snapshots_engine.list_available_weeks()
+            if _ws:
+                return _ws[-1]
+        except Exception:
+            pass
+    return acciones_log.semana_actual()
+
+
+def _nombre_base():
+    _bp = st.session_state.get("_base_profundidad_path")
+    return os.path.basename(_bp) if _bp else ""
+
+
+def _registrar_lote_ui(key, etiqueta, tipo, vista, lote, detalle, descripcion, marca="", ayuda=""):
+    """Botón 'registrar lo enviado' + resultado. El pedido queda en el log (y en Notion) para medir después."""
+    _n = int((pd.to_numeric(detalle.get("uds", pd.Series(dtype=float)), errors="coerce").fillna(0) > 0).sum()) if "uds" in detalle.columns else len(detalle)
+    if st.button(f"{etiqueta} ({_n:,} combos)", key=key, help=ayuda, disabled=_n == 0):
+        with st.spinner("Registrando en el log de acciones…"):
+            _r = acciones_log.registrar_lote(tipo, vista, lote, _semana_base(), detalle, descripcion,
+                                             marca=marca, corte_base=_nombre_base())
+        if _r.get("notion_url"):
+            st.success(f"✅ Lote **{_r['lote']}** registrado: {_r['filas']:,} combos · {_r['unidades']:,} uds → "
+                       f"[ver en Notion]({_r['notion_url']})")
+        elif _r.get("error"):
+            st.warning(f"Lote **{_r['lote']}** quedó registrado en el disco local ({_r['filas']:,} combos) pero no llegó a Notion: "
+                       f"{_r['error']}. Se reintenta con «Sincronizar» en Caso de Éxito.")
+        elif not notion_store.disponible():
+            st.warning(f"Lote **{_r['lote']}** registrado solo en el disco local ({_r['filas']:,} combos): no hay NOTION_TOKEN. "
+                       "☁️ En la nube este registro se pierde al reiniciar.")
+        else:
+            st.success(f"✅ Lote **{_r['lote']}** registrado ({_r['filas']:,} combos).")
+
+
 if run_btn:
     if uploaded is None:
         st.warning("⚠️ Primero sube tu archivo Excel para continuar.")
@@ -1007,7 +1093,8 @@ if run_btn:
                     # Guardar snapshot ANTES de transformar (columnas originales Ripley)
                     if _HAS_SNAPSHOTS:
                         try:
-                            snapshots_engine.process_micro_profundidad(_base_copy_path, force=True)
+                            _meta_snap = snapshots_engine.process_micro_profundidad(_base_copy_path, force=True)
+                            _subir_corte_notion(_meta_snap.get("semana_iso"), _base_copy_name)
                         except Exception as _e_snap:
                             # No bloquea el análisis, pero la semana perdida se avisa (S1, 2026-09-05)
                             st.warning(f"⚠️ El snapshot semanal no se guardó: {_e_snap}. "
@@ -1027,7 +1114,8 @@ if run_btn:
                 # Snapshot para formato plantilla (non-profundidad uploads)
                 if _HAS_SNAPSHOTS and not st.session_state.get("_base_profundidad_path"):
                     try:
-                        snapshots_engine.process_micro_profundidad(tmp_path, force=True)
+                        _meta_snap = snapshots_engine.process_micro_profundidad(tmp_path, force=True)
+                        _subir_corte_notion(_meta_snap.get("semana_iso"), uploaded.name or "")
                     except Exception as _e_snap:
                         st.warning(f"⚠️ El snapshot semanal no se guardó: {_e_snap}. "
                                    "El análisis sigue, pero esta semana no entra al comparativo.")
@@ -3224,6 +3312,14 @@ elif nav_page == "📦 Reposición":
                            file_name=f"Capi_Giro_{_uni_rp}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_repo_uni")
         st.caption("Hoja **Giro**: una fila por SKU, una columna por tienda con lo que el CD puede servir hoy (la suma por SKU nunca supera el stock CD), TOTAL y PENDIENTE (lo que falta y no hay en CD). Hoja **Sustento**: el porqué de cada línea.")
+        # ── Registrar el giro enviado (decisión Franco 2026-09-12): sin esto no hay "pedido" contra el
+        #    cual medir cumplimiento (S6). Va al log local y a Notion (📋 Acciones Capi) con el detalle adjunto.
+        if not _mx_dl.empty:
+            _det_giro = acciones_log.matriz_a_detalle(_mx_dl)
+            _registrar_lote_ui("reg_giro", "📤 Registrar este giro como ENVIADO a inventories",
+                               "Reposición / Empuje", "Reposición", f"giro-{_semana_base()}-{_uni_rp.lower()}",
+                               _det_giro, f"Excel de giro {_uni_rp.lower()} enviado a inventories",
+                               ayuda="Guarda la matriz SKU × tienda × uds tal como se descargó. Márcalo el mismo día que mandas el Excel.")
 
 
 elif nav_page == "🔄 Transferencias":
@@ -5245,6 +5341,13 @@ if nav_page == "📲 Productos Venta Cero":
             _vp80_buf.getvalue(), file_name="Capi_Venta_Cero_Tiendas_Pareto.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dl_vc_pareto", use_container_width=True)
+        # ── K1 (Franco 2026-09-12): registrar la lista enviada a jefes de tienda para medir activación ──
+        if not _vp80.empty:
+            _det_vc = _vp80[_vp80["top_80"].astype(str) != ""][["sku", "tienda", "marca", "nombre", "categoria", "stock_total"]].rename(columns={"stock_total": "uds"})
+            _registrar_lote_ui("reg_vc", "📤 Registrar esta lista (TOP 80%) como ENVIADA a tiendas",
+                               "Venta Cero / Exhibición", "Venta Cero", f"vc-{_semana_base()}", _det_vc,
+                               "Lista Pareto 80% de venta cero enviada a jefes de tienda",
+                               ayuda="Guarda los SKU × tienda del TOP 80%. La semana siguiente se mide qué % vendió (K1) contra la cola no enviada.")
 
         # Excel: una hoja por tienda (para repartir a cada una)
         _vc_buf = io.BytesIO()
@@ -5871,13 +5974,64 @@ elif nav_page == "🏆 Caso de Éxito":
 
         with _tab_log:
             _log = acciones_log.cargar()
-            if _log.empty:
-                st.info("Sin acciones registradas todavía. La primera se registra en la pestaña de al lado.")
+            _lc1, _lc2 = st.columns([3, 1])
+            if notion_store.disponible():
+                _pend = int((_log["notion_url"].astype(str) == "").sum()) if not _log.empty else 0
+                _lc1.caption(f"☁️ Fuente: Notion 📋 Acciones Capi ({len(_log):,} acciones) · {_pend} pendiente(s) de sincronizar")
+                if _lc2.button("🔄 Sincronizar", key="sync_log", disabled=_pend == 0):
+                    _rs = acciones_log.sincronizar_pendientes()
+                    st.success(f"{_rs['subidas']} subida(s) a Notion · {_rs['pendientes']} pendiente(s) {('· ' + _rs['error']) if _rs.get('error') else ''}")
+                    st.rerun()
             else:
-                st.dataframe(_log.sort_values("fecha_registro", ascending=False),
-                             use_container_width=True, hide_index=True, height=300)
+                _lc1.caption("☁️ Sin NOTION_TOKEN: el log vive solo en este disco. En la nube se borra al reiniciar.")
+            if _log.empty:
+                st.info("Sin acciones registradas todavía. Se registran desde 📦 Reposición (giro enviado), "
+                        "📲 Venta Cero (lista enviada), 🎯 Match, 🤝 Agente Terceras o la pestaña de al lado.")
+            else:
+                _log_show = _log[[c for c in ["fecha_registro", "semana_iso", "tipo", "vista", "lote", "marca", "sku", "descripcion",
+                                              "magnitud", "origen", "estado", "notion_url"] if c in _log.columns]]
+                st.dataframe(_log_show, use_container_width=True, hide_index=True, height=300,
+                             column_config={"notion_url": st.column_config.LinkColumn("Notion", display_text="abrir")})
                 st.download_button("📥 Descargar log (CSV)",
                                    data=_log.to_csv(index=False).encode("utf-8"),
                                    file_name="acciones_log.csv", mime="text/csv")
-                st.caption("☁️ En la nube el registro es temporal: descarga el CSV al terminar y "
-                           "pásalo al flujo semanal (se versiona en el repo junto al snapshot).")
+
+        # ── K4 Adopción + K1 Activación de venta cero (KPIs aprobados por Franco 2026-09-12) ──
+        st.markdown("---")
+        st.markdown("##### 📈 KPIs de uso y resultado (K4 adopción · K1 venta cero)")
+        try:
+            _ws_k = snapshots_engine.list_available_weeks()
+        except Exception:
+            _ws_k = []
+        def _racha(ws):
+            n = 0
+            for i in range(len(ws) - 1, 0, -1):
+                y1, w1 = map(int, ws[i].split("-")); y0, w0 = map(int, ws[i - 1].split("-"))
+                if (y1 * 100 + w1) - (y0 * 100 + w0) == 1:
+                    n += 1
+                else:
+                    break
+            return n + 1 if ws else 0
+        _k1, _k2, _k3 = st.columns(3)
+        _k1.metric("Semanas seguidas con corte", f"{_racha(_ws_k)}", help=f"Último corte: {_ws_k[-1] if _ws_k else '—'}. Se rompe si una semana no se carga la base.")
+        _n_acc_sem = int((_log["semana_iso"] == _semana_base()).sum()) if not _log.empty else 0
+        _k2.metric("Acciones registradas esta semana", f"{_n_acc_sem}", help=f"Semana de la base cargada: {_semana_base()}")
+        _lotes = acciones_log.lotes(df=_log) if not _log.empty else pd.DataFrame()
+        _k3.metric("Lotes enviados (giro / venta cero)", f"{len(_lotes)}")
+        if not _lotes.empty:
+            with st.expander("K1 · Activación de venta cero: % de lo enviado que vendió la semana siguiente vs la cola no enviada", expanded=True):
+                _vc_lotes = _lotes[_lotes["tipo"].astype(str).str.contains("Venta Cero", na=False)]
+                if _vc_lotes.empty:
+                    st.info("Aún no hay una lista de venta cero registrada (📲 Productos Venta Cero → «Registrar esta lista»). "
+                            "Tasa base medida sin ritual (sem 30→35): 29–35 % en el Pareto, 11–12 % en la cola.")
+                for _, _lr in _vc_lotes.head(6).iterrows():
+                    _ra = kpi_venta_cero.activacion_lote(str(_lr["lote"]))
+                    if _ra.get("error"):
+                        st.caption(f"**{_lr['lote']}** · {_ra['error']}")
+                        continue
+                    _a1, _a2, _a3, _a4 = st.columns(4)
+                    _a1.metric(f"{_lr['lote']} · enviados", f"{_ra['n_enviados']:,}")
+                    _a2.metric("Activación enviados", f"{_ra['activacion_enviados']*100:.0f}%" if _ra['n_enviados'] else "—")
+                    _a3.metric("Activación cola (no enviada)", f"{_ra['activacion_no_enviados']*100:.0f}%" if _ra['n_no_enviados'] else "—")
+                    _a4.metric("Lift", f"{_ra['lift_pp']:+.0f} pp" if _ra['n_enviados'] and _ra['n_no_enviados'] else "—",
+                               help=f"Medido en el corte {_ra['semana_medida']} sobre el envío de {_ra['semana']}. Base sin ritual: 29–35 % Pareto vs 11–12 % cola.")

@@ -375,6 +375,14 @@ def cumplimiento_empujes(sem_a: str, sem_b: str, acciones_df: pd.DataFrame = Non
             acciones_df = pd.DataFrame()
     if acciones_df is not None and not acciones_df.empty and 'semana_iso' in acciones_df.columns:
         acciones_df = acciones_df[acciones_df['semana_iso'].astype(str) == str(sem_a)]
+        # 2026-09-12: el pedido real sale como LOTE (Excel de giro) con el detalle SKU×tienda aparte;
+        # se expande para que el cruce vea esos SKUs y no solo las acciones sueltas con SKU.
+        if 'lote' in acciones_df.columns and (acciones_df['lote'].astype(str) != '').any():
+            try:
+                import acciones_log as _al
+                acciones_df = _al.expandir_lotes(acciones_df)
+            except Exception:
+                pass
     df = cumplimiento_empujes_df(df_a, df_b, acciones_df)
     n_ped = int(df['pedido'].sum())
     n_ok = int((df['pedido'] & df['observado']).sum())
