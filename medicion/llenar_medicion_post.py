@@ -9,9 +9,13 @@ Qué llena (todo desde <snapshots-dir>/<semana>/, nada a mano):
 - Hoja Datos, columnas P–R por fila SKU×tienda, con tienda.parquet de la semana medida:
     Venta_sem_uds     = vta_uds_sem
     Venta_sem_soles   = vta_soles_sem   (columna agregada a la ingesta el 2026-09-12)
-    Quiebre_en_semana = "Sí" si la tienda cerró la semana con stock_uds = 0.
+    Quiebre_en_semana = "Sí" si el SKU×tienda está en quiebre según la regla de Capi
+                        (venta_perdida_semanal, regla Franco 06-sep): cobertura en la tienda al
+                        cierre ≤ 4 semanas, con velocidad de referencia = máx(prom simple, prom
+                        reciente) de hasta 4 semanas previas (mín. 2 observadas) y las mismas
+                        exclusiones de liquidación. Misma definición que la hoja Quiebres.
   Una fila ausente en tienda.parquet significa stock 0 y on-order 0 al cierre (la ingesta no la
-  guarda) → Quiebre "Sí" y venta 0. OJO: si esa tienda vendió algo antes de quedar en 0, esa venta
+  guarda) → venta 0. OJO: si esa tienda vendió algo antes de quedar en 0, esa venta
   se pierde (filtro de ingesta, ver Pendientes-Post-Presentacion-Zina). Columna V marca esas filas.
 - Hoja Quiebres: por semana disponible, combos SKU×tienda en quiebre con stock en CD y su venta
   perdida neta máx (venta_perdida_semanal.venta_perdida_semana, mismo cálculo que reprodujo la
@@ -92,6 +96,11 @@ def main():
 
     # ── 1. Datos P–R ──
     post = leer_tienda(a.snapshots_dir, a.semana_post).set_index(['sku', 'tienda'])
+    import venta_perdida_semanal as vp
+    res_post = vp.venta_perdida_semana(a.semana_post)
+    en_q = res_post['en_quiebre']
+    quiebres = set(zip(_sku(en_q['sku']), en_q['tienda'])) if len(en_q) else set()
+    print(f'Regla de quiebre Capi (cob ≤ {vp.COB_QUIEBRE_SEM:g} sem en tienda): {len(quiebres):,} SKU×tienda en quiebre en {a.semana_post}; velocidad de {res_post["prev"]}')
     filas, ausentes = [], 0
     for r in range(4, ws.max_row + 1):
         grupo = ws.cell(row=r, column=col['Grupo']).value
@@ -105,11 +114,11 @@ def main():
         key = (sku, codigo)
         if key in post.index:
             x = post.loc[key]
-            uds, soles, stk_fin, ausente = int(x['vta_uds_sem']), float(x['vta_soles_sem']), int(x['stock_uds']), False
+            uds, soles, ausente = int(x['vta_uds_sem']), float(x['vta_soles_sem']), False
         else:
-            uds, soles, stk_fin, ausente = 0, 0.0, 0, True
+            uds, soles, ausente = 0, 0.0, True
             ausentes += 1
-        quiebre = 'Sí' if stk_fin <= 0 else 'No'
+        quiebre = 'Sí' if key in quiebres else 'No'
         ws.cell(row=r, column=col['Venta_sem_uds'], value=uds)
         ws.cell(row=r, column=col['Venta_sem_soles'], value=round(soles, 2))
         ws.cell(row=r, column=col['Quiebre_en_semana'], value=quiebre)
@@ -118,10 +127,9 @@ def main():
                           tienda=tienda, uds=uds, soles=soles, quiebre=quiebre == 'Sí', emp=float(ws.cell(row=r, column=col['Uds_empujadas']).value or 0) > 0))
     df = pd.DataFrame(filas)
     nota_prev = ws.cell(row=2, column=1).value or ''
-    ws.cell(row=2, column=1, value=f'{nota_prev} · POST {a.semana_post} desde tienda.parquet ({dt.date.today()}), {ausentes} filas ausentes en el parquet (stock 0 al cierre)')
+    ws.cell(row=2, column=1, value=f'{nota_prev} · POST {a.semana_post} desde tienda.parquet ({dt.date.today()}), {ausentes} filas ausentes en el parquet (stock 0 al cierre) · Quiebre_en_semana = regla Capi cob ≤ 4 sem')
 
     # ── 2. Quiebres ──
-    import venta_perdida_semanal as vp
     wq = wb['Quiebres']
     q_lleno = []
     for r in range(4, wq.max_row + 1):
@@ -131,7 +139,7 @@ def main():
         w = f'{a.semana_post[:4]}-{int(lab[1:]):02d}'
         if w > a.semana_post or not os.path.exists(os.path.join(a.snapshots_dir, w, 'tienda.parquet')):
             continue
-        res = vp.venta_perdida_semana(w)
+        res = res_post if w == a.semana_post else vp.venta_perdida_semana(w)
         d = res['detalle']
         cd = d[d['stock_cd'] > 0] if 'stock_cd' in d.columns else d.iloc[0:0]
         wq.cell(row=r, column=3, value=int(len(cd)))
@@ -181,7 +189,7 @@ def main():
     wb.save(a.salida)
 
     # ── resumen ──
-    print(f'POST {a.semana_post}: {len(df)} filas llenadas · {ausentes} ausentes en parquet (venta 0, quiebre Sí)')
+    print(f'POST {a.semana_post}: {len(df)} filas llenadas · {ausentes} ausentes en parquet (stock 0 al cierre, venta 0)')
     g = df.groupby(['tipo', 'grupo']).agg(n=('uds', 'size'), uds_prom=('uds', 'mean'), soles_prom=('soles', 'mean'), quiebre_pct=('quiebre', 'mean')).round(2)
     print(g.to_string())
     print('Quiebres:', q_lleno if q_lleno else 'ninguna semana disponible')
