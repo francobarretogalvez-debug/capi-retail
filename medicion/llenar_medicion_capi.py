@@ -29,7 +29,12 @@ Reglas (mismas del LÉEME de la xlsx — NO cambian):
               El motor (motor_v2._reparto_fair_share) calcula L por bisección en memoria y
               NO lo persiste; recalcularlo exige a_reponer/cob_target del pipeline completo,
               así que se mantiene la mediana. Columna L_fuente lo deja explícito por fila.
-- Cobertura_pre_sem = stock_pre / velocidad (vacío si velocidad = 0).
+- Cobertura_pre_sem = (stock_pre + OO_pre) / velocidad (vacío si velocidad = 0). OO = unidades en
+              tránsito CD → tienda (on_order del parquet). Decisión Franco 2026-09-12: el motor decide con
+              stock físico + tránsito (stock_total en motor_v2), así que la distancia al corte L se mide
+              igual. La cobertura post que aproxima L también suma el OO. La regla de quiebre del POST
+              (venta_perdida_semanal) sigue con stock físico: un quiebre es quiebre aunque venga camión.
+              Columna OO_tienda_pre_uds deja el dato a la vista.
 
 Limitación conocida de la ingesta (medida el 12-sep sobre Base al 06.09): build_from_base
 solo guarda SKU×tienda con stock u on-order ≠ 0, así que una tienda que vendió y quedó en 0
@@ -126,9 +131,11 @@ def leer_base(semana, snapshots_dir, base_xlsx=None, capi_dir=None):
     t = _consolidar_tienda(t, origen)
     stk = t.pivot(index='sku', columns='tienda', values='stock_uds').fillna(0)
     vta = t.pivot(index='sku', columns='tienda', values='vta_uds_sem').fillna(0)
+    oo = t.pivot(index='sku', columns='tienda', values='on_order').fillna(0)
     stk.columns = [f'{c} Stk' for c in stk.columns]
     vta.columns = [f'{c} Unidades' for c in vta.columns]
-    b = stk.join(vta, how='outer').fillna(0)
+    oo.columns = [f'{c} OO' for c in oo.columns]
+    b = stk.join(vta, how='outer').join(oo, how='outer').fillna(0)
     b[COL_CD] = cd.reindex(b.index).fillna(0)
     # SKUs con stock CD pero sin fila en tienda.parquet (sin stock en ninguna tienda)
     solo_cd = cd.index.difference(b.index)
@@ -193,12 +200,13 @@ def main():
         for t in tiendas:
             p = MAPA_TIENDAS[t]
             stk = float(fb.get(f'{p} Stk', 0) or 0)
+            oo = float(fb.get(f'{p} OO', 0) or 0)
             vel = sum(float(bb.loc[sku].get(f'{p} Unidades', 0) or 0) for bb in bases if sku in bb.index) / n_bases
             vel = max(vel, 0.0)
             uds = float(r[t] or 0)
-            info[t] = dict(stk=max(stk, 0.0), vel=vel, uds=uds)
-        # L del SKU: mediana cobertura post de tiendas servidas con velocidad > 0
-        post = [(i['stk'] + i['uds']) / i['vel'] for i in info.values() if i['uds'] > 0 and i['vel'] > 0]
+            info[t] = dict(stk=max(stk, 0.0), oo=max(oo, 0.0), vel=vel, uds=uds)
+        # L del SKU: mediana cobertura post (stock + tránsito + uds recibidas) de tiendas servidas con velocidad > 0
+        post = [(i['stk'] + i['oo'] + i['uds']) / i['vel'] for i in info.values() if i['uds'] > 0 and i['vel'] > 0]
         L = float(pd.Series(post).median()) if post else None
         L_fuente = 'mediana_cob_post' if L is not None else ''
         for t, i in info.items():
@@ -208,7 +216,7 @@ def main():
                 grupo = 'Control'
             else:
                 continue
-            cob = i['stk'] / i['vel'] if i['vel'] > 0 else None
+            cob = (i['stk'] + i['oo']) / i['vel'] if i['vel'] > 0 else None
             filas.append(dict(
                 ID_Par='', Tipo_Control=tipo, Grupo=grupo, Cod_Modelo=r['SKU'],
                 Descripcion=r['Producto'], Marca=r['Marca'], Categoria=r['Línea'], Tienda=t,
@@ -217,7 +225,7 @@ def main():
                 Stock_tienda_pre_uds=int(i['stk']), Stock_CD_pre_uds=int(cd_pre),
                 Uds_empujadas=int(i['uds']) if i['uds'] > 0 else 0,
                 Fecha_empuje=fecha if i['uds'] > 0 else None,
-                L_fuente=L_fuente,
+                L_fuente=L_fuente, OO_tienda_pre_uds=int(i['oo']),
             ))
 
     df = pd.DataFrame(filas)
@@ -229,12 +237,14 @@ def main():
             'Uds_empujadas', 'Fecha_empuje']
     ws.delete_rows(4, ws.max_row)  # borra el ejemplo
     ws.cell(row=3, column=21, value='L_fuente')  # col U: cómo se obtuvo L (mediana_cob_post | motor)
+    ws.cell(row=3, column=22, value='OO_tienda_pre_uds')  # col V: tránsito CD → tienda al cierre (sumado en la cobertura)
     for k, row in enumerate(df.itertuples(index=False), start=4):
         for j, c in enumerate(cols, start=1):
             ws.cell(row=k, column=j, value=getattr(row, c))
         ws.cell(row=k, column=19, value=f'=IFERROR(P{k}/J{k},"")')
         ws.cell(row=k, column=20, value=f'=IFERROR(K{k}-I{k},"")')
         ws.cell(row=k, column=21, value=row.L_fuente)
+        ws.cell(row=k, column=22, value=row.OO_tienda_pre_uds)
     ult = 3 + len(df)
     # extender rangos de fórmulas en el resto del libro
     pat = re.compile(r'\$(1000)\b')
@@ -248,7 +258,7 @@ def main():
     nota = (f'Generado {dt.date.today()} · stock pre = {metas[0]["origen"]} · velocidad = promedio de '
             f'{n_bases} semana(s): ' + ', '.join(m['origen'] for m in metas)
             + (' ⚠️ UNA sola semana: Prom_4sem es venta de 1 semana, no de 4' if n_bases == 1 else '')
-            + ' · L = mediana cob post (motor no persiste L)')
+            + ' · L = mediana cob post (motor no persiste L) · cobertura pre y post suman OO (tránsito), como el motor')
     ws.cell(row=2, column=1, value=nota)
     wb.save(a.salida)
 
@@ -260,6 +270,7 @@ def main():
     print(f'En banda ±1.5 sem alrededor de L: {len(banda)} filas ({(banda.Grupo=="Empujado").sum()} emp / {(banda.Grupo=="Control").sum()} ctrl)')
     print(f'Filas sin cobertura (velocidad 0): {df.Cobertura_pre_sem.isna().sum()}')
     print(f'Filas sin L (SKU sin tienda servida con velocidad > 0): {df.L_sku_sem.isna().sum()}')
+    print(f'Filas con OO > 0: {(df.OO_tienda_pre_uds > 0).sum()} ({int(df.OO_tienda_pre_uds.sum())} uds en tránsito)')
     for w in avisos[:10]:
         print('AVISO:', w)
 
