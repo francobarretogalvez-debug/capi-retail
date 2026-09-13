@@ -14,11 +14,16 @@ Qué llena (todo desde <snapshots-dir>/<semana>/, nada a mano):
                         cierre ≤ 4 semanas, con velocidad de referencia = máx(prom simple, prom
                         reciente) de hasta 4 semanas previas (mín. 2 observadas) y las mismas
                         exclusiones de liquidación. Misma definición que la hoja Quiebres.
+    Estado_cob_fin (col W) = Quiebre (≤4 sem) · Pre-quiebre (4–8 sem, mismo umbral que
+                        taxonomia.Estado.PRE_QUIEBRE) · "Cob > 8 o sin velocidad".
+    Cobertura_fin_sem (col X) = cobertura al cierre según Capi, solo para filas ≤ 8 sem.
   Una fila ausente en tienda.parquet significa stock 0 y on-order 0 al cierre (la ingesta no la
   guarda) → venta 0. OJO: si esa tienda vendió algo antes de quedar en 0, esa venta
   se pierde (filtro de ingesta, ver Pendientes-Post-Presentacion-Zina). Columna V marca esas filas.
 - Hoja Quiebres: por semana disponible, combos SKU×tienda en quiebre con stock en CD y su venta
-  perdida neta máx (venta_perdida_semanal.venta_perdida_semana, mismo cálculo que reprodujo la
+  perdida neta máx; columna G: combos en pre-quiebre (4–8 sem) con stock en CD. El umbral de 8 se
+  aplica cambiando vp.COB_QUIEBRE_SEM solo durante la llamada (la función no lo recibe como
+  parámetro; no se toca producción) (venta_perdida_semanal.venta_perdida_semana, mismo cálculo que reprodujo la
   referencia del LÉEME: 744 / S/ 56K en la semana 35).
 - Hoja Canibalización: venta en soles de la CATEGORÍA COMPLETA (todos los SKU de esas líneas, no
   solo los empujados) en tiendas empujadas vs control. Tienda empujada de una categoría = recibió
@@ -31,6 +36,8 @@ import openpyxl
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from llenar_medicion_capi import MAPA_TIENDAS  # noqa: E402
+
+COB_PRE_QUIEBRE = 8.0   # taxonomia.py: PRE-QUIEBRE = cobertura 4–8 sem (quiebre ≤ 4 = vp.COB_QUIEBRE_SEM)
 
 CATEGORIAS = {  # fila de la hoja Canibalización -> líneas del snapshot
     'Polos': ['POLOS M/C', 'POLOS M/L'], 'Camisas': ['CAMISAS M/C', 'CAMISAS M/L'],
@@ -92,15 +99,35 @@ def main():
         if h not in col:
             raise SystemExit(f'La hoja Datos no tiene la columna {h}')
     col_flag = max(col.values()) + 1
+    col_estado, col_cob = col_flag + 1, col_flag + 2
     ws.cell(row=3, column=col_flag, value='Post_ausente_en_parquet')
+    ws.cell(row=3, column=col_estado, value='Estado_cob_fin')
+    ws.cell(row=3, column=col_cob, value='Cobertura_fin_sem')
 
     # ── 1. Datos P–R ──
     post = leer_tienda(a.snapshots_dir, a.semana_post).set_index(['sku', 'tienda'])
     import venta_perdida_semanal as vp
+
+    def vp_con_umbral(w, cob):
+        """venta_perdida_semana con otro umbral de cobertura; restaura la constante al salir."""
+        prev_c = vp.COB_QUIEBRE_SEM
+        vp.COB_QUIEBRE_SEM = cob
+        try:
+            return vp.venta_perdida_semana(w)
+        finally:
+            vp.COB_QUIEBRE_SEM = prev_c
+
+    def claves(res):
+        q = res['en_quiebre']
+        return set(zip(_sku(q['sku']), q['tienda'])) if len(q) else set()
+
     res_post = vp.venta_perdida_semana(a.semana_post)
-    en_q = res_post['en_quiebre']
-    quiebres = set(zip(_sku(en_q['sku']), en_q['tienda'])) if len(en_q) else set()
-    print(f'Regla de quiebre Capi (cob ≤ {vp.COB_QUIEBRE_SEM:g} sem en tienda): {len(quiebres):,} SKU×tienda en quiebre en {a.semana_post}; velocidad de {res_post["prev"]}')
+    res_post8 = vp_con_umbral(a.semana_post, COB_PRE_QUIEBRE)
+    quiebres = claves(res_post)
+    q8 = res_post8['en_quiebre']
+    cob_fin = dict(zip(zip(_sku(q8['sku']), q8['tienda']), q8['cobertura_sem'])) if len(q8) else {}
+    print(f'Regla Capi: quiebre cob ≤ {vp.COB_QUIEBRE_SEM:g} sem → {len(quiebres):,} SKU×tienda; pre-quiebre (4–{COB_PRE_QUIEBRE:g}] → '
+          f'{len(cob_fin) - len(quiebres):,} en {a.semana_post}; velocidad de {res_post["prev"]}')
     filas, ausentes = [], 0
     for r in range(4, ws.max_row + 1):
         grupo = ws.cell(row=r, column=col['Grupo']).value
@@ -119,18 +146,24 @@ def main():
             uds, soles, ausente = 0, 0.0, True
             ausentes += 1
         quiebre = 'Sí' if key in quiebres else 'No'
+        cob = cob_fin.get(key)
+        estado = 'Quiebre' if key in quiebres else ('Pre-quiebre' if cob is not None else f'Cob > {COB_PRE_QUIEBRE:g} o sin velocidad')
+        ws.cell(row=r, column=col_estado, value=estado)
+        if cob is not None:
+            ws.cell(row=r, column=col_cob, value=round(float(cob), 2))
         ws.cell(row=r, column=col['Venta_sem_uds'], value=uds)
         ws.cell(row=r, column=col['Venta_sem_soles'], value=round(soles, 2))
         ws.cell(row=r, column=col['Quiebre_en_semana'], value=quiebre)
         ws.cell(row=r, column=col_flag, value='Sí' if ausente else 'No')
         filas.append(dict(grupo=grupo, tipo=ws.cell(row=r, column=col['Tipo_Control']).value, cat=ws.cell(row=r, column=col['Categoria']).value,
-                          tienda=tienda, uds=uds, soles=soles, quiebre=quiebre == 'Sí', emp=float(ws.cell(row=r, column=col['Uds_empujadas']).value or 0) > 0))
+                          tienda=tienda, uds=uds, soles=soles, quiebre=quiebre == 'Sí', prequiebre=estado == 'Pre-quiebre', emp=float(ws.cell(row=r, column=col['Uds_empujadas']).value or 0) > 0))
     df = pd.DataFrame(filas)
     nota_prev = ws.cell(row=2, column=1).value or ''
     ws.cell(row=2, column=1, value=f'{nota_prev} · POST {a.semana_post} desde tienda.parquet ({dt.date.today()}), {ausentes} filas ausentes en el parquet (stock 0 al cierre) · Quiebre_en_semana = regla Capi cob ≤ 4 sem')
 
     # ── 2. Quiebres ──
     wq = wb['Quiebres']
+    wq.cell(row=3, column=7, value=f'Pre-quiebre (4–{COB_PRE_QUIEBRE:g} sem) con stock en CD')
     q_lleno = []
     for r in range(4, wq.max_row + 1):
         lab = wq.cell(row=r, column=1).value
@@ -140,12 +173,20 @@ def main():
         if w > a.semana_post or not os.path.exists(os.path.join(a.snapshots_dir, w, 'tienda.parquet')):
             continue
         res = res_post if w == a.semana_post else vp.venta_perdida_semana(w)
+        res8 = res_post8 if w == a.semana_post else vp_con_umbral(w, COB_PRE_QUIEBRE)
         d = res['detalle']
         cd = d[d['stock_cd'] > 0] if 'stock_cd' in d.columns else d.iloc[0:0]
+        # pre-quiebre: (4, 8] sem con stock en CD (stock_cd del snapshot de cadena de esa semana)
+        s_cd = pd.read_parquet(os.path.join(a.snapshots_dir, w, 'snapshot.parquet'), columns=['sku', 'stock_cd'])
+        s_cd = dict(zip(_sku(s_cd['sku']), s_cd['stock_cd']))
+        p8 = res8['en_quiebre']
+        p8 = p8[p8['cobertura_sem'] > vp.COB_QUIEBRE_SEM] if len(p8) else p8
+        n_pre_cd = int(sum(1 for k in _sku(p8['sku']) if float(s_cd.get(k, 0) or 0) > 0)) if len(p8) else 0
         wq.cell(row=r, column=3, value=int(len(cd)))
         wq.cell(row=r, column=4, value=round(float(cd['neto_max'].sum()), 0))
         wq.cell(row=r, column=6, value=f'Capi venta_perdida_semanal {w}: combos en quiebre con stock CD > 0, pérdida neta máx')
-        q_lleno.append((lab, w, int(len(cd)), round(float(cd['neto_max'].sum()))))
+        wq.cell(row=r, column=7, value=n_pre_cd)
+        q_lleno.append((lab, w, int(len(cd)), round(float(cd['neto_max'].sum())), n_pre_cd))
 
     # ── 3. Canibalización ──
     prev = semanas_previas(a.snapshots_dir, a.semana_post, a.n_pre)
@@ -190,9 +231,10 @@ def main():
 
     # ── resumen ──
     print(f'POST {a.semana_post}: {len(df)} filas llenadas · {ausentes} ausentes en parquet (stock 0 al cierre, venta 0)')
-    g = df.groupby(['tipo', 'grupo']).agg(n=('uds', 'size'), uds_prom=('uds', 'mean'), soles_prom=('soles', 'mean'), quiebre_pct=('quiebre', 'mean')).round(2)
+    g = df.groupby(['tipo', 'grupo']).agg(n=('uds', 'size'), uds_prom=('uds', 'mean'), soles_prom=('soles', 'mean'),
+                                          quiebre_pct=('quiebre', 'mean'), prequiebre_pct=('prequiebre', 'mean')).round(2)
     print(g.to_string())
-    print('Quiebres:', q_lleno if q_lleno else 'ninguna semana disponible')
+    print('Quiebres (semana, ISO, quiebres con CD, S/ perdida, pre-quiebre con CD):', q_lleno if q_lleno else 'ninguna semana disponible')
     print('Canibalización (semanas previas', prev, '):'); print(pd.DataFrame(canib).to_string(index=False))
 
 
