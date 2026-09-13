@@ -51,6 +51,23 @@ capi-deploy/
 └── .streamlit/               # Config Streamlit
 ```
 
+## Persistencia en Notion (decisión Franco 2026-09-12)
+
+Franco usa la URL de Streamlit Cloud; el disco de la nube se borra en cada reinicio o push.
+Por eso el **log de acciones** y los **cortes semanales** salen a Notion (`notion_store.py`):
+
+- 📋 **Acciones Capi** (DB `af83c41b8e6d480299dc66d4c06eccd4`): una página por acción o por
+  **lote** (giro enviado a inventories, lista de venta cero enviada a tiendas) con el detalle
+  SKU×tienda×uds adjunto en CSV. Módulo `acciones_log.py` (`registrar_lote`, `expandir_lotes`,
+  `pedidos_sku_tienda`, `sincronizar_pendientes`). Botones: 📦 Reposición y 📲 Venta Cero.
+- 🗂️ **Cortes Capi** (DB `748c0ce7f70d491bbe4605eef0b3f2f1`): zip con `snapshot.parquet` +
+  `tienda.parquet` por semana. `snapshots_engine/nube.py`: `subir_corte` al cargar base,
+  `restaurar_faltantes` al arrancar la app.
+- Credencial: `NOTION_TOKEN` (local `.env`; nube `st.secrets`). La integración debe estar
+  **conectada a las dos bases**. Sin token todo sigue con CSV/parquet local y el sidebar lo avisa.
+- Regla: el "pedido" que se mide (S6 cumplimiento, K1 activación) es el LOTE registrado el día
+  que se manda el Excel. Sin lote registrado, no hay KPI esa semana.
+
 ## Pipeline de datos (flujo crítico)
 
 ```
