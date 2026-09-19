@@ -627,3 +627,241 @@ def excel_proveedor(bloques: dict) -> bytes:
         reportes_marcas._hoja_leyenda(w)
     buf.seek(0)
     return buf.read()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  COMPARATIVO SEMANAL (C10): persistir lo que se envió y comparar contra eso
+#  Principio: el pedido medible es el corte registrado; no se recalculan motores
+#  sobre bases viejas. `proveedor.parquet` viaja dentro del zip de cortes que
+#  snapshots_engine.nube sube/restaura de Notion (opcional: los cortes viejos no lo traen).
+# ══════════════════════════════════════════════════════════════════════════════
+import os as _os
+from datetime import date as _date, datetime as _datetime, timedelta as _timedelta
+
+try:
+    from snapshots_engine.config import SNAPSHOTS_DIR as _SNAPSHOTS_DIR
+except Exception:  # pragma: no cover
+    _SNAPSHOTS_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "snapshots")
+
+ARCHIVO_CORTE = "proveedor.parquet"
+COLS_CORTE = ["marca", "semana_iso", "corte", "bloque", "sku", "nombre", "categoria", "estado", "capital", "uds",
+              "cobertura", "vta_sem", "n_tiendas", "n_tiendas_quiebre", "stock_cd", "accion", "top_80",
+              "enviado", "fecha_envio", "generado"]
+PERSISTENCIA_ALERTA = 3   # semanas consecutivas en el mismo bloque → presión explícita en el correo
+
+
+def _ruta_corte(semana_iso: str, base_dir: str | None = None) -> str:
+    return _os.path.join(base_dir or _SNAPSHOTS_DIR, semana_iso, ARCHIVO_CORTE)
+
+
+def _semana_anterior(semana_iso: str) -> str:
+    y, w = (int(x) for x in semana_iso.split("-"))
+    d = _date.fromisocalendar(y, w, 1) - _timedelta(days=7)
+    iy, iw, _ = d.isocalendar()
+    return f"{iy}-{iw:02d}"
+
+
+def filas_corte(bloques: dict, semana_iso: str, enviado: bool = False) -> pd.DataFrame:
+    """Formato largo (una fila por marca × semana × bloque × SKU) con lo que dice el correo."""
+    marca, corte = bloques["marca"], bloques["corte"]
+    ahora = _datetime.now().isoformat(timespec="seconds")
+    partes = []
+    def _mk(df, bloque, capital, uds, cob, vta, estado, accion, top):
+        if df.empty:
+            return
+        d = pd.DataFrame({
+            "marca": marca, "semana_iso": semana_iso, "corte": corte, "bloque": bloque,
+            "sku": df["sku"].map(sku_key).values, "nombre": df["nombre"].astype(str).values,
+            "categoria": df["categoria"].astype(str).values if "categoria" in df.columns else "",
+            "estado": df[estado].astype(str).values if estado and estado in df.columns else "",
+            "capital": df[capital].fillna(0).astype(float).round(0).values if capital in df.columns else 0.0,
+            "uds": df[uds].fillna(0).astype(float).round(0).values if uds in df.columns else 0.0,
+            "cobertura": df[cob].astype(float).values if cob and cob in df.columns else np.nan,
+            "vta_sem": df[vta].astype(float).values if vta and vta in df.columns else np.nan,
+            "n_tiendas": df["n_tiendas"].fillna(0).astype(int).values if "n_tiendas" in df.columns else 0,
+            "n_tiendas_quiebre": df["n_tiendas_quiebre"].fillna(0).astype(int).values if "n_tiendas_quiebre" in df.columns else 0,
+            "stock_cd": df["stock_cd"].fillna(0).astype(float).values if "stock_cd" in df.columns else 0.0,
+            "accion": df[accion].astype(str).values if accion in df.columns else "",
+            "top_80": df[top].astype(bool).values if top and top in df.columns else False,
+            "enviado": bool(enviado), "fecha_envio": ahora if enviado else "", "generado": ahora,
+        })
+        partes.append(d)
+    _mk(bloques["b1"], "b1", "capital_costo", "stock_cadena", "cobertura_cadena", "vta_sem_prom4", "estado_cadena", "accion", "top_80")
+    _mk(bloques["b2a"], "b2a", "capital_costo", "stock_cadena", "cobertura_cadena", "vta_sem_prom4", "estado_cadena", "accion", "top_80")
+    _mk(bloques["b2b"], "b2b", "capital_costo", "transf_uds", "cobertura_cadena", None, "estado_cadena", "accion", None)
+    _mk(bloques["b3"], "b3", "capital_costo", "stock_cadena", "cobertura_cadena", "vta_sem_prom4", "estado_cadena", "accion", None)
+    if not partes:
+        return pd.DataFrame(columns=COLS_CORTE)
+    return pd.concat(partes, ignore_index=True)[COLS_CORTE]
+
+
+def persistir_corte(bloques: dict, semana_iso: str, enviado: bool = False, base_dir: str | None = None) -> str:
+    """Escribe/actualiza las filas de la marca en snapshots/<semana>/proveedor.parquet.
+    Idempotente por (marca, semana): reemplaza las filas previas de esa marca. Devuelve la ruta."""
+    ruta = _ruta_corte(semana_iso, base_dir)
+    _os.makedirs(_os.path.dirname(ruta), exist_ok=True)
+    nuevo = filas_corte(bloques, semana_iso, enviado)
+    if _os.path.exists(ruta):
+        prev = pd.read_parquet(ruta)
+        prev = prev[prev["marca"].astype(str).str.upper() != str(bloques["marca"]).upper()]
+        nuevo = pd.concat([prev, nuevo], ignore_index=True)
+    nuevo.to_parquet(ruta, index=False)
+    return ruta
+
+
+def cargar_cortes(marca: str, hasta: str | None = None, n: int = 8, base_dir: str | None = None) -> pd.DataFrame:
+    """Filas persistidas de la marca en las últimas `n` semanas anteriores a `hasta` (excluida)."""
+    base = base_dir or _SNAPSHOTS_DIR
+    if not _os.path.isdir(base):
+        return pd.DataFrame(columns=COLS_CORTE)
+    semanas = sorted(d for d in _os.listdir(base) if _os.path.exists(_ruta_corte(d, base)))
+    if hasta:
+        semanas = [s for s in semanas if s < hasta]
+    partes = []
+    for s in semanas[-n:]:
+        try:
+            df = pd.read_parquet(_ruta_corte(s, base))
+        except Exception:
+            continue
+        df = df[df["marca"].astype(str).str.upper() == str(marca).upper()]
+        if not df.empty:
+            partes.append(df)
+    return pd.concat(partes, ignore_index=True) if partes else pd.DataFrame(columns=COLS_CORTE)
+
+
+def _kpis_de_filas(df: pd.DataFrame) -> dict:
+    def _b(bl):
+        d = df[df["bloque"] == bl]
+        return d
+    b1, b2a, b2b, b3 = _b("b1"), _b("b2a"), _b("b2b"), _b("b3")
+    return {"b1": {"n_skus": len(b1), "capital": float(b1["capital"].sum()), "stock_uds": float(b1["uds"].sum())},
+            "b2a": {"n_skus": len(b2a), "capital": float(b2a["capital"].sum())},
+            "b2b": {"n_skus": len(b2b), "uds": float(b2b["uds"].sum())},
+            "b3": {"n_skus": len(b3), "vta_sem_total": float(b3["vta_sem"].fillna(0).sum())}}
+
+
+def _kpis_de_hechos(h: dict) -> dict:
+    return {"b1": {"n_skus": h["b1"]["n_skus"], "capital": float(h["b1"]["capital"]), "stock_uds": float(h["b1"]["stock_uds"])},
+            "b2a": {"n_skus": h["b2a"]["n_skus"], "capital": float(h["b2a"]["capital"])},
+            "b2b": {"n_skus": h["b2b"]["n_skus"], "uds": float(h["b2b"]["uds"])},
+            "b3": {"n_skus": h["b3"]["n_skus"], "vta_sem_total": float(h["b3"]["vta_sem_total"])}}
+
+
+def comparar_marca(bloques: dict, cortes_prev: pd.DataFrame) -> dict:
+    """Compara los bloques de la semana contra el corte persistido más reciente de la marca.
+
+    Devuelve {semana, semana_prev, consecutivas, hay_prev, kpis{bloque{kpi{actual,prev,delta_abs,delta_pct}}},
+              skus{bloque{persisten,salieron,nuevos}}, semanas_en_bloque{bloque{sku:n}}, persistentes{bloque:[skus]},
+              resolucion_b1 (% de los SKUs de venta cero de la semana anterior que ya no están sin venta)}.
+    La racha `semanas_en_bloque` cuenta hacia atrás sobre cortes CONSECUTIVOS; un hueco la corta."""
+    semana = bloques.get("semana_iso") or ""
+    h = bloques["hechos"]
+    actual = filas_corte(bloques, semana)
+    out = {"semana": semana, "hay_prev": False, "semana_prev": None, "consecutivas": False,
+           "kpis": {}, "skus": {}, "semanas_en_bloque": {}, "persistentes": {}, "resolucion_b1": None}
+    k_act = _kpis_de_hechos(h)
+    if cortes_prev is None or cortes_prev.empty:
+        out["kpis"] = {b: {k: {"actual": v, "prev": None, "delta_abs": None, "delta_pct": None} for k, v in d.items()} for b, d in k_act.items()}
+        out["semanas_en_bloque"] = {b: {s: 1 for s in actual.loc[actual["bloque"] == b, "sku"]} for b in ("b1", "b2a", "b2b", "b3")}
+        return out
+    semanas = sorted(cortes_prev["semana_iso"].unique())
+    prev_w = semanas[-1]
+    prev = cortes_prev[cortes_prev["semana_iso"] == prev_w]
+    out.update(hay_prev=True, semana_prev=prev_w, consecutivas=(semana and _semana_anterior(semana) == prev_w))
+    k_prev = _kpis_de_filas(prev)
+    for b, d in k_act.items():
+        out["kpis"][b] = {}
+        for k, v in d.items():
+            p = k_prev[b].get(k)
+            da = (v - p) if p is not None else None
+            dp = (round(da / p * 100, 1) if p else None) if da is not None else None
+            out["kpis"][b][k] = {"actual": v, "prev": p, "delta_abs": da, "delta_pct": dp}
+    for b in ("b1", "b2a", "b2b", "b3"):
+        s_act = set(actual.loc[actual["bloque"] == b, "sku"]); s_prev = set(prev.loc[prev["bloque"] == b, "sku"])
+        out["skus"][b] = {"persisten": sorted(s_act & s_prev), "salieron": sorted(s_prev - s_act), "nuevos": sorted(s_act - s_prev)}
+        # racha consecutiva hacia atrás
+        racha = {}
+        por_sem = {w: set(cortes_prev.loc[(cortes_prev["semana_iso"] == w) & (cortes_prev["bloque"] == b), "sku"]) for w in semanas}
+        for s in s_act:
+            n, w = 1, semana
+            while True:
+                w = _semana_anterior(w)
+                if w not in por_sem or s not in por_sem[w]:
+                    break
+                n += 1
+            racha[s] = n
+        out["semanas_en_bloque"][b] = racha
+        out["persistentes"][b] = sorted([s for s, n in racha.items() if n >= PERSISTENCIA_ALERTA], key=lambda s: (-racha[s], s))
+    p1 = set(prev.loc[prev["bloque"] == "b1", "sku"])
+    if p1:
+        out["resolucion_b1"] = round(len(p1 - set(actual.loc[actual["bloque"] == "b1", "sku"])) / len(p1) * 100, 1)
+    return out
+
+
+_KPI_LABELS = [("b1", "capital", "Venta cero — capital S/"), ("b1", "n_skus", "Venta cero — modelos"),
+               ("b2a", "capital", "Sobrestock — capital S/"), ("b2a", "n_skus", "Sobrestock — modelos"),
+               ("b2b", "uds", "Desbalance — uds a mover"), ("b3", "n_skus", "Ganadores cortos — modelos")]
+
+
+def evolucion_texto(cmp: dict, bloques: dict) -> str:
+    """Bloque 0 del correo (solo si hay corte previo REAL). Texto plano."""
+    if not cmp.get("hay_prev"):
+        return ""
+    filas = []
+    for b, k, lab in _KPI_LABELS:
+        d = cmp["kpis"][b][k]
+        flecha = "" if d["delta_abs"] is None else ("▲" if d["delta_abs"] > 0 else ("▼" if d["delta_abs"] < 0 else "="))
+        dpct = "" if d["delta_pct"] is None else f" ({d['delta_pct']:+.0f}%)"
+        filas.append({"Indicador": lab, f"Sem {cmp['semana_prev']}": _s(d["prev"]), f"Sem {cmp['semana']}": _s(d["actual"]), "Δ": f"{flecha} {_s(d['delta_abs'])}{dpct}".strip()})
+    cols = list(filas[0].keys())
+    txt = _tabla_txt(filas, cols, {})
+    extra = []
+    if cmp.get("resolucion_b1") is not None:
+        extra.append(f"De los modelos sin venta que les reportamos la semana pasada, el {cmp['resolucion_b1']:.0f}% ya volvió a vender o salió de la lista.")
+    pers = cmp["persistentes"].get("b1", [])
+    if pers:
+        nombres = bloques["b1"].assign(_k=bloques["b1"]["sku"].map(sku_key)).set_index("_k")["nombre"].to_dict()
+        rachas = cmp["semanas_en_bloque"]["b1"]
+        top = ", ".join(f"{s} {nombres.get(s, '')} ({rachas[s]} sem)" for s in pers[:5])
+        extra.append(f"{len(pers)} modelos llevan {PERSISTENCIA_ALERTA} o más semanas seguidas sin venta: {top}{'…' if len(pers) > 5 else ''}.")
+    if not cmp.get("consecutivas"):
+        extra.append(f"(La comparación es contra la semana {cmp['semana_prev']}, la última reportada.)")
+    return txt + ("\n" + "\n".join(extra) if extra else "")
+
+
+def evolucion_html(cmp: dict, bloques: dict) -> str:
+    if not cmp.get("hay_prev"):
+        return ""
+    filas = []
+    for b, k, lab in _KPI_LABELS:
+        d = cmp["kpis"][b][k]
+        flecha = "" if d["delta_abs"] is None else ("▲" if d["delta_abs"] > 0 else ("▼" if d["delta_abs"] < 0 else "="))
+        dpct = "" if d["delta_pct"] is None else f" ({d['delta_pct']:+.0f}%)"
+        filas.append({"Indicador": lab, f"Sem {cmp['semana_prev']}": _s(d["prev"]), f"Sem {cmp['semana']}": _s(d["actual"]), "Δ": f"{flecha} {_s(d['delta_abs'])}{dpct}".strip()})
+    cols = list(filas[0].keys())
+    html = _tabla_html(filas, cols)
+    P = "<p style='font-family:Calibri,Arial;font-size:10.5pt;margin:4px 0'>"
+    if cmp.get("resolucion_b1") is not None:
+        html += f"{P}De los modelos sin venta que les reportamos la semana pasada, el <b>{cmp['resolucion_b1']:.0f}%</b> ya volvió a vender o salió de la lista.</p>"
+    pers = cmp["persistentes"].get("b1", [])
+    if pers:
+        nombres = bloques["b1"].assign(_k=bloques["b1"]["sku"].map(sku_key)).set_index("_k")["nombre"].to_dict()
+        rachas = cmp["semanas_en_bloque"]["b1"]
+        top = ", ".join(f"{s} {nombres.get(s, '')} ({rachas[s]} sem)" for s in pers[:5])
+        html += f"{P}<b>{len(pers)} modelos llevan {PERSISTENCIA_ALERTA} o más semanas seguidas sin venta:</b> {top}{'…' if len(pers) > 5 else ''}</p>"
+    return html
+
+
+def serie_kpis(cortes: pd.DataFrame, bloques: dict | None = None) -> pd.DataFrame:
+    """KPI × semana (para la hoja '0. Evolución' y el historial en la app)."""
+    filas = {}
+    if cortes is not None and not cortes.empty:
+        for w, d in cortes.groupby("semana_iso"):
+            k = _kpis_de_filas(d)
+            filas[w] = {lab: k[b][kk] for b, kk, lab in _KPI_LABELS}
+    if bloques is not None:
+        k = _kpis_de_hechos(bloques["hechos"])
+        filas[bloques.get("semana_iso") or "actual"] = {lab: k[b][kk] for b, kk, lab in _KPI_LABELS}
+    if not filas:
+        return pd.DataFrame()
+    return pd.DataFrame(filas).reindex(columns=sorted(filas))

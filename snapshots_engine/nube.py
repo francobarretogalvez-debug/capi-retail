@@ -23,7 +23,9 @@ import notion_store as _ns
 from .config import SNAPSHOTS_DIR, INDEX_PATH
 from .storage import list_available_weeks, _update_index
 
-ARCHIVOS = ("snapshot.parquet", "tienda.parquet")
+# proveedor.parquet (reporte semanal al proveedor, 2026-09-19) es OPCIONAL: los cortes
+# anteriores no lo traen; empaquetar lo omite si falta y restaurar solo exige snapshot.parquet.
+ARCHIVOS = ("snapshot.parquet", "tienda.parquet", "proveedor.parquet")
 
 
 def _meta_index(semana_iso: str) -> dict:

@@ -224,3 +224,73 @@ def test_marca_sin_datos_no_rompe():
     b = rp.bloques_marca("NO-EXISTE", _cob(), corte="x")
     assert b["b1"].empty and b["b2a"].empty and b["b3"].empty and b["hechos"]["b1"]["n_skus"] == 0
     assert rp.tablas_texto(b)["b1"].strip().startswith("(sin modelos")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  C10 — comparativo semanal: persistir el corte y comparar contra lo enviado
+# ══════════════════════════════════════════════════════════════════════════════
+def _bl_semana(semana, quitar=(), extra_b1=()):
+    """Bloques de la marca M para una semana dada; `quitar` saca SKUs de la base (simula que se resolvieron)."""
+    cob = _cob()
+    cob = cob[~cob["sku"].isin(quitar)]
+    return rp.bloques_marca("M", cob, _trans_sint(), _vp_sint(), None, _rep_sint(), _alertas_sint(), corte=semana, semana_iso=semana)
+
+
+def test_persistir_corte_roundtrip(tmp_path):
+    b35 = _bl_semana("2026-35")
+    ruta = rp.persistir_corte(b35, "2026-35", enviado=False, base_dir=str(tmp_path))
+    assert ruta.endswith("2026-35/proveedor.parquet")
+    df = pd.read_parquet(ruta)
+    assert list(df.columns) == rp.COLS_CORTE and set(df["bloque"]) == {"b1", "b2a", "b2b", "b3"}
+    assert df.loc[df["bloque"] == "b1", "capital"].sum() == b35["hechos"]["b1"]["capital"]
+    assert not df["enviado"].any()
+    # idempotente: re-persistir la misma marca (ahora enviado) reemplaza, no duplica
+    rp.persistir_corte(b35, "2026-35", enviado=True, base_dir=str(tmp_path))
+    df2 = pd.read_parquet(ruta)
+    assert len(df2) == len(df) and df2["enviado"].all() and (df2["fecha_envio"] != "").all()
+    # cargar_cortes: excluye la semana `hasta` y filtra la marca
+    assert rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path))["semana_iso"].unique().tolist() == ["2026-35"]
+    assert rp.cargar_cortes("M", hasta="2026-35", base_dir=str(tmp_path)).empty
+    assert rp.cargar_cortes("OTRA", base_dir=str(tmp_path)).empty
+    # viaja en el zip de cortes (opcional) y se restaura
+    from snapshots_engine import nube
+    assert "proveedor.parquet" in nube.ARCHIVOS
+
+
+def test_comparar_marca(tmp_path):
+    b34 = _bl_semana("2026-34"); rp.persistir_corte(b34, "2026-34", True, base_dir=str(tmp_path))
+    b35 = _bl_semana("2026-35"); rp.persistir_corte(b35, "2026-35", True, base_dir=str(tmp_path))
+    # semana 36: el 103 (venta cero) se resolvió (sale de la base) → B1 pierde 1 SKU y S/ 100
+    b36 = _bl_semana("2026-36", quitar=(103,))
+    cmp = rp.comparar_marca(b36, rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path)))
+    assert cmp["hay_prev"] and cmp["semana_prev"] == "2026-35" and cmp["consecutivas"]
+    k = cmp["kpis"]["b1"]
+    assert k["n_skus"]["prev"] == 3 and k["n_skus"]["actual"] == 2 and k["n_skus"]["delta_abs"] == -1
+    assert k["capital"]["delta_abs"] == -100 and k["capital"]["delta_pct"] == pytest.approx(-100 / 3700 * 100, abs=0.1)
+    assert cmp["skus"]["b1"] == {"persisten": ["101", "102"], "salieron": ["103"], "nuevos": []}
+    assert cmp["semanas_en_bloque"]["b1"] == {"101": 3, "102": 3}          # 34, 35, 36 seguidas
+    assert cmp["persistentes"]["b1"] == ["101", "102"]                       # ≥3 semanas → presión en el correo
+    assert cmp["resolucion_b1"] == pytest.approx(100 / 3, abs=0.1)
+    txt = rp.evolucion_texto(cmp, b36)
+    assert "Venta cero — capital S/" in txt and "2 modelos llevan 3 o más semanas seguidas sin venta" in txt
+    assert "33%" in txt
+    assert "<table" in rp.evolucion_html(cmp, b36)
+    serie = rp.serie_kpis(rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path)), b36)
+    assert list(serie.columns) == ["2026-34", "2026-35", "2026-36"] and serie.loc["Venta cero — modelos"].tolist() == [3, 3, 2]
+
+
+def test_comparar_marca_hueco_corta_la_racha(tmp_path):
+    rp.persistir_corte(_bl_semana("2026-33"), "2026-33", True, base_dir=str(tmp_path))   # falta la 34 y la 35
+    b36 = _bl_semana("2026-36")
+    cmp = rp.comparar_marca(b36, rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path)))
+    assert cmp["hay_prev"] and cmp["semana_prev"] == "2026-33" and not cmp["consecutivas"]
+    assert all(n == 1 for n in cmp["semanas_en_bloque"]["b1"].values())      # el hueco no infla la racha
+    assert cmp["persistentes"]["b1"] == []
+    assert "la última reportada" in rp.evolucion_texto(cmp, b36)
+
+
+def test_comparar_sin_historial():
+    b = _bl_semana("2026-36")
+    cmp = rp.comparar_marca(b, pd.DataFrame())
+    assert not cmp["hay_prev"] and cmp["kpis"]["b1"]["capital"]["prev"] is None
+    assert rp.evolucion_texto(cmp, b) == ""                                  # sin corte previo real no hay bloque 0
