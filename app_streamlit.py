@@ -122,6 +122,10 @@ for _mod in (comparativo_semanal, render_foto, otb_terceras, venta_perdida_seman
 import rendimiento_tienda as rend_t
 import reporte_semanal as rep_sem
 import agente_reporte as ag_rep
+import reporte_proveedor
+import agente_proveedor
+for _mod in (reporte_proveedor, agente_proveedor):
+    importlib.reload(_mod)
 import calendario_ripley as cal_rip
 
 # ══════════════════════════════════════════════════════════════
@@ -3427,12 +3431,12 @@ elif nav_page == "💰 Gestión de Precios":
 
 elif nav_page == "🤝 Agente Terceras":
     st.markdown(f'<div class="section-header"><h3>🤝 Agente Terceras</h3><span class="live-badge">AGENTE</span></div>', unsafe_allow_html=True)
-    st.caption("Detecta oportunidades con marcas terceras y redacta el correo al proveedor. "
-               "El agente genera un BORRADOR — tú lo revisas y lo envías. Nunca manda nada solo.")
+    st.caption("Reporte semanal al proveedor: un correo + un Excel por marca con tres frentes (venta cero · sobrestock y "
+               "desbalance · ganadores que se quedan cortos) y el comparativo contra la semana anterior. "
+               "Capi arma el BORRADOR y el Excel; el envío lo haces tú desde Outlook. Nunca manda nada solo.")
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        st.warning("🔑 Falta configurar la API key de Anthropic (secrets del deploy o archivo "
-                   ".env). Las tablas de oportunidades funcionan igual; solo la redacción "
-                   "del correo con IA está deshabilitada.")
+        st.info("🔑 Sin API key de Anthropic el correo sale con la versión por reglas (mismos números, prosa fija). "
+                "Las tablas y el Excel no dependen de la IA.")
 
     # Paquete de trabajo: todo el análisis de terceras en un Excel
     st.download_button(
@@ -3514,94 +3518,189 @@ elif nav_page == "🤝 Agente Terceras":
                 st.download_button("📥 Excel — reparto OTB con factores y argumentos", _ob.getvalue(), file_name="Capi_Reparto_OTB_Terceras.xlsx",
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="otb_dl")
 
-    _at_prov = agente_terceras.cargar_proveedores()
+    # ══════════════════════════════════════════════════════════════════════
+    #  REPORTE SEMANAL AL PROVEEDOR (decisión Franco 2026-09-18; plan v2 19-sep)
+    #  Un correo + un Excel por marca, 3 frentes: venta cero · sobrestock/desbalance ·
+    #  ganadores cortos. Motor: reporte_proveedor (pandas puro). Prosa: agente_proveedor
+    #  (Claude acotado o reglas). Capi NO envía: Daniela copia a Outlook y adjunta.
+    #  Reemplaza a los correos legado "Capital parado" y "Quiebre" (retirados 19-sep).
+    # ══════════════════════════════════════════════════════════════════════
+    if st.session_state.pop("at_rep_reset", False):
+        for _k in ("at_borrador_rep", "at_rep_asunto", "at_rep_cuerpo"):
+            st.session_state.pop(_k, None)
 
-    _at_tipo = st.radio(
-        "Tipo de oportunidad",
-        ["💰 Capital parado (rebate / markdown support)", "📦 Quiebre (reorder urgente)"],
-        horizontal=True, key="at_tipo",
-    )
-
-    if _at_tipo.startswith("💰"):
-        _at_op = agente_terceras.detectar_capital_parado(df_cob)
-        if _at_op.empty:
-            st.info("No hay marcas terceras con capital parado sobre el umbral.")
-        else:
-            st.markdown(f"**{len(_at_op)} marcas terceras con capital inmovilizado y baja rotación:**")
-            _at_show = _at_op[['marca', 'capital', 'n_skus', 'cob_prom', 'sell_through', 'margen_efectivo']].rename(columns={
-                'marca': 'Marca', 'capital': 'Capital S/', 'n_skus': 'SKUs',
-                'cob_prom': 'Cob (sem)', 'sell_through': 'Sell-through %', 'margen_efectivo': 'Margen %',
-            })
-            st.dataframe(_at_show.style.format({
-                'Capital S/': 'S/ {:,.0f}', 'Cob (sem)': '{:.0f}', 'Sell-through %': '{:.0f}%', 'Margen %': '{:.0f}%',
-            }, na_rep="—"), use_container_width=True, hide_index=True)
-
-            _at_marcas_op = _at_op['marca'].tolist()
-            _at_sel = st.selectbox("Marca para generar el correo", _at_marcas_op, key="at_sel_cap")
-            _at_row = _at_op[_at_op['marca'] == _at_sel].iloc[0]
-            _at_prov_marca = _at_prov.get(_at_sel.upper())
-            if _at_prov_marca and _at_prov_marca.get('contacto'):
-                st.caption(f"Destinatario sugerido: {_at_prov_marca.get('contacto','')} ({_at_prov_marca.get('empresa','')})")
-            if st.button("✍️ Generar texto del correo", key="at_gen_cap", type="primary"):
-                with st.spinner("Redactando con IA..."):
-                    try:
-                        _at_skus = agente_terceras.top_skus_marca(df_cob, _at_sel)
-                        _at_det = agente_terceras.top5_por_marca_linea(df_cob)
-                        if not _at_det.empty:
-                            _at_det = _at_det[_at_det['marca'].str.upper() == _at_sel.upper()]
-                        _at_correo = agente_terceras.generar_correo_capital_parado(
-                            _at_row, _at_prov_marca, _at_skus, detalle_lineas=_at_det)
-                        st.session_state["at_borrador"] = _at_correo
-                    except Exception as _at_e:
-                        st.error(f"No se pudo generar el texto: {_at_e}")
-
+    _rep_marcas = sorted(reportes_marcas.marcas_reporte(df_cob),
+                         key=lambda m: (str(m).upper().strip() not in agente_terceras.MARCAS_AGENTE, str(m)))
+    if not _rep_marcas:
+        st.info("La base cargada no trae marcas terceras con presencia.")
     else:
-        _at_op = agente_terceras.detectar_quiebre_tercera(df_cob)
-        if _at_op.empty:
-            st.info("No hay marcas terceras en quiebre con venta relevante.")
+        _rc1, _rc2 = st.columns([2, 1])
+        _rep_marca = _rc1.selectbox("Marca (proveedor)", _rep_marcas, key="at_rep_marca")
+        _rep_sem = _semana_base()
+        _rep_corte = None
+        try:
+            _rep_corte = str(etl_profundidad.fecha_corte_desde_nombre(_nombre_base()) or "").replace("/", ".") or None
+        except Exception:
+            _rep_corte = None
+        _rep_corte = _rep_corte or pd.Timestamp.now().strftime("%d.%m.%Y")
+        _rc2.caption(f"Semana **{_rep_sem}** · corte de la base **{_rep_corte}**")
+
+        @st.cache_data(ttl=600, show_spinner=False)
+        def _vp_detalle_semana(_sem):
+            try:
+                import venta_perdida_semanal as _vps
+                return _vps.venta_perdida_semana().get("detalle")
+            except Exception:
+                return None
+        _rep_vp = _vp_detalle_semana(_rep_sem)
+        _rep_bp = _capi_base_path()
+        _rep_tev = _tipo_evento_map(_rep_bp) if _rep_bp else {}
+
+        _rep_fp = f"{_rep_marca}|{len(df_cob)}|{df_cob['stock_valor_costo'].sum():.0f}|{_rep_sem}"
+        if st.session_state.get("at_rep_bloques_fp") != _rep_fp:
+            with st.spinner("Calculando los bloques de la marca…"):
+                _bl = reporte_proveedor.bloques_marca(
+                    _rep_marca, df_cob,
+                    df_trans if not df_trans.empty else None, _rep_vp,
+                    df_prec if not df_prec.empty else None, df_rep if not df_rep.empty else None,
+                    df_alertas if not df_alertas.empty else None,
+                    corte=_rep_corte, tipo_evento_map=_rep_tev, semana_iso=_rep_sem)
+                try:
+                    _cortes = reporte_proveedor.cargar_cortes(_rep_marca, hasta=_rep_sem)
+                except Exception:
+                    _cortes = pd.DataFrame()
+                _cmp = reporte_proveedor.comparar_marca(_bl, _cortes)
+            st.session_state["at_rep_bloques"] = (_bl, _cortes, _cmp)
+            st.session_state["at_rep_bloques_fp"] = _rep_fp
+        _bl, _cortes, _cmp = st.session_state["at_rep_bloques"]
+        _h = _bl["hechos"]
+
+        # ── Tiles ──
+        def _tile(col, titulo, valor, sub, color):
+            col.markdown(f'<div style="background:var(--capi-bg-surface); border-radius:12px; padding:12px 16px; border-left:4px solid {color};">'
+                         f'<div style="font-size:0.72rem; color:var(--capi-text2);">{titulo}</div>'
+                         f'<div style="font-size:1.35rem; font-weight:700; color:var(--capi-text);">{valor}</div>'
+                         f'<div style="font-size:0.72rem; color:var(--capi-text2);">{sub}</div></div>', unsafe_allow_html=True)
+        _t1, _t2, _t3, _t4 = st.columns(4)
+        _tile(_t1, "1) Venta cero (cadena, última semana)", f"S/ {_h['b1']['capital']:,}", f"{_h['b1']['n_skus']} modelos · ⭐ {_h['b1']['n_top']} · {_h['b1']['pct_capital_marca']}% del capital", STATUS_CRITICO)
+        _tile(_t2, "2a) Sobrestock de cadena", f"S/ {_h['b2a']['capital']:,}", f"{_h['b2a']['n_skus']} modelos · mkd {_h['b2a']['n_markdown']} · canje {_h['b2a']['n_canje']} · frenar {_h['b2a']['n_frenar']}", STATUS_SOBRESTOCK)
+        _tile(_t3, "2b) Desbalance entre tiendas", f"{_h['b2b']['uds']:,} uds", f"{_h['b2b']['n_skus']} modelos · ganancia neta S/ {_h['b2b']['ganancia']:,}", STATUS_SOBRESTOCK)
+        _tile(_t4, "3) Ganadores que se quedan cortos", f"{_h['b3']['n_skus']} modelos", f"{_h['b3']['n_sin_cd']} sin stock en CD · necesidad {_h['b3']['necesidad_uds']:,} uds", STATUS_MUERTO)
+        _ft = _h["foto"]
+        st.caption(f"Foto de {_rep_marca}: S/ {_ft['capital_total']:,} a costo · {_ft['skus']} modelos · {_ft['tiendas']} tiendas · "
+                   f"sell-through {_ft['sell_through_pct']}% · margen efectivo {_ft['margen_efectivo_pct'] if _ft['margen_efectivo_pct'] is not None else '—'}%"
+                   + ("" if _rep_vp is not None else " · sin snapshots suficientes: el bloque 3 sale sin venta perdida")
+                   + ("" if _rep_tev else " · sin ruta de la base: la acción de piso por tienda sale como 'revisar exhibición'"))
+        if _cmp.get("hay_prev"):
+            _k1 = _cmp["kpis"]["b1"]["capital"]; _k2 = _cmp["kpis"]["b2a"]["capital"]
+            st.caption(f"📈 Vs semana {_cmp['semana_prev']}{'' if _cmp['consecutivas'] else ' (no consecutiva)'}: venta cero "
+                       f"{_k1['delta_pct']:+.0f}% · sobrestock {_k2['delta_pct']:+.0f}%" if _k1["delta_pct"] is not None and _k2["delta_pct"] is not None else
+                       f"📈 Hay corte previo ({_cmp['semana_prev']}) para comparar.")
+            if _cmp["persistentes"].get("b1"):
+                st.caption(f"⏱️ {len(_cmp['persistentes']['b1'])} modelos llevan ≥{reporte_proveedor.PERSISTENCIA_ALERTA} semanas seguidas sin venta — van resaltados en el correo.")
         else:
-            st.markdown(f"**{len(_at_op)} marcas terceras con quiebres que vendían bien:**")
-            _at_show = _at_op.rename(columns={
-                'marca': 'Marca', 'n_skus_quiebre': 'SKUs en quiebre',
-                'venta_riesgo_sem': 'Venta en riesgo S//sem', 'vta_sem_uds': 'Vta/sem (uds)',
-            })
-            st.dataframe(_at_show.style.format({
-                'Venta en riesgo S//sem': 'S/ {:,.0f}', 'Vta/sem (uds)': '{:.0f}',
-            }), use_container_width=True, hide_index=True)
+            st.caption("📈 Primer reporte de esta marca con Capi: el comparativo semanal aparece desde el segundo envío.")
 
-            _at_sel = st.selectbox("Marca para generar el correo", _at_op['marca'].tolist(), key="at_sel_q")
-            _at_row = _at_op[_at_op['marca'] == _at_sel].iloc[0]
-            _at_prov_marca = _at_prov.get(_at_sel.upper())
-            if _at_prov_marca and _at_prov_marca.get('contacto'):
-                st.caption(f"Destinatario sugerido: {_at_prov_marca.get('contacto','')} ({_at_prov_marca.get('empresa','')})")
-            if st.button("✍️ Generar texto del correo", key="at_gen_q", type="primary"):
-                with st.spinner("Redactando con IA..."):
+        # ── Detalle (top 50 por bloque) ──
+        _fmt_rep = {"capital_costo": "S/ {:,.0f}", "cobertura_cadena": "{:.1f}", "vta_sem_prom4": "{:.1f}", "pct_descuento": "{:.0%}",
+                    "dscto_sugerido": "{:.0%}", "precio_sugerido": "S/ {:,.2f}", "precio_vigente": "S/ {:,.2f}", "precio_minimo": "S/ {:,.2f}",
+                    "transf_ganancia": "S/ {:,.0f}", "vp_neto_min": "S/ {:,.0f}", "vp_neto_max": "S/ {:,.0f}"}
+        def _mostrar(df, cols):
+            if df.empty:
+                st.caption("Sin modelos en este bloque esta semana."); return
+            _c = [c for c in cols if c in df.columns]
+            st.dataframe(df[_c].head(50).style.format({k: v for k, v in _fmt_rep.items() if k in _c}, na_rep="—"), use_container_width=True, hide_index=True)
+        with st.expander(f"1) Venta cero — {_h['b1']['n_skus']} modelos", expanded=False):
+            _mostrar(_bl["b1"], ["sku", "nombre", "categoria", "estado_cadena", "n_tiendas_stock", "stock_cadena", "capital_costo", "top_80", "semanas_sin_venta", "edad_semanas", "pct_descuento", "dscto_sugerido", "precio_sugerido", "accion"])
+        with st.expander(f"2a) Sobrestock de cadena — {_h['b2a']['n_skus']} modelos", expanded=False):
+            _mostrar(_bl["b2a"], ["sku", "nombre", "categoria", "grupo", "estado_cadena", "tendencia", "stock_cadena", "vta_sem_prom4", "cobertura_cadena", "capital_costo", "top_80", "pct_descuento", "dscto_sugerido", "precio_sugerido", "accion", "alternativas"])
+        with st.expander(f"2b) Desbalance entre tiendas — {_h['b2b']['n_skus']} modelos", expanded=False):
+            _mostrar(_bl["b2b"], ["sku", "nombre", "categoria", "estado_cadena", "transf_uds", "transf_tiendas", "transf_ganancia", "stock_cadena", "cobertura_cadena", "accion"])
+        with st.expander(f"3) Ganadores que se quedan cortos — {_h['b3']['n_skus']} modelos (umbral {_h['b3']['umbral_vta']} u/sem)", expanded=False):
+            _mostrar(_bl["b3"], ["sku", "nombre", "categoria", "tendencia", "entra_por", "vta_sem_prom4", "stock_cadena", "cobertura_cadena", "n_tiendas_quiebre", "n_tiendas", "stock_cd", "necesidad_uds", "pendiente_sin_cd_uds", "sem_en_quiebre_max", "vp_neto_min", "vp_neto_max", "accion"])
+        with st.expander("📈 Historial de la marca (cortes enviados con Capi)", expanded=False):
+            _serie = reporte_proveedor.serie_kpis(_cortes, _bl)
+            if _serie.empty or _serie.shape[1] < 2:
+                st.caption("Todavía no hay cortes anteriores de esta marca. La serie se construye con cada reporte enviado.")
+            else:
+                st.dataframe(_serie.style.format("{:,.0f}", na_rep="—"), use_container_width=True)
+
+        # ── Generar ──
+        st.session_state.setdefault("at_rep_firma", "Daniela Hernández · Moda Masculina · Ripley")
+        st.text_input("Firma del correo", key="at_rep_firma")
+        if st.button("✍️ Generar correo + Excel", key="at_rep_gen", type="primary"):
+            with st.spinner("Armando el reporte…"):
+                try:
+                    _prosa = agente_proveedor.redactar(_h)
+                    _via = "prosa redactada con IA — revísala"
+                except Exception as _e_ia:
+                    _prosa = agente_proveedor.redactar_reglas(_h)
+                    _via = f"versión por reglas (sin IA: {_e_ia})"
+                _ev_t = reporte_proveedor.evolucion_texto(_cmp, _bl)
+                _ev_h = reporte_proveedor.evolucion_html(_cmp, _bl)
+                _correo = agente_proveedor.ensamblar(_h, _prosa, reporte_proveedor.tablas_texto(_bl), reporte_proveedor.tablas_html(_bl),
+                                                     firma=st.session_state.get("at_rep_firma", ""), evolucion_texto=_ev_t, evolucion_html=_ev_h)
+                _xlsx = reporte_proveedor.excel_proveedor(_bl, cortes=_cortes, cmp=_cmp)
+                try:
+                    reporte_proveedor.persistir_corte(_bl, _rep_sem, enviado=False)
+                except Exception as _e_pc:
+                    st.warning(f"No se pudo guardar el corte de la marca en snapshots/: {_e_pc}")
+                st.session_state["at_borrador_rep"] = {
+                    "marca": _rep_marca, "semana_iso": _rep_sem, "corte": _rep_corte, "via": _via, "xlsx": _xlsx,
+                    "cuerpo_html": _correo["cuerpo_html"], "sospechosos": _correo["sospechosos"], "fp": _rep_fp,
+                    "capital_total": _h["b1"]["capital"] + _h["b2a"]["capital"], "detalle_lote": reporte_proveedor.detalle_lote(_bl),
+                }
+                st.session_state["at_rep_asunto"] = _correo["asunto"]
+                st.session_state["at_rep_cuerpo"] = _correo["cuerpo_texto"]
+
+        # ── Borrador: revisar / copiar / descargar / registrar ──
+        _bor = st.session_state.get("at_borrador_rep")
+        if _bor and _bor.get("fp") == _rep_fp:
+            st.markdown("---")
+            st.markdown(f"##### ✉️ Reporte semanal para {_bor['marca']} — semana {_bor['semana_iso']}")
+            st.caption(f"Borrador: {_bor['via']}. Copia el asunto y el cuerpo a tu Outlook, adjunta el Excel y envíalo. Capi no envía nada.")
+            if _bor["sospechosos"]:
+                st.error("El borrador tiene cifras que NO están en el análisis: " + ", ".join(_bor["sospechosos"]) + ". Corrígelas antes de enviar.")
+            st.text_input("Asunto", key="at_rep_asunto")
+            st.text_area("Cuerpo (texto plano)", key="at_rep_cuerpo", height=420)
+            with st.expander("Vista para copiar a Outlook (con tablas)", expanded=True):
+                st.markdown(_bor["cuerpo_html"], unsafe_allow_html=True)
+                st.caption("Selecciona todo dentro de este cuadro, copia y pega en Outlook: las tablas se conservan.")
+            st.download_button("📥 Excel para el proveedor", data=_bor["xlsx"],
+                               file_name=f"Reporte_Proveedor_{str(_bor['marca']).replace(' ', '_')}_{_bor['corte']}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_rep_prov_xlsx")
+            _rb1, _rb2 = st.columns(2)
+            _n_lote = len(_bor["detalle_lote"])
+            if _rb1.button(f"📨 Ya lo envié → registrar (correo + lote venta cero, {_n_lote:,} combos)", key="at_rep_enviado", type="primary"):
+                with st.spinner("Registrando…"):
+                    acciones_log.agregar("", "Negociación Terceras", str(_bor["marca"]).upper(),
+                                         f"Reporte semanal al proveedor enviado: {st.session_state.get('at_rep_asunto', '')[:100]}",
+                                         magnitud=f"S/ {_bor['capital_total']:,.0f}", vista="Agente Terceras", corte_base=_nombre_base())
+                    _r_lote = None
+                    if _n_lote:
+                        _r_lote = acciones_log.registrar_lote(
+                            "Venta Cero / Exhibición", "Agente Terceras",
+                            f"prov-{str(_bor['marca']).lower().replace(' ', '-')}-{_bor['semana_iso']}", _bor["semana_iso"],
+                            _bor["detalle_lote"], f"Venta cero enviada al proveedor {_bor['marca']} (reporte semanal)",
+                            marca=str(_bor["marca"]).upper(), corte_base=_nombre_base())
                     try:
-                        _at_correo = agente_terceras.generar_correo_reorder(_at_row, _at_prov_marca)
-                        st.session_state["at_borrador"] = _at_correo
-                    except Exception as _at_e:
-                        st.error(f"No se pudo generar el texto: {_at_e}")
-
-    # ── Borrador generado: revisar / editar / copiar ──
-    _at_bor = st.session_state.get("at_borrador")
-    if _at_bor:
-        st.markdown("---")
-        st.markdown(f"##### ✉️ Texto para {_at_bor.get('marca','')} — revisar y copiar")
-        st.text_input("Asunto", value=_at_bor.get("asunto", ""), key="at_asunto")
-        st.text_area("Cuerpo", value=_at_bor.get("cuerpo", ""), height=320, key="at_cuerpo")
-        st.caption("Revisa y ajusta el texto, luego cópialo a tu correo de Ripley para enviarlo al proveedor. "
-                   "El agente solo redacta — el envío lo haces tú.")
-        _atb1, _atb2 = st.columns(2)
-        if _atb1.button("📨 Ya lo envié → registrar acción", key="at_enviado", type="primary"):
-            acciones_log.agregar(
-                "", "Negociación Terceras", str(_at_bor.get("marca", "")).upper(),
-                f"Correo al proveedor enviado: {_at_bor.get('asunto', '')[:120]}",
-                origen="Sugerida por Capi", estado="Ejecutada")
-            del st.session_state["at_borrador"]
-            st.success("Acción registrada en el log ✅ — cuenta para el Caso de Éxito.")
-        if _atb2.button("🗑️ Descartar", key="at_descartar"):
-            del st.session_state["at_borrador"]
-            st.rerun()
+                        reporte_proveedor.persistir_corte(_bl, _bor["semana_iso"], enviado=True)
+                    except Exception as _e_pc:
+                        st.warning(f"El corte quedó sin marcar como enviado: {_e_pc}")
+                if _r_lote and _r_lote.get("notion_url"):
+                    st.success(f"✅ Registrado: acción + lote **{_r_lote['lote']}** ({_r_lote['filas']:,} combos) → [ver en Notion]({_r_lote['notion_url']})")
+                elif _r_lote and _r_lote.get("error"):
+                    st.warning(f"Acción registrada. El lote **{_r_lote['lote']}** quedó en disco local pero no llegó a Notion: {_r_lote['error']}.")
+                elif not notion_store.disponible():
+                    st.warning("Registrado solo en el disco local: no hay NOTION_TOKEN. ☁️ En la nube este registro se pierde al reiniciar.")
+                else:
+                    st.success("✅ Acción registrada en el log.")
+                st.session_state["at_rep_bloques_fp"] = None      # recalcular: ahora hay corte enviado
+                st.session_state["at_rep_reset"] = True
+                st.rerun()
+            if _rb2.button("🗑️ Descartar borrador", key="at_rep_descartar"):
+                st.session_state["at_rep_reset"] = True
+                st.rerun()
 
 
 # ─── TAB 2: Gestión por Antigüedad ─────────────────────────────────

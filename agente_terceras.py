@@ -1,18 +1,12 @@
 """
-agente_terceras.py — Primer agente de Capi.
+agente_terceras.py — universo de marcas terceras y detectores de oportunidad.
 
-Detecta oportunidades con marcas TERCERAS y genera BORRADORES de correo a
-proveedores que Franco aprueba antes de enviar. Nunca envía solo: el flujo
-seguro es generar texto → dejar borrador en Gmail → Franco revisa y envía.
-(Fase 1 de inducción supervisada del diseño original.)
-
-Dos tipos de oportunidad:
-  - capital_parado: marca tercera con capital inmovilizado alto + sell-through
-    bajo → correo pidiendo rebate / apoyo de markdown / devolución.
-  - quiebre: marca tercera agotada que vendía bien (requiere_proveedor) →
-    correo pidiendo reorder.
-
-Llamada directa a Claude con system prompt comercial.
+Desde 2026-09-19 la redacción del correo al proveedor vive en `agente_proveedor`
+(prosa acotada) y los bloques del "Reporte semanal al proveedor" en `reporte_proveedor`.
+Aquí quedan: los universos de marcas (MARCAS_AGENTE, MARCAS_PROPIAS_SET), los
+detectores agregados (capital parado, quiebre por marca), el top por marca×línea que
+usa el Excel-paquete de terceras, las sugerencias de precio de terceras y los contactos.
+Capi nunca envía correos: genera borradores que una persona revisa y manda.
 """
 from __future__ import annotations
 
@@ -23,15 +17,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-try:
-    from anthropic import Anthropic
-except ImportError:
-    Anthropic = None
 
 # ── Config ──
-MODEL = "claude-sonnet-4-6"
-MAX_TOKENS = 1200
-TEMPERATURE = 0.3  # algo de variación: es redacción, no análisis
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROVEEDORES_PATH = os.path.join(_BASE_DIR, "config_proveedores.json")
@@ -62,15 +49,8 @@ MARCAS_PROPIAS_SET = {
 # análisis agregados. Usar para filtrar Salud del Stock y rankings.
 MARCAS_CON_PRESENCIA = MARCAS_PROPIAS_SET | MARCAS_AGENTE
 
-SYSTEM_PROMPT_CORREO = """Eres el asistente de un Senior Fashion Buyer de Ripley (retail de moda, Perú).
-Redactas correos comerciales a proveedores y representantes de marca: profesionales,
-directos, cordiales, en español peruano de negocios. Sin relleno ni adjetivos vacíos.
-El buyer revisará y enviará el correo, así que escribe en su voz (primera persona).
-Estructura: saludo breve, contexto con los datos duros, pedido concreto, cierre cordial.
-Nunca inventes cifras: usa SOLO los datos que se te dan. Devuelve EXACTAMENTE este formato:
-ASUNTO: <línea de asunto>
----
-<cuerpo del correo>"""
+# La redacción de correos vive en agente_proveedor (reporte semanal al proveedor, 2026-09-19).
+
 
 
 # ══════════════════════════════════════════════════════════════
@@ -306,107 +286,6 @@ def detectar_quiebre_tercera(df_cob: pd.DataFrame, min_vta: float = 1.0) -> pd.D
 #  GENERACIÓN DEL BORRADOR
 # ══════════════════════════════════════════════════════════════
 
-def _call_claude(prompt: str) -> str:
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise ValueError("No se encontró ANTHROPIC_API_KEY. Configúrala en .env")
-    if Anthropic is None:
-        raise ImportError("Instala el SDK: pip install anthropic")
-    client = Anthropic(api_key=api_key, timeout=30.0, max_retries=1)
-    try:
-        resp = client.messages.create(
-            model=MODEL, max_tokens=MAX_TOKENS, temperature=TEMPERATURE,
-            system=SYSTEM_PROMPT_CORREO, messages=[{"role": "user", "content": prompt}],
-        )
-    except Exception as e:
-        _n = type(e).__name__
-        if "RateLimit" in _n or "Overloaded" in str(e):
-            raise ValueError("El asistente está saturado. Intenta en unos segundos.")
-        if "Timeout" in _n or "Connection" in _n:
-            raise ValueError("El asistente tardó demasiado. Reintenta.")
-        raise
-    return resp.content[0].text
-
-
 # Parser compartido (fix 2026-09-19): antes partía en el primer `---` y perdía el
 # saludo dentro del asunto. La implementación vive en agente_reporte.partir_asunto.
 from agente_reporte import partir_asunto as _parse_correo  # noqa: E402
-
-
-def generar_correo_capital_parado(marca_row: pd.Series, proveedor: dict = None,
-                                  top_skus: pd.DataFrame = None, buyer: str = "Franco Barreto",
-                                  detalle_lineas: pd.DataFrame = None) -> dict:
-    """Borrador pidiendo rebate / apoyo de markdown por capital parado.
-    proveedor es opcional. Si se pasa detalle_lineas (top SKUs por línea de la
-    marca), el correo comunica el desglose por línea, no solo el agregado."""
-    proveedor = proveedor or {}
-    top_skus = top_skus if top_skus is not None else pd.DataFrame()
-
-    # Desglose por línea (si está disponible) — lo que Franco pidió comunicar
-    if detalle_lineas is not None and not detalle_lineas.empty:
-        bloques = []
-        for _linea, _grp in detalle_lineas.groupby('categoria', sort=False):
-            _cap_lin = _grp['capital'].sum() if 'capital' in _grp else 0
-            _items = "\n".join(
-                f"    · {r.get('nombre', r.get('sku'))}: {int(r.get('stock', 0))} uds, "
-                f"cobertura {r.get('cobertura', 0):.0f} sem, S/ {r.get('capital', 0):,.0f}"
-                for _, r in _grp.head(5).iterrows()
-            )
-            bloques.append(f"  {_linea} (S/ {_cap_lin:,.0f} en total):\n{_items}")
-        skus_txt = "\n".join(bloques)
-    else:
-        skus_txt = "\n".join(
-            f"  - {r.get('nombre', r.get('sku'))}: {int(r.get('stock_total', 0))} uds, "
-            f"cobertura {r.get('cobertura_sem', 0):.0f} sem, "
-            f"S/ {r.get('stock_valor_costo', 0):,.0f} a costo"
-            for _, r in top_skus.iterrows()
-        )
-    _dest = (f"{proveedor.get('contacto','')} ({proveedor.get('empresa','')})"
-             if proveedor.get('contacto') else f"representante comercial de la marca {marca_row['marca']}")
-    prompt = f"""Redacta un correo al representante de la marca {marca_row['marca']} en Ripley.
-
-DESTINATARIO: {_dest}
-REMITENTE: {buyer}, Senior Fashion Buyer - Moda Masculina, Ripley.
-
-SITUACIÓN (datos reales del inventario):
-- Capital inmovilizado en stock sin rotación (sobrestock + sin venta): S/ {marca_row['capital']:,.0f} (a costo)
-- {int(marca_row['n_skus'])} SKUs / {int(marca_row['stock_uds']):,} unidades en esa condición
-- Cobertura de ese stock: {marca_row['cob_prom']:.0f} semanas (muy por encima del objetivo de 12)
-- Sell-through de la marca: {marca_row['sell_through']:.0f}% (bajo)
-- Margen efectivo actual: {marca_row.get('margen_efectivo', 0):.0f}%
-
-Detalle por línea de producto (SKUs prioritarios a revisar):
-{skus_txt}
-
-PEDIDO: solicitar apoyo comercial para liquidar este stock — rebate (descuento
-post-compra), apoyo de markdown (que la marca cofinancie la rebaja de precio),
-o devolución parcial. Menciona que el detalle está desglosado POR LÍNEA de
-producto para facilitar la conversación. Propón una reunión para revisar
-opciones línea por línea. Tono colaborativo: es una relación de largo plazo."""
-    return {**_parse_correo(_call_claude(prompt)),
-            "para": proveedor.get("email", ""), "marca": marca_row['marca'],
-            "tipo": "capital_parado"}
-
-
-def generar_correo_reorder(marca_row: pd.Series, proveedor: dict = None,
-                           buyer: str = "Franco Barreto") -> dict:
-    """Borrador pidiendo reorder por quiebre de marca tercera con venta.
-    proveedor es opcional."""
-    proveedor = proveedor or {}
-    _dest = (f"{proveedor.get('contacto','')} ({proveedor.get('empresa','')})"
-             if proveedor.get('contacto') else f"proveedor/representante de la marca {marca_row['marca']}")
-    prompt = f"""Redacta un correo al proveedor/fabricante de la marca {marca_row['marca']}.
-
-DESTINATARIO: {_dest}
-REMITENTE: {buyer}, Senior Fashion Buyer - Moda Masculina, Ripley.
-
-SITUACIÓN (datos reales):
-- {int(marca_row['n_skus_quiebre'])} SKUs de la marca están en QUIEBRE de stock
-- Estos productos venden {marca_row['vta_sem_uds']:.0f} unidades/semana en conjunto
-- Venta en riesgo por el quiebre: S/ {marca_row['venta_riesgo_sem']:,.0f} por semana
-
-PEDIDO: solicitar reorder urgente de estos productos, confirmar disponibilidad y
-plazo de entrega. Tono de urgencia comercial pero cordial."""
-    return {**_parse_correo(_call_claude(prompt)),
-            "para": proveedor.get("email", ""), "marca": marca_row['marca'],
-            "tipo": "reorder"}

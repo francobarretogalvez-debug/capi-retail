@@ -555,11 +555,17 @@ def _hoja_o_vacia(writer, hoja: str, titulo: str, df: pd.DataFrame, formatos: di
         vistas_excel._tabla_con_titulo(writer, hoja, titulo, df, formatos, anchos={"Producto": 34, "Acción sugerida": 48, "Modelo": 34})
 
 
-def excel_proveedor(bloques: dict) -> bytes:
-    """Pestañas: Resumen · 1. Venta Cero (SKU) · 1b. Venta Cero x Tienda · 2a. Sobrestock ·
-    2b. Desbalance tiendas · 3. Ganadores · Leyenda. Todas construidas de los mismos
-    DataFrames del correo; los totales del Resumen salen de `hechos`."""
+def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict | None = None) -> bytes:
+    """Pestañas: Resumen · [0. Evolución] · 1. Venta Cero (SKU) · 1b. Venta Cero x Tienda · 2a. Sobrestock ·
+    2b. Desbalance tiendas · 3. Ganadores · Leyenda. Todas construidas de los mismos DataFrames del
+    correo; los totales del Resumen salen de `hechos`. Con `cortes`/`cmp` (comparar_marca) agrega la
+    hoja 0 (serie KPI × semana) y la columna "Semanas en el bloque" en 1, 2a y 3."""
     import io
+    racha = (cmp or {}).get("semanas_en_bloque", {})
+    def _racha(df, bloque):
+        if df.empty or not racha.get(bloque):
+            return None
+        return df["sku"].map(sku_key).map(racha[bloque]).fillna(1).astype(int)
     h, marca, corte = bloques["hechos"], bloques["marca"], bloques["corte"]
     b1, b2a, b2b, b3 = bloques["b1"], bloques["b2a"], bloques["b2b"], bloques["b3"]
     buf = io.BytesIO()
@@ -579,6 +585,21 @@ def excel_proveedor(bloques: dict) -> bytes:
         ws.cell(row=fila + 1, column=1, value=f"Los bloques 1 y 2a suman S/ {h['b1']['capital'] + h['b2a']['capital']:,} = {round((h['b1']['capital'] + h['b2a']['capital']) / foto['capital_total'] * 100, 1) if foto['capital_total'] else 0}% del capital de la marca. Un modelo aparece en un solo bloque.")
         ws.cell(row=fila + 2, column=1, value=reportes_marcas._SUPUESTOS)
         ws.cell(row=fila + 3, column=1, value="Cifras al corte de la base (no a la fecha de envío). Generado por Capi.")
+        # 0. Evolución (solo si hay cortes previos reales)
+        if cortes is not None and not cortes.empty:
+            serie = serie_kpis(cortes, bloques)
+            if not serie.empty and serie.shape[1] >= 2:
+                ev = serie.reset_index().rename(columns={"index": "Indicador"})
+                ws0 = vistas_excel._tabla_con_titulo(w, "0. Evolución", f"{marca} — Evolución semanal de los frentes (cortes enviados con Capi) · corte {corte}",
+                                                     ev, {c: _F["S"] for c in ev.columns if c != "Indicador"}, anchos={"Indicador": 34})
+                if cmp and cmp.get("hay_prev"):
+                    fila0 = ws0.max_row + 2
+                    if cmp.get("resolucion_b1") is not None:
+                        ws0.cell(row=fila0, column=1, value=f"De los modelos sin venta reportados la semana {cmp['semana_prev']}, el {cmp['resolucion_b1']:.0f}% ya volvió a vender o salió de la lista.")
+                        fila0 += 1
+                    pers = cmp.get("persistentes", {}).get("b1", [])
+                    if pers:
+                        ws0.cell(row=fila0, column=1, value=f"{len(pers)} modelos llevan {PERSISTENCIA_ALERTA} o más semanas seguidas sin venta (ver columna 'Semanas en el bloque' en la hoja 1).")
         # 1
         c1 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("temporada", "Temporada"), ("estado_cadena", "Estado"), ("n_tiendas_stock", "Tiendas con stock"),
               ("stock_cadena", "Stock (uds)"), ("capital_costo", "Capital S/ (costo)"), ("pct_acum", "% acum."), ("top_80", "Prioridad"), ("semanas_sin_venta", "Sem sin venta"),
@@ -587,6 +608,9 @@ def excel_proveedor(bloques: dict) -> bytes:
         d1 = b1[[a for a, _ in c1 if a in b1.columns]].rename(columns=dict(c1)).copy() if not b1.empty else pd.DataFrame()
         if not d1.empty:
             d1["Prioridad"] = np.where(d1["Prioridad"], "⭐ TOP 80%", "")
+            r1 = _racha(b1, "b1")
+            if r1 is not None:
+                d1.insert(min(11, len(d1.columns)), "Semanas en el bloque", r1.values)
         _hoja_o_vacia(w, "1. Venta Cero (SKU)", f"{marca} — Modelos con stock y SIN venta la última semana en toda la cadena · ⭐ = concentran el 80% del capital · corte {corte}",
                       d1, {"Stock (uds)": _F["S"], "Capital S/ (costo)": _F["S"], "% acum.": _F["PCT"], "Edad (sem)": "0", "Dscto actual": _F["PCT"], "Dscto sugerido": _F["PCT"],
                            "P. Vigente": _F["P"], "P. Sugerido": _F["P"], "P. Mínimo (piso)": _F["P"]}, chips_col="Estado")
@@ -606,6 +630,9 @@ def excel_proveedor(bloques: dict) -> bytes:
         d2 = b2a[[a for a, _ in c2 if a in b2a.columns]].rename(columns=dict(c2)).copy() if not b2a.empty else pd.DataFrame()
         if not d2.empty:
             d2["Prioridad"] = np.where(d2["Prioridad"], "⭐ TOP 80%", "")
+            r2 = _racha(b2a, "b2a")
+            if r2 is not None:
+                d2.insert(min(13, len(d2.columns)), "Semanas en el bloque", r2.values)
         _hoja_o_vacia(w, "2a. Sobrestock", f"{marca} — Sobrestock y liquidación a nivel cadena (venden, pero cargan de más) · corte {corte}",
                       d2, {**reportes_marcas._FMTS_PRECIO, "% acum.": _F["PCT"]}, chips_col="Estado")
         # 2b
@@ -620,7 +647,11 @@ def excel_proveedor(bloques: dict) -> bytes:
               ("n_tiendas", "Tiendas"), ("stock_cd", "Stock CD"), ("on_order", "On order"), ("necesidad_uds", "Necesidad (uds)"), ("desde_cd_uds", "A girar hoy (uds)"),
               ("pendiente_sin_cd_uds", "Pendiente sin CD (uds)"), ("sem_en_quiebre_max", "Sem en quiebre (máx)"), ("vp_neto_min", "Venta perdida S/ (mín)"),
               ("vp_neto_max", "Venta perdida S/ (máx)"), ("accion", "Acción sugerida")]
-        d4 = b3[[a for a, _ in c4 if a in b3.columns]].rename(columns=dict(c4)) if not b3.empty else pd.DataFrame()
+        d4 = b3[[a for a, _ in c4 if a in b3.columns]].rename(columns=dict(c4)).copy() if not b3.empty else pd.DataFrame()
+        if not d4.empty:
+            r4 = _racha(b3, "b3")
+            if r4 is not None:
+                d4.insert(min(6, len(d4.columns)), "Semanas en el bloque", r4.values)
         _hoja_o_vacia(w, "3. Ganadores", f"{marca} — Modelos con buena rotación que se están quedando cortos (venta ≥ {h['b3']['umbral_vta']} u/sem y cobertura ≤ {B3_COB_MAX:.0f} sem o tendencia ▲) · corte {corte}",
                       d4, {"Vta sem (prom 4)": _F["C"], "Stock (uds)": _F["S"], "Cobertura (sem)": _F["C"], "Stock CD": _F["S"], "On order": _F["S"], "Necesidad (uds)": _F["S"],
                            "A girar hoy (uds)": _F["S"], "Pendiente sin CD (uds)": _F["S"], "Venta perdida S/ (mín)": _F["S"], "Venta perdida S/ (máx)": _F["S"]})
@@ -642,6 +673,8 @@ try:
     from snapshots_engine.config import SNAPSHOTS_DIR as _SNAPSHOTS_DIR
 except Exception:  # pragma: no cover
     _SNAPSHOTS_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "snapshots")
+# CAPI_SNAPSHOTS_DIR permite aislar la persistencia (tests de UI, corridas de prueba) sin tocar snapshots/.
+_SNAPSHOTS_DIR = _os.environ.get("CAPI_SNAPSHOTS_DIR") or _SNAPSHOTS_DIR
 
 ARCHIVO_CORTE = "proveedor.parquet"
 COLS_CORTE = ["marca", "semana_iso", "corte", "bloque", "sku", "nombre", "categoria", "estado", "capital", "uds",
