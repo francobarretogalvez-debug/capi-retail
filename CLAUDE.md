@@ -63,8 +63,16 @@ Por eso el **log de acciones** y los **cortes semanales** salen a Notion (`notio
 - 🗂️ **Cortes Capi** (DB `748c0ce7f70d491bbe4605eef0b3f2f1`): zip con `snapshot.parquet` +
   `tienda.parquet` por semana. `snapshots_engine/nube.py`: `subir_corte` al cargar base,
   `restaurar_faltantes` al arrancar la app.
+- 📈 **Proveedores Capi** (DB `2df6fa17326b4f9da7f201845e46a41d`, creada 2026-09-19): una fila por
+  **marca tercera × semana** con los KPIs del reporte semanal al proveedor (venta cero · sobrestock ·
+  desbalance · ganadores cortos), el Δ vs el corte anterior, persistentes ≥3 sem y la **respuesta del
+  proveedor** que Daniela registra (compromisos, cumplidos, % respuesta). Módulos `reporte_proveedor.py`
+  (bloques, Excel, `persistir_corte` → `snapshots/<sem>/proveedor.parquet`, que viaja en el zip de cortes)
+  y `agente_proveedor.py` (prosa acotada). El lote `prov-<marca>-<semana>` (venta cero enviada al
+  proveedor) cuenta para K1 igual que el de tiendas. Checksum antes de entregar:
+  `python medicion/checksum_reporte_proveedor.py --base <Base> --marca ALL`.
 - Credencial: `NOTION_TOKEN` (local `.env`; nube `st.secrets`). La integración debe estar
-  **conectada a las dos bases**. Sin token todo sigue con CSV/parquet local y el sidebar lo avisa.
+  **conectada a las tres bases**. Sin token todo sigue con CSV/parquet local y el sidebar lo avisa.
 - Regla: el "pedido" que se mide (S6 cumplimiento, K1 activación) es el LOTE registrado el día
   que se manda el Excel. Sin lote registrado, no hay KPI esa semana.
 
