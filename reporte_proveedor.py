@@ -898,3 +898,108 @@ def serie_kpis(cortes: pd.DataFrame, bloques: dict | None = None) -> pd.DataFram
     if not filas:
         return pd.DataFrame()
     return pd.DataFrame(filas).reindex(columns=sorted(filas))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  RESPUESTA DEL PROVEEDOR (C12): lo que el proveedor confirma por correo, cargado por
+#  Daniela, viaja a Notion (📈 Proveedores Capi + 📋 Acciones Capi). Score = solo confirmado.
+# ══════════════════════════════════════════════════════════════════════════════
+import json as _json
+
+ACCIONES_PROVEEDOR = ["Markdown cofinanciado 50/50", "Transferencia entre tiendas", "Canje / devolución con recompra",
+                      "Reposición / reorden", "Exhibición en tienda", "Rechazó", "Otro"]
+BLOQUES_LABEL = {"b1": "1) Venta cero", "b2a": "2a) Sobrestock", "b2b": "2b) Desbalance", "b3": "3) Ganadores"}
+RESPONDIO = ["Sin respuesta aún", "Sí", "Parcial", "No"]
+_DIR_RESPUESTAS = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "acciones", "proveedor")
+
+
+def ruta_respuesta(marca: str, semana_iso: str, base_dir: str | None = None) -> str:
+    d = _os.path.join(base_dir or _os.environ.get("CAPI_RESPUESTAS_DIR") or _DIR_RESPUESTAS, str(marca).upper().replace("/", "-"))
+    return _os.path.join(d, f"{semana_iso}.json")
+
+
+def cargar_respuesta(marca: str, semana_iso: str, base_dir: str | None = None) -> dict:
+    r = ruta_respuesta(marca, semana_iso, base_dir)
+    if _os.path.exists(r):
+        try:
+            return _json.load(open(r, encoding="utf-8"))
+        except Exception:
+            pass
+    return {"respondio": RESPONDIO[0], "fecha_respuesta": "", "notas": "", "compromisos": []}
+
+
+def guardar_respuesta(marca: str, semana_iso: str, respuesta: dict, base_dir: str | None = None) -> str:
+    r = ruta_respuesta(marca, semana_iso, base_dir)
+    _os.makedirs(_os.path.dirname(r), exist_ok=True)
+    _json.dump(respuesta, open(r, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    return r
+
+
+def score_respuesta(hechos: dict, respuesta: dict) -> dict:
+    """respuesta_pct = modelos con compromiso / modelos enviados (TOP 80% de B1 + B2a + B2b + B3);
+    cumplimiento_pct = compromisos marcados cumplidos / compromisos."""
+    comps = respuesta.get("compromisos") or []
+    enviados = int(hechos["b1"].get("n_top", 0)) + int(hechos["b2a"].get("n_skus", 0)) + int(hechos["b2b"].get("n_skus", 0)) + int(hechos["b3"].get("n_skus", 0))
+    con_comp = set()
+    for c in comps:
+        if str(c.get("accion", "")).startswith("Rechazó"):
+            continue
+        for s in c.get("skus") or []:
+            con_comp.add(sku_key(s))
+    n_cump = sum(1 for c in comps if c.get("cumplido"))
+    return {"n_compromisos": len(comps), "n_cumplidos": n_cump, "modelos_enviados": enviados, "modelos_con_compromiso": len(con_comp),
+            "respuesta_pct": round(min(len(con_comp), enviados) / enviados * 100, 1) if enviados else None,
+            "cumplimiento_pct": round(n_cump / len(comps) * 100, 1) if comps else None}
+
+
+def props_notion_proveedor(bloques: dict, cmp: dict | None = None, enviado: bool = False, respuesta: dict | None = None,
+                           fecha_envio: str | None = None) -> dict:
+    """Propiedades de la fila marca × semana en 📈 Proveedores Capi (formato Notion vía notion_store.p_*)."""
+    import notion_store as ns
+    h = bloques["hechos"]; marca = str(bloques["marca"]).upper().strip(); sem = bloques.get("semana_iso") or ""
+    cmp = cmp or {}; resp = respuesta or {}
+    def _d(b, k, campo="delta_pct"):
+        try:
+            return cmp["kpis"][b][k][campo]
+        except Exception:
+            return None
+    sc = score_respuesta(h, resp) if resp else {}
+    props = {
+        "Marca × Semana": ns.p_title(f"{marca} · {sem}"), "Marca": ns.p_text(marca), "Semana ISO": ns.p_text(sem), "Corte": ns.p_text(str(bloques.get("corte", ""))),
+        "VC capital": ns.p_number(h["b1"]["capital"]), "VC modelos": ns.p_number(h["b1"]["n_skus"]), "VC combos": ns.p_number(len(bloques["vc_tienda"]) if bloques.get("vc_tienda") is not None else 0),
+        "SOB capital": ns.p_number(h["b2a"]["capital"]), "SOB modelos": ns.p_number(h["b2a"]["n_skus"]), "DESB uds": ns.p_number(h["b2b"]["uds"]),
+        "GAN modelos": ns.p_number(h["b3"]["n_skus"]), "GAN vta sem": ns.p_number(h["b3"]["vta_sem_total"]),
+        "Δ VC %": ns.p_number(_d("b1", "capital")), "Δ SOB %": ns.p_number(_d("b2a", "capital")), "Δ GAN": ns.p_number(_d("b3", "n_skus", "delta_abs")),
+        "Persistentes 3 sem": ns.p_number(len((cmp.get("persistentes") or {}).get("b1", []))), "Resolución VC %": ns.p_number(cmp.get("resolucion_b1")),
+        "Respondió": ns.p_select(resp.get("respondio") or RESPONDIO[0]),
+        "Compromisos": ns.p_number(sc.get("n_compromisos", 0)), "Cumplidos": ns.p_number(sc.get("n_cumplidos", 0)),
+        "Respuesta %": ns.p_number(sc.get("respuesta_pct")), "Cumplimiento %": ns.p_number(sc.get("cumplimiento_pct")),
+        "Compromisos detalle": ns.p_text(_json.dumps(resp.get("compromisos") or [], ensure_ascii=False)[:ns.MAX_TEXTO]),
+        "Notas": ns.p_text(str(resp.get("notas") or "")[:ns.MAX_TEXTO]),
+        "Registrado desde": ns.p_select("nube" if ns.en_nube() else "laptop"),
+    }
+    if enviado:
+        props["Enviado"] = ns.p_date((fecha_envio or _date.today().isoformat())[:10])
+    if resp.get("fecha_respuesta"):
+        props["Fecha respuesta"] = ns.p_date(str(resp["fecha_respuesta"])[:10])
+    return props
+
+
+def props_respuesta_solo(marca: str, semana_iso: str, respuesta: dict, hechos: dict | None = None) -> dict:
+    """Props de respuesta para una semana anterior (no recalcula KPIs). Si no hay `hechos`,
+    el % de respuesta no se puede calcular y se deja vacío; compromisos y cumplidos sí."""
+    import notion_store as ns
+    resp = respuesta or {}
+    sc = score_respuesta(hechos, resp) if hechos else {"n_compromisos": len(resp.get("compromisos") or []),
+                                                       "n_cumplidos": sum(1 for c in (resp.get("compromisos") or []) if c.get("cumplido")),
+                                                       "respuesta_pct": None,
+                                                       "cumplimiento_pct": (round(sum(1 for c in resp["compromisos"] if c.get("cumplido")) / len(resp["compromisos"]) * 100, 1) if resp.get("compromisos") else None)}
+    props = {"Marca × Semana": ns.p_title(f"{str(marca).upper().strip()} · {semana_iso}"), "Marca": ns.p_text(str(marca).upper().strip()), "Semana ISO": ns.p_text(semana_iso),
+             "Respondió": ns.p_select(resp.get("respondio") or RESPONDIO[0]), "Compromisos": ns.p_number(sc["n_compromisos"]), "Cumplidos": ns.p_number(sc["n_cumplidos"]),
+             "Respuesta %": ns.p_number(sc.get("respuesta_pct")), "Cumplimiento %": ns.p_number(sc.get("cumplimiento_pct")),
+             "Compromisos detalle": ns.p_text(_json.dumps(resp.get("compromisos") or [], ensure_ascii=False)[:ns.MAX_TEXTO]),
+             "Notas": ns.p_text(str(resp.get("notas") or "")[:ns.MAX_TEXTO]), "Registrado desde": ns.p_select("nube" if ns.en_nube() else "laptop")}
+    if resp.get("fecha_respuesta"):
+        props["Fecha respuesta"] = ns.p_date(str(resp["fecha_respuesta"])[:10])
+    return props
+

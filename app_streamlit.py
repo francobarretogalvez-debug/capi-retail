@@ -3687,6 +3687,11 @@ elif nav_page == "🤝 Agente Terceras":
                         reporte_proveedor.persistir_corte(_bl, _bor["semana_iso"], enviado=True)
                     except Exception as _e_pc:
                         st.warning(f"El corte quedó sin marcar como enviado: {_e_pc}")
+                    _resp_prev = reporte_proveedor.cargar_respuesta(_bor["marca"], _bor["semana_iso"])
+                    _r_np = notion_store.upsert_proveedor(
+                        _bor["marca"], _bor["semana_iso"],
+                        reporte_proveedor.props_notion_proveedor(_bl, _cmp, enviado=True, respuesta=_resp_prev),
+                        archivos=[(f"Reporte_Proveedor_{str(_bor['marca']).replace(' ', '_')}_{_bor['corte']}.xlsx", _bor["xlsx"])])
                 if _r_lote and _r_lote.get("notion_url"):
                     st.success(f"✅ Registrado: acción + lote **{_r_lote['lote']}** ({_r_lote['filas']:,} combos) → [ver en Notion]({_r_lote['notion_url']})")
                 elif _r_lote and _r_lote.get("error"):
@@ -3695,12 +3700,94 @@ elif nav_page == "🤝 Agente Terceras":
                     st.warning("Registrado solo en el disco local: no hay NOTION_TOKEN. ☁️ En la nube este registro se pierde al reiniciar.")
                 else:
                     st.success("✅ Acción registrada en el log.")
+                if _r_np.get("ok"):
+                    st.success(f"📈 Fila de {_bor['marca']} · {_bor['semana_iso']} {'creada' if _r_np['creada'] else 'actualizada'} en Proveedores Capi → [ver]({_r_np['url']})")
+                elif _r_np.get("error") != "sin NOTION_TOKEN":
+                    st.warning(f"No se pudo escribir la fila en 📈 Proveedores Capi: {_r_np.get('error')}. ¿La integración está conectada a esa base?")
                 st.session_state["at_rep_bloques_fp"] = None      # recalcular: ahora hay corte enviado
                 st.session_state["at_rep_reset"] = True
                 st.rerun()
             if _rb2.button("🗑️ Descartar borrador", key="at_rep_descartar"):
                 st.session_state["at_rep_reset"] = True
                 st.rerun()
+
+        # ── Respuesta del proveedor (decisión Franco 18-sep: score solo con lo confirmado por correo) ──
+        st.markdown("---")
+        with st.expander("📬 Respuesta del proveedor — registrar lo que confirmó por correo", expanded=False):
+            _sem_opts = sorted(set([_rep_sem] + ([str(x) for x in _cortes["semana_iso"].unique()] if not _cortes.empty else [])), reverse=True)
+            _rp_c1, _rp_c2, _rp_c3 = st.columns([1, 1, 1])
+            _rp_sem = _rp_c1.selectbox("Semana del reporte", _sem_opts, key="at_rep_resp_sem")
+            _rp_key = f"at_rep_resp::{_rep_marca}::{_rp_sem}"
+            if st.session_state.get("at_rep_resp_key") != _rp_key:
+                st.session_state["at_rep_resp"] = reporte_proveedor.cargar_respuesta(_rep_marca, _rp_sem)
+                st.session_state["at_rep_resp_key"] = _rp_key
+            _resp = st.session_state["at_rep_resp"]
+            _resp["respondio"] = _rp_c2.selectbox("¿Respondió?", reporte_proveedor.RESPONDIO,
+                                                  index=reporte_proveedor.RESPONDIO.index(_resp.get("respondio", reporte_proveedor.RESPONDIO[0])), key="at_rep_resp_si")
+            _resp["fecha_respuesta"] = _rp_c3.text_input("Fecha de respuesta (AAAA-MM-DD)", value=_resp.get("fecha_respuesta", ""), key="at_rep_resp_fecha")
+            _resp["notas"] = st.text_area("Notas de la respuesta", value=_resp.get("notas", ""), height=80, key="at_rep_resp_notas")
+
+            # modelos enviados de esa semana (del corte persistido; si es la semana actual, de los bloques vivos)
+            if _rp_sem == _rep_sem:
+                _cat = {b: _bl[b] for b in ("b1", "b2a", "b2b", "b3")}
+                _opts = {b: [f"{reporte_proveedor.sku_key(r.sku)} · {r.nombre}" for r in _cat[b].itertuples()] for b in _cat}
+            else:
+                _cs = _cortes[_cortes["semana_iso"] == _rp_sem] if not _cortes.empty else pd.DataFrame()
+                _opts = {b: [f"{r.sku} · {r.nombre}" for r in _cs[_cs["bloque"] == b].itertuples()] for b in ("b1", "b2a", "b2b", "b3")}
+            st.markdown("**Agregar compromiso**")
+            _cc1, _cc2, _cc3 = st.columns([1, 1.4, 1])
+            _c_bloque = _cc1.selectbox("Bloque", list(reporte_proveedor.BLOQUES_LABEL), format_func=lambda b: reporte_proveedor.BLOQUES_LABEL[b], key="at_rep_c_bloque")
+            _c_accion = _cc2.selectbox("Acción comprometida", reporte_proveedor.ACCIONES_PROVEEDOR, key="at_rep_c_accion")
+            _c_fecha = _cc3.text_input("Fecha compromiso (AAAA-MM-DD)", key="at_rep_c_fecha")
+            _c_todos = st.checkbox("Aplica a todos los modelos del bloque", key="at_rep_c_todos")
+            _c_skus = st.multiselect("Modelos", _opts.get(_c_bloque, []), key="at_rep_c_skus", disabled=_c_todos)
+            _c_nota = st.text_input("Nota (opcional)", key="at_rep_c_nota")
+            if st.button("➕ Agregar compromiso", key="at_rep_c_add"):
+                _sel = _opts.get(_c_bloque, []) if _c_todos else _c_skus
+                if not _sel:
+                    st.warning("Elige al menos un modelo o marca 'todos'.")
+                else:
+                    _resp.setdefault("compromisos", []).append({"bloque": _c_bloque, "accion": _c_accion, "skus": [x.split(" · ")[0] for x in _sel],
+                                                                "fecha": _c_fecha, "nota": _c_nota, "cumplido": False})
+                    st.rerun()
+            _comps = _resp.get("compromisos", [])
+            if _comps:
+                st.markdown("**Compromisos registrados** (marca «cumplido» cuando ocurra)")
+                for _i, _c in enumerate(_comps):
+                    _k1, _k2, _k3 = st.columns([5, 1, 1])
+                    _k1.markdown(f"- {reporte_proveedor.BLOQUES_LABEL.get(_c['bloque'], _c['bloque'])} · **{_c['accion']}** · {len(_c['skus'])} modelo(s)"
+                                 + (f" · para el {_c['fecha']}" if _c.get("fecha") else "") + (f" · _{_c['nota']}_" if _c.get("nota") else ""))
+                    _c["cumplido"] = _k2.checkbox("Cumplido", value=bool(_c.get("cumplido")), key=f"at_rep_c_ok_{_i}")
+                    if _k3.button("Quitar", key=f"at_rep_c_del_{_i}"):
+                        _comps.pop(_i); st.rerun()
+                _sc = reporte_proveedor.score_respuesta(_h if _rp_sem == _rep_sem else _h, _resp)
+                st.caption(f"Respuesta: {_sc['modelos_con_compromiso']} de {_sc['modelos_enviados']} modelos enviados con compromiso"
+                           + (f" ({_sc['respuesta_pct']}%)" if _sc['respuesta_pct'] is not None else "")
+                           + f" · cumplidos {_sc['n_cumplidos']}/{_sc['n_compromisos']}")
+            if st.button("💾 Guardar respuesta (log + Notion)", key="at_rep_resp_save", type="primary"):
+                with st.spinner("Guardando…"):
+                    reporte_proveedor.guardar_respuesta(_rep_marca, _rp_sem, _resp)
+                    for _c in _comps:
+                        if _c.get("_logueado"):
+                            continue
+                        acciones_log.agregar("", "Negociación Terceras", str(_rep_marca).upper(),
+                                             f"Compromiso proveedor ({reporte_proveedor.BLOQUES_LABEL.get(_c['bloque'], _c['bloque'])}): {_c['accion']} — {len(_c['skus'])} modelos"
+                                             + (f" para el {_c['fecha']}" if _c.get("fecha") else ""),
+                                             sku=", ".join(_c["skus"][:20]), estado="Ejecutada" if _c.get("cumplido") else "En curso",
+                                             vista="Agente Terceras", corte_base=_nombre_base())
+                        _c["_logueado"] = True
+                    reporte_proveedor.guardar_respuesta(_rep_marca, _rp_sem, _resp)
+                    _bl_np = _bl if _rp_sem == _rep_sem else None
+                    if _bl_np is not None:
+                        _r_np2 = notion_store.upsert_proveedor(_rep_marca, _rp_sem, reporte_proveedor.props_notion_proveedor(_bl_np, _cmp, enviado=False, respuesta=_resp))
+                    else:
+                        _r_np2 = notion_store.upsert_proveedor(_rep_marca, _rp_sem, reporte_proveedor.props_respuesta_solo(_rep_marca, _rp_sem, _resp))
+                if _r_np2.get("ok"):
+                    st.success(f"✅ Respuesta guardada → [fila en Proveedores Capi]({_r_np2['url']})")
+                elif _r_np2.get("error") == "sin NOTION_TOKEN":
+                    st.warning("Respuesta guardada en disco local (sin NOTION_TOKEN). ☁️ En la nube se pierde al reiniciar.")
+                else:
+                    st.warning(f"Respuesta guardada en disco; Notion falló: {_r_np2.get('error')}")
 
 
 # ─── TAB 2: Gestión por Antigüedad ─────────────────────────────────

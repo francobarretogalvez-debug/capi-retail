@@ -294,3 +294,54 @@ def test_comparar_sin_historial():
     cmp = rp.comparar_marca(b, pd.DataFrame())
     assert not cmp["hay_prev"] and cmp["kpis"]["b1"]["capital"]["prev"] is None
     assert rp.evolucion_texto(cmp, b) == ""                                  # sin corte previo real no hay bloque 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  C12 — respuesta del proveedor → 📈 Proveedores Capi (props, score, upsert sin duplicar)
+# ══════════════════════════════════════════════════════════════════════════════
+def test_score_y_props_respuesta_proveedor(bl, tmp_path, monkeypatch):
+    import notion_store as ns
+    h = bl["hechos"]
+    resp = {"respondio": "Parcial", "fecha_respuesta": "2026-09-22", "notas": "llamada con Raúl",
+            "compromisos": [{"bloque": "b1", "accion": "Markdown cofinanciado 50/50", "skus": ["101"], "fecha": "2026-09-26", "cumplido": True},
+                            {"bloque": "b3", "accion": "Reposición / reorden", "skus": ["301", "302"], "fecha": "", "cumplido": False},
+                            {"bloque": "b2a", "accion": "Rechazó", "skus": ["202"], "fecha": "", "cumplido": False}]}
+    sc = rp.score_respuesta(h, resp)
+    # enviados = ⭐ de B1 (2) + B2a (3) + B2b (1) + B3 (3) = 9; con compromiso (sin 'Rechazó') = 101, 301, 302 = 3
+    assert sc["modelos_enviados"] == 9 and sc["modelos_con_compromiso"] == 3 and sc["respuesta_pct"] == pytest.approx(33.3, abs=0.1)
+    assert sc["n_compromisos"] == 3 and sc["n_cumplidos"] == 1 and sc["cumplimiento_pct"] == pytest.approx(33.3, abs=0.1)
+    # mirror local aislado
+    monkeypatch.setenv("CAPI_RESPUESTAS_DIR", str(tmp_path))
+    ruta = rp.guardar_respuesta("M", "2026-35", resp)
+    assert ruta.startswith(str(tmp_path)) and rp.cargar_respuesta("M", "2026-35") == resp
+    assert rp.cargar_respuesta("M", "2026-99")["compromisos"] == []
+    # props Notion bien formadas
+    cmp = rp.comparar_marca(bl, pd.DataFrame())
+    props = rp.props_notion_proveedor(bl, cmp, enviado=True, respuesta=resp, fecha_envio="2026-09-22")
+    assert props["Marca × Semana"]["title"][0]["text"]["content"] == "M · 2026-35"
+    assert props["VC capital"]["number"] == h["b1"]["capital"] and props["Respondió"]["select"]["name"] == "Parcial"
+    assert props["Enviado"]["date"]["start"] == "2026-09-22" and props["Respuesta %"]["number"] == pytest.approx(33.3, abs=0.1)
+    assert props["Δ VC %"]["number"] is None                       # sin corte previo no hay delta
+    assert json.loads(props["Compromisos detalle"]["rich_text"][0]["text"]["content"])[1]["skus"] == ["301", "302"]
+
+
+def test_upsert_proveedor_actualiza_no_duplica(monkeypatch):
+    import notion_store as ns
+    llamadas = {"crear": [], "actualizar": [], "subidos": []}
+    paginas = []
+    monkeypatch.setattr(ns, "token", lambda: "ntn_x")
+    monkeypatch.setattr(ns, "subir_archivo", lambda n, d, ct=None: llamadas["subidos"].append(n) or f"id-{n}")
+    monkeypatch.setattr(ns, "consultar", lambda db, filtro=None, **k: list(paginas))
+    def _crear(db, props, archivos=None, prop_archivos=None):
+        assert db == ns.DB_PROVEEDORES
+        llamadas["crear"].append((props, archivos)); paginas.append({"id": "pg1"}); return {"id": "pg1", "url": "https://n/pg1"}
+    def _actualizar(pid, props=None, archivada=None):
+        llamadas["actualizar"].append((pid, props)); return {"id": pid, "url": "https://n/" + pid}
+    monkeypatch.setattr(ns, "crear_pagina", _crear); monkeypatch.setattr(ns, "actualizar_pagina", _actualizar)
+    props = {"Marca": ns.p_text("M"), "Semana ISO": ns.p_text("2026-35")}
+    r1 = ns.upsert_proveedor("M", "2026-35", props, archivos=[("x.xlsx", b"abc")])
+    assert r1["ok"] and r1["creada"] and llamadas["subidos"] == ["x.xlsx"] and len(llamadas["crear"]) == 1
+    r2 = ns.upsert_proveedor("M", "2026-35", props)
+    assert r2["ok"] and not r2["creada"] and llamadas["actualizar"][0][0] == "pg1" and len(llamadas["crear"]) == 1
+    monkeypatch.setattr(ns, "token", lambda: "")
+    assert ns.upsert_proveedor("M", "2026-35", props)["error"] == "sin NOTION_TOKEN"

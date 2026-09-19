@@ -28,6 +28,8 @@ API = "https://api.notion.com/v1"
 VERSION = "2022-06-28"
 DB_ACCIONES = os.getenv("NOTION_DB_ACCIONES", "af83c41b8e6d480299dc66d4c06eccd4")
 DB_CORTES = os.getenv("NOTION_DB_CORTES", "748c0ce7f70d491bbe4605eef0b3f2f1")
+# 📈 Proveedores Capi (reporte semanal al proveedor, creada 2026-09-19 bajo FRANCO OS): una fila por marca × semana.
+DB_PROVEEDORES = os.getenv("NOTION_DB_PROVEEDORES", "2df6fa17326b4f9da7f201845e46a41d")
 TIMEOUT = 60
 MAX_TEXTO = 2000          # límite de un rich_text en Notion
 
@@ -202,3 +204,33 @@ def valor(page: dict, nombre: str):
     if t in ("created_time", "last_edited_time", "url", "checkbox"):
         return p.get(t)
     return None
+
+
+# ── 📈 Proveedores Capi (marca × semana) ─────────────────────────────────────
+
+def buscar_proveedor(marca: str, semana_iso: str) -> dict | None:
+    """Página de la fila marca × semana, o None."""
+    filtro = {"and": [filtro_texto("Marca", str(marca).upper().strip()), filtro_texto("Semana ISO", str(semana_iso))]}
+    pags = consultar(DB_PROVEEDORES, filtro)
+    return pags[0] if pags else None
+
+
+def upsert_proveedor(marca: str, semana_iso: str, props: dict, archivos: list | None = None) -> dict:
+    """Crea o actualiza la fila marca × semana. `props` ya en formato Notion (p_*). Los archivos
+    (lista de (nombre, bytes)) se suben y se adjuntan en "Archivos" (reemplazan los previos).
+    Devuelve {ok, page_id, url, creada, error}. Sin token → {ok: False, error: "sin NOTION_TOKEN"}."""
+    if not disponible():
+        return {"ok": False, "error": "sin NOTION_TOKEN", "page_id": None, "url": None, "creada": False}
+    try:
+        subidos = [(n, subir_archivo(n, d)) for n, d in (archivos or [])]
+        pag = buscar_proveedor(marca, semana_iso)
+        if pag:
+            r = actualizar_pagina(pag["id"], props={**props, **({"Archivos": p_files(subidos)} if subidos else {})})
+            creada = False
+        else:
+            r = crear_pagina(DB_PROVEEDORES, props, archivos=subidos or None, prop_archivos="Archivos" if subidos else None)
+            creada = True
+        return {"ok": True, "page_id": r.get("id"), "url": r.get("url"), "creada": creada, "error": None}
+    except Exception as e:  # NotionError, requests
+        return {"ok": False, "error": str(e)[:300], "page_id": None, "url": None, "creada": False}
+
