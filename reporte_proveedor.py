@@ -44,6 +44,8 @@ B3_MIN_SELLERS = 4             # con menos SKUs vendiendo, el percentil no signi
 B3_COB_MAX = 8.0               # semanas (límite de PRE-QUIEBRE)
 B3_ALERTAS_ENTRADA = ("ACELERANDO", "RIESGO QUIEBRE")
 EDAD_LIQUIDAR = 26             # semanas: venta cero con esta edad ya no es "exhibición", es liquidar
+GRUPO_B1_4SEM = "Sin venta en las últimas 4 semanas"
+GRUPO_B1_PARO = "Vendía y no vendió la última semana"
 TOP_CUERPO_LINEA = 5           # modelos por línea en el cuerpo del correo (B1, B2a)
 TOP_CUERPO_PLANO = 10          # modelos en el cuerpo (B2b, B3)
 
@@ -162,8 +164,14 @@ def bloque_venta_cero(g: pd.DataFrame, dfm: pd.DataFrame, precio_min_map: dict |
     b1 = _con_precio(b1, precio_min_map)
     if b1.empty:
         return b1, vc_tienda
-    b1["pct_acum"], b1["top_80"] = pareto_flag(b1["capital_costo"])
-    b1["semanas_sin_venta"] = np.where(b1["vta_sem_prom4"] <= 0, "4+", "1")  # 4 sem sin venta vs solo la última
+    # Dos grupos (Franco 2026-09-19): sin venta en las 4 últimas semanas vs vendía y paró la última.
+    # Pareto 80% DENTRO de cada grupo: cada lista tiene su propio TOP.
+    b1["semanas_sin_venta"] = np.where(b1["vta_sem_prom4"] <= 0, "4+", "1")
+    b1["grupo"] = np.where(b1["semanas_sin_venta"] == "4+", GRUPO_B1_4SEM, GRUPO_B1_PARO)
+    b1["pct_acum"] = 0.0; b1["top_80"] = False
+    for gname, idx in b1.groupby("grupo").groups.items():
+        pa, tp = pareto_flag(b1.loc[idx, "capital_costo"])
+        b1.loc[idx, "pct_acum"] = pa; b1.loc[idx, "top_80"] = tp
     def _acc(r):
         p = r.get("precio_sugerido")
         if r["edad_semanas"] >= EDAD_LIQUIDAR:
@@ -175,7 +183,8 @@ def bloque_venta_cero(g: pd.DataFrame, dfm: pd.DataFrame, precio_min_map: dict |
             return f"👁️ Exhibición + cofinanciar {r['dscto_sugerido']:.0%} → S/ {p:,.2f}"
         return "👁️ Revisar exhibición / comunicación de precio"
     b1["accion"] = b1.apply(_acc, axis=1)
-    b1 = b1.sort_values(["top_80", "capital_costo"], ascending=[False, False]).reset_index(drop=True)
+    b1["_g"] = (b1["grupo"] != GRUPO_B1_4SEM).astype(int)
+    b1 = b1.sort_values(["_g", "top_80", "capital_costo"], ascending=[True, False, False]).drop(columns="_g").reset_index(drop=True)
     return b1, vc_tienda
 
 
@@ -337,6 +346,9 @@ def hechos_marca(marca: str, foto: dict, b1, b2a, b2b, b3, umbral_b3: float, cor
                "capital_top": round(float(b1.loc[b1["top_80"], "capital_costo"].sum())) if not b1.empty else 0,
                "n_liquidar": int((b1["edad_semanas"] >= EDAD_LIQUIDAR).sum()) if not b1.empty else 0,
                "n_4sem": int((b1["semanas_sin_venta"] == "4+").sum()) if not b1.empty else 0,
+               "capital_4sem": round(float(b1.loc[b1["semanas_sin_venta"] == "4+", "capital_costo"].sum())) if not b1.empty else 0,
+               "n_paro": int((b1["semanas_sin_venta"] == "1").sum()) if not b1.empty else 0,
+               "capital_paro": round(float(b1.loc[b1["semanas_sin_venta"] == "1", "capital_costo"].sum())) if not b1.empty else 0,
                "top": _top(b1, ["sku", "nombre", "categoria", "n_tiendas_stock", "stock_cadena", "capital_costo", "edad_semanas", "accion"], top_n, "capital_costo")}
     h["b1"]["pct_capital_marca"] = round(h["b1"]["capital"] / foto["capital_total"] * 100, 1) if foto.get("capital_total") else 0.0
     def _por_linea(df):
@@ -418,7 +430,7 @@ def _linea(v) -> str:
 
 
 def _filas_b1(b1: pd.DataFrame) -> list[dict]:
-    return [{"SKU": r["sku"], "Producto": r["nombre"], "Línea": _linea(r.get("categoria")), "Tiendas": int(r["n_tiendas_stock"]),
+    return [{"SKU": r["sku"], "Producto": r["nombre"], "Línea": _linea(r.get("categoria")), "Grupo": r["grupo"], "Tiendas": int(r["n_tiendas_stock"]),
              "Stock uds": int(r["stock_cadena"]), "Capital S/": float(r["capital_costo"]), "Edad sem": int(r["edad_semanas"]),
              "⭐": "⭐ TOP 80%" if r["top_80"] else "", "Acción": r["accion"]} for _, r in b1.iterrows()]
 
@@ -483,9 +495,15 @@ def tablas_texto(bloques: dict, tope_linea: int = TOP_CUERPO_LINEA, tope_plano: 
     h = bloques["hechos"]; out = {}
     for key, filas in (("b1", _filas_b1(bloques["b1"])), ("b2a", _filas_b2a(bloques["b2a"]))):
         partes = []
-        for lin, cap, n, top in _grupos_por_linea(filas, tope_linea):
-            extra = f"  (+{n - len(top)} modelos más en el Excel)" if n > len(top) else ""
-            partes.append(f"▸ {lin} — S/ {_s(cap)} en {n} modelo(s){extra}\n" + _tabla_txt(top, _COLS_TXT[key], _FMT_TXT))
+        secciones = ([(GRUPO_B1_4SEM, [f for f in filas if f["Grupo"] == GRUPO_B1_4SEM]), (GRUPO_B1_PARO, [f for f in filas if f["Grupo"] == GRUPO_B1_PARO])]
+                     if key == "b1" else [(None, filas)])
+        for titulo_g, fil in secciones:
+            if titulo_g is not None:
+                cap_g = sum(f["Capital S/"] for f in fil)
+                partes.append(f"■ {titulo_g.upper()} — {len(fil)} modelos · S/ {_s(cap_g)}" + ("" if fil else "  (ninguno esta semana)"))
+            for lin, cap, n, top in _grupos_por_linea(fil, tope_linea):
+                extra = f"  (+{n - len(top)} modelos más en el Excel)" if n > len(top) else ""
+                partes.append(f"▸ {lin} — S/ {_s(cap)} en {n} modelo(s){extra}\n" + _tabla_txt(top, _COLS_TXT[key], _FMT_TXT))
         tot = h[key]
         partes.append(f"TOTAL {'VENTA CERO' if key == 'b1' else 'SOBRESTOCK'}: {tot['n_skus']} modelos · {_s(tot['stock_uds'])} uds · S/ {_s(tot['capital'])}")
         out[key] = "\n\n".join(partes) if filas else "  (sin modelos en este bloque)"
@@ -528,9 +546,15 @@ def tablas_html(bloques: dict, tope_linea: int = TOP_CUERPO_LINEA, tope_plano: i
     P = "<p style='font-family:Calibri,Arial;font-size:10.5pt;margin:6px 0 2px 0'>"
     for key, filas in (("b1", _filas_b1(bloques["b1"])), ("b2a", _filas_b2a(bloques["b2a"]))):
         partes = []
-        for lin, cap, n, top in _grupos_por_linea(filas, tope_linea):
-            extra = f" <span style='color:#666'>(+{n - len(top)} modelos más en el Excel)</span>" if n > len(top) else ""
-            partes.append(f"{P}<b>▸ {lin}</b> — S/ {_s(cap)} en {n} modelo(s){extra}</p>" + _tabla_html(top, _COLS_TXT[key]))
+        secciones = ([(GRUPO_B1_4SEM, [f for f in filas if f["Grupo"] == GRUPO_B1_4SEM]), (GRUPO_B1_PARO, [f for f in filas if f["Grupo"] == GRUPO_B1_PARO])]
+                     if key == "b1" else [(None, filas)])
+        for titulo_g, fil in secciones:
+            if titulo_g is not None:
+                cap_g = sum(f["Capital S/"] for f in fil)
+                partes.append(f"<p style='font-family:Calibri,Arial;font-size:11pt;font-weight:bold;margin:10px 0 2px 0;color:#7f1d1d'>■ {titulo_g} — {len(fil)} modelos · S/ {_s(cap_g)}" + ("" if fil else " (ninguno esta semana)") + "</p>")
+            for lin, cap, n, top in _grupos_por_linea(fil, tope_linea):
+                extra = f" <span style='color:#666'>(+{n - len(top)} modelos más en el Excel)</span>" if n > len(top) else ""
+                partes.append(f"{P}<b>▸ {lin}</b> — S/ {_s(cap)} en {n} modelo(s){extra}</p>" + _tabla_html(top, _COLS_TXT[key]))
         tot = h[key]
         partes.append(f"{P}<b>TOTAL {'VENTA CERO' if key == 'b1' else 'SOBRESTOCK'}:</b> {tot['n_skus']} modelos · {_s(tot['stock_uds'])} uds · S/ {_s(tot['capital'])}</p>")
         out[key] = "".join(partes) if filas else f"{P}(sin modelos en este bloque)</p>"
@@ -572,7 +596,8 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         foto = h["foto"]
         res = pd.DataFrame([
-            {"Bloque": "1. Venta cero (sin venta la última semana en toda la cadena)", "Modelos": h["b1"]["n_skus"], "Stock (uds)": h["b1"]["stock_uds"], "Capital S/ (costo)": h["b1"]["capital"], "Qué pedimos": f"{h['b1']['n_top']} modelos concentran el 80% · {h['b1']['n_liquidar']} con más de 26 sem: liquidar / canje"},
+            {"Bloque": f"1. Venta cero — {GRUPO_B1_4SEM.lower()}", "Modelos": h["b1"]["n_4sem"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_4sem"], "Qué pedimos": f"liquidar / canje lo de más de 26 sem ({h['b1']['n_liquidar']} en todo el bloque) · exhibición y precio en el resto"},
+            {"Bloque": f"1. Venta cero — {GRUPO_B1_PARO.lower()} (alerta temprana)", "Modelos": h["b1"]["n_paro"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_paro"], "Qué pedimos": "revisar exhibición y precio esta semana; si repite, pasa al grupo anterior"},
             {"Bloque": "2a. Sobrestock de cadena (venden, pero cargan de más)", "Modelos": h["b2a"]["n_skus"], "Stock (uds)": h["b2a"]["stock_uds"], "Capital S/ (costo)": h["b2a"]["capital"], "Qué pedimos": f"markdown 50/50: {h['b2a']['n_markdown']} · canje/devolución: {h['b2a']['n_canje']} · frenar ingreso: {h['b2a']['n_frenar']}"},
             {"Bloque": "2b. Desbalance entre tiendas (transferencias rentables)", "Modelos": h["b2b"]["n_skus"], "Stock (uds)": h["b2b"]["uds"], "Capital S/ (costo)": None, "Qué pedimos": f"mover {h['b2b']['uds']:,} uds · ganancia neta S/ {h['b2b']['ganancia']:,}"},
             {"Bloque": "3. Ganadores que se quedan cortos", "Modelos": h["b3"]["n_skus"], "Stock (uds)": None, "Capital S/ (costo)": None, "Qué pedimos": f"{h['b3']['n_sin_cd']} sin stock en CD (reorden) · necesidad {h['b3']['necesidad_uds']:,} uds"},
@@ -601,9 +626,9 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
                     if pers:
                         ws0.cell(row=fila0, column=1, value=f"{len(pers)} modelos llevan {PERSISTENCIA_ALERTA} o más semanas seguidas sin venta (ver columna 'Semanas en el bloque' en la hoja 1).")
         # 1
-        c1 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("temporada", "Temporada"), ("estado_cadena", "Estado"), ("n_tiendas_stock", "Tiendas con stock"),
+        c1 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("grupo", "Grupo"), ("temporada", "Temporada"), ("estado_cadena", "Estado"), ("n_tiendas_stock", "Tiendas con stock"),
               ("stock_cadena", "Stock (uds)"), ("capital_costo", "Capital S/ (costo)"), ("pct_acum", "% acum."), ("top_80", "Prioridad"), ("semanas_sin_venta", "Sem sin venta"),
-              ("edad_semanas", "Edad (sem)"), ("pct_descuento", "Dscto actual"), ("dscto_sugerido", "Dscto sugerido"), ("precio_vigente", "P. Vigente"),
+              ("edad_semanas", "Edad (sem)"), ("pct_descuento", "Dscto actual"), ("dscto_piramide", "Dscto pirámide"), ("dscto_sugerido", "Dscto sugerido"), ("precio_vigente", "P. Vigente"),
               ("precio_sugerido", "P. Sugerido"), ("precio_minimo", "P. Mínimo (piso)"), ("accion", "Acción sugerida")]
         d1 = b1[[a for a, _ in c1 if a in b1.columns]].rename(columns=dict(c1)).copy() if not b1.empty else pd.DataFrame()
         if not d1.empty:
@@ -612,7 +637,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             if r1 is not None:
                 d1.insert(min(11, len(d1.columns)), "Semanas en el bloque", r1.values)
         _hoja_o_vacia(w, "1. Venta Cero (SKU)", f"{marca} — Modelos con stock y SIN venta la última semana en toda la cadena · ⭐ = concentran el 80% del capital · corte {corte}",
-                      d1, {"Stock (uds)": _F["S"], "Capital S/ (costo)": _F["S"], "% acum.": _F["PCT"], "Edad (sem)": "0", "Dscto actual": _F["PCT"], "Dscto sugerido": _F["PCT"],
+                      d1, {"Stock (uds)": _F["S"], "Capital S/ (costo)": _F["S"], "% acum.": _F["PCT"], "Edad (sem)": "0", "Dscto actual": _F["PCT"], "Dscto pirámide": _F["PCT"], "Dscto sugerido": _F["PCT"],
                            "P. Vigente": _F["P"], "P. Sugerido": _F["P"], "P. Mínimo (piso)": _F["P"]}, chips_col="Estado")
         # 1b
         vc = bloques["vc_tienda"]
@@ -624,7 +649,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
         # 2a
         c2 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("temporada", "Temporada"), ("grupo", "Grupo"), ("estado_cadena", "Estado"), ("tendencia", "Tendencia"),
               ("stock_cadena", "Stock (uds)"), ("vta_sem_prom4", "Vta sem (prom 4)"), ("cobertura_cadena", "Cobertura (sem)"), ("capital_costo", "Capital S/ (costo)"),
-              ("pct_acum", "% acum."), ("top_80", "Prioridad"), ("edad_semanas", "Edad (sem)"), ("costo", "Costo unit."), ("pct_descuento", "Dscto actual"), ("dscto_sugerido", "Dscto sugerido"),
+              ("pct_acum", "% acum."), ("top_80", "Prioridad"), ("edad_semanas", "Edad (sem)"), ("costo", "Costo unit."), ("pct_descuento", "Dscto actual"), ("dscto_piramide", "Dscto pirámide"), ("dscto_sugerido", "Dscto sugerido"),
               ("precio_blanco", "P. Blanco"), ("precio_vigente", "P. Vigente"), ("precio_sugerido", "P. Sugerido"), ("margen_resultante", "Margen result."), ("precio_minimo", "P. Mínimo (piso)"),
               ("accion", "Acción sugerida"), ("alternativas", "Alternativas")]
         d2 = b2a[[a for a, _ in c2 if a in b2a.columns]].rename(columns=dict(c2)).copy() if not b2a.empty else pd.DataFrame()

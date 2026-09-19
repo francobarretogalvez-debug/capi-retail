@@ -41,7 +41,8 @@ def test_excel_cuadra_con_bloques(wb_bl):
     assert sum(_col(wb["2b. Desbalance tiendas"], "Uds a mover")) == h["b2b"]["uds"]
     assert len(_col(wb["3. Ganadores"], "SKU")) == h["b3"]["n_skus"]
     res = wb["Resumen"]
-    assert _col(res, "Modelos")[:4] == [h["b1"]["n_skus"], h["b2a"]["n_skus"], h["b2b"]["n_skus"], h["b3"]["n_skus"]]
+    assert _col(res, "Modelos")[:5] == [h["b1"]["n_4sem"], h["b1"]["n_paro"], h["b2a"]["n_skus"], h["b2b"]["n_skus"], h["b3"]["n_skus"]]
+    assert h["b1"]["n_4sem"] + h["b1"]["n_paro"] == h["b1"]["n_skus"]
     assert _col(wb["1. Venta Cero (SKU)"], "Prioridad").count("⭐ TOP 80%") == h["b1"]["n_top"]
 
 

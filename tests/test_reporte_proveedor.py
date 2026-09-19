@@ -145,9 +145,13 @@ def test_b1_cadena_ultima_semana(bl):
 def test_b1_pareto_cadena(bl):
     b1 = bl["b1"].sort_values("capital_costo", ascending=False)
     # 2.000 / 1.600 / 100 → la 1ª siempre ⭐; la 2ª entra porque el acumulado ANTES de ella (54%) < 80%
-    assert list(b1["top_80"]) == [True, True, False]
-    assert b1["pct_acum"].is_monotonic_increasing and b1["pct_acum"].iloc[-1] == pytest.approx(1.0)
-    assert bl["hechos"]["b1"]["n_top"] == 2
+    # Pareto por GRUPO: 101 (1.600) y 103 (100) son "sin venta 4 sem" → 101 ⭐; 102 (2.000) es "vendía y paró" → ⭐ solo
+    f = b1.set_index("sku")
+    assert f.loc[101, "grupo"] == rp.GRUPO_B1_4SEM and f.loc[103, "grupo"] == rp.GRUPO_B1_4SEM and f.loc[102, "grupo"] == rp.GRUPO_B1_PARO
+    assert bool(f.loc[101, "top_80"]) and not bool(f.loc[103, "top_80"]) and bool(f.loc[102, "top_80"])
+    assert f.loc[103, "pct_acum"] == pytest.approx(1.0) and f.loc[102, "pct_acum"] == pytest.approx(1.0)
+    assert bl["hechos"]["b1"]["n_top"] == 2 and bl["hechos"]["b1"]["n_4sem"] == 2 and bl["hechos"]["b1"]["capital_paro"] == 2000
+    assert list(bl["b1"]["grupo"])[:2] == [rp.GRUPO_B1_4SEM] * 2          # el grupo duro va primero
 
 
 def test_b2_estado_cadena_y_precedencia_b1(bl):
@@ -155,6 +159,9 @@ def test_b2_estado_cadena_y_precedencia_b1(bl):
     assert set(b2a.index) == {201, 202, 203}          # 102 es SOBRESTOCK de cadena pero ya está en B1
     assert b2a.loc[201, "estado_cadena"] == "SOBRESTOCK" and b2a.loc[202, "estado_cadena"] == "ESTANCADO"
     assert b2a.loc[201, "precio_sugerido"] == pytest.approx(70.0)      # 100 × (1 − 30%) sobre precio BLANCO
+    assert b2a.loc[201, "dscto_sugerido"] == pytest.approx(0.30) and b2a.loc[201, "dscto_piramide"] == pytest.approx(0.30)
+    # 202 ya está al 60% y la pirámide dice 30%: el sugerido NUNCA baja del actual (Franco 19-sep)
+    assert b2a.loc[202, "dscto_piramide"] == pytest.approx(0.30) and b2a.loc[202, "dscto_sugerido"] == pytest.approx(0.60)
     assert b2a.loc[201, "accion"].startswith("⬇️ Markdown cofinanciado 50/50: 30%")
     assert pd.isna(b2a.loc[202, "precio_sugerido"]) and b2a.loc[202, "accion"].startswith("↩️ Canje")
     assert b2a.loc[203, "accion"].startswith("⏸️ Frenar ingreso")
@@ -214,7 +221,9 @@ def test_tablas_texto_cuadran(bl):
     assert m and int(m[1]) == h["b1"]["n_skus"] and int(m[3].replace(",", "")) == h["b1"]["capital"]
     m = re.search(r"TOTAL SOBRESTOCK: (\d+) modelos · ([\d,]+) uds · S/ ([\d,]+)", t["b2a"])
     assert m and int(m[3].replace(",", "")) == h["b2a"]["capital"]
-    assert "▸ CAMISAS — S/ 3,600 en 2 modelo(s)" in t["b1"]     # agrupado por línea con subtotal
+    assert "■ SIN VENTA EN LAS ÚLTIMAS 4 SEMANAS — 2 modelos · S/ 1,700" in t["b1"]
+    assert "■ VENDÍA Y NO VENDIÓ LA ÚLTIMA SEMANA — 1 modelos · S/ 2,000" in t["b1"]
+    assert "▸ CAMISAS — S/ 1,600 en 1 modelo(s)" in t["b1"]     # agrupado por línea dentro del grupo
     assert "TOTAL GANADORES CORTOS: 3 modelos" in t["b3"]
     html = rp.tablas_html(bl)
     assert all("<table" in v for v in html.values())

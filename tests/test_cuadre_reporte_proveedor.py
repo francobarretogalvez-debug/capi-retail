@@ -143,5 +143,6 @@ def test_cuadre_pricing_nunca_sube_y_respeta_piso():
             for _, r in con.iterrows():
                 n += 1
                 assert r["precio_sugerido"] < r["precio_vigente"], (marca, r["sku"])
+                assert r["dscto_sugerido"] >= (r.get("pct_descuento") or 0) - 1e-9, (marca, r["sku"])   # nunca menor al actual
                 assert r["precio_sugerido"] >= pricing.precio_piso(r["costo"], margen_min) - 0.01, (marca, r["sku"])
     assert n > 0, "el fixture debería producir al menos un precio sugerido"

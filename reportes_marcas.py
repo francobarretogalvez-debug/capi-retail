@@ -79,7 +79,12 @@ def _con_sugerencias(g: pd.DataFrame, precio_min_map: dict) -> pd.DataFrame:
     precio mínimo a un agregado por SKU."""
     g = g.copy()
     sug = g["edad_semanas"].apply(lambda e: agente_terceras.descuento_sugerido(e))
-    g["dscto_sugerido"] = sug.map(lambda t: t[0])
+    # dscto_piramide = lo que dice la pirámide por edad (crudo). dscto_sugerido se recalcula más
+    # abajo como el descuento EFECTIVO que se le comunica: el del precio sugerido cuando hay
+    # bajada, o el actual cuando ya está en/sobre la pirámide o en piso. Nunca menor al actual
+    # (Franco 2026-09-19: "estás poniendo descuentos sugeridos menores a los actuales").
+    g["dscto_piramide"] = sug.map(lambda t: t[0])
+    g["dscto_sugerido"] = g["dscto_piramide"]
     g["tipo_dscto"] = sug.map(lambda t: t[1])
     # Piso de margen UNIVERSAL (fix B7 auditoría 2026-08-23): df_prec solo trae
     # precio_minimo para estados críticos; para el resto se calcula igual que
@@ -101,7 +106,7 @@ def _con_sugerencias(g: pd.DataFrame, precio_min_map: dict) -> pd.DataFrame:
     # actual ya supera la pirámide, o el piso de margen no deja bajar más,
     # la acción es Mantener.
     if "precio_blanco" in g.columns and "precio_vigente" in g.columns:
-        p_obj = (g["precio_blanco"] * (1 - g["dscto_sugerido"])).round(2)
+        p_obj = (g["precio_blanco"] * (1 - g["dscto_piramide"])).round(2)
         limitado_piso = pd.Series(False, index=g.index)
         if "precio_minimo" in g.columns:
             piso = g["precio_minimo"]
@@ -112,6 +117,9 @@ def _con_sugerencias(g: pd.DataFrame, precio_min_map: dict) -> pd.DataFrame:
         _sin_piso = g["precio_minimo"].isna() if "precio_minimo" in g.columns else pd.Series(False, index=g.index)
         bajar = (p_obj < (g["precio_vigente"] - 0.01)) & ~_sin_piso
         g["precio_sugerido"] = np.where(bajar, p_obj, np.nan)
+        _actual = g["pct_descuento"].fillna(0) if "pct_descuento" in g.columns else pd.Series(0.0, index=g.index)
+        _efectivo = np.where(g["precio_blanco"] > 0, 1 - p_obj / g["precio_blanco"], g["dscto_piramide"])
+        g["dscto_sugerido"] = np.where(bajar, np.round(_efectivo, 3), np.maximum(_actual, 0))
         g["accion"] = np.where(
             _sin_piso,
             "⚠️ Sin costo en base — revisar antes de sugerir",
@@ -135,7 +143,7 @@ _COLS_PRECIO = [
     ("rango_antiguedad", "Antigüedad"), ("stock_cadena", "Stock (uds)"),
     ("vta_sem_prom4", "Vta sem (prom 4)"), ("cobertura_cadena", "Cobertura (sem)"),
     ("capital_costo", "Capital S/ (costo)"), ("costo", "Costo unit."),
-    ("pct_descuento", "Dscto actual"), ("dscto_sugerido", "Dscto sugerido"),
+    ("pct_descuento", "Dscto actual"), ("dscto_piramide", "Dscto pirámide"), ("dscto_sugerido", "Dscto sugerido"),
     ("tipo_dscto", "Tipo"), ("accion", "Acción"), ("precio_blanco", "P. Blanco"),
     ("precio_vigente", "P. Vigente"), ("precio_sugerido", "P. Sugerido"),
     ("margen_resultante", "Margen result."), ("precio_minimo", "P. Mínimo (piso)"),
@@ -144,7 +152,7 @@ _COLS_PRECIO = [
 _FMTS_PRECIO = {
     "Edad (sem)": "0", "Stock (uds)": _FMT_S, "Vta sem (prom 4)": _FMT_C,
     "Cobertura (sem)": _FMT_C, "Capital S/ (costo)": _FMT_S, "Costo unit.": _FMT_P,
-    "Dscto actual": _FMT_PCT, "Dscto sugerido": _FMT_PCT, "P. Blanco": _FMT_P,
+    "Dscto actual": _FMT_PCT, "Dscto pirámide": _FMT_PCT, "Dscto sugerido": _FMT_PCT, "P. Blanco": _FMT_P,
     "P. Vigente": _FMT_P, "P. Sugerido": _FMT_P, "Margen result.": _FMT_PCT,
     "P. Mínimo (piso)": _FMT_P,
 }
