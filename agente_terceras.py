@@ -328,18 +328,9 @@ def _call_claude(prompt: str) -> str:
     return resp.content[0].text
 
 
-def _parse_correo(texto: str) -> dict:
-    """Separa ASUNTO y cuerpo del formato devuelto por Claude."""
-    asunto, cuerpo = "", texto.strip()
-    if "ASUNTO:" in texto:
-        resto = texto.split("ASUNTO:", 1)[1]
-        if "---" in resto:
-            asunto, cuerpo = resto.split("---", 1)
-        else:
-            partes = resto.split("\n", 1)
-            asunto = partes[0]
-            cuerpo = partes[1] if len(partes) > 1 else ""
-    return {"asunto": asunto.strip(), "cuerpo": cuerpo.strip()}
+# Parser compartido (fix 2026-09-19): antes partía en el primer `---` y perdía el
+# saludo dentro del asunto. La implementación vive en agente_reporte.partir_asunto.
+from agente_reporte import partir_asunto as _parse_correo  # noqa: E402
 
 
 def generar_correo_capital_parado(marca_row: pd.Series, proveedor: dict = None,
