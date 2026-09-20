@@ -1003,6 +1003,8 @@ def comparar_marca(bloques: dict, cortes_prev: pd.DataFrame) -> dict:
     if cortes_prev is None or cortes_prev.empty:
         out["kpis"] = {b: {k: {"actual": v, "prev": None, "delta_abs": None, "delta_pct": None} for k, v in d.items()} for b, d in k_act.items()}
         out["semanas_en_bloque"] = {b: {s: 1 for s in actual.loc[actual["bloque"] == b, "sku"]} for b in ("b1", "b2a", "b2b", "b3")}
+        out["skus"] = {b: {"persisten": [], "salieron": [], "nuevos": sorted(actual.loc[actual["bloque"] == b, "sku"])} for b in ("b1", "b2a", "b2b", "b3")}
+        out["persistentes"] = {b: [] for b in ("b1", "b2a", "b2b", "b3")}
         return out
     semanas = sorted(cortes_prev["semana_iso"].unique())
     prev_w = semanas[-1]

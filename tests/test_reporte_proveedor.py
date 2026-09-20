@@ -317,6 +317,7 @@ def test_comparar_sin_historial():
     b = _bl_semana("2026-36")
     cmp = rp.comparar_marca(b, pd.DataFrame())
     assert not cmp["hay_prev"] and cmp["kpis"]["b1"]["capital"]["prev"] is None
+    assert cmp["persistentes"] == {b: [] for b in ("b1", "b2a", "b2b", "b3")} and cmp["skus"]["b1"]["persisten"] == []
     assert rp.evolucion_texto(cmp, b) == ""                                  # sin corte previo real no hay bloque 0
 
 
