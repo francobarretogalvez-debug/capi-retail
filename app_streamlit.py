@@ -3675,6 +3675,9 @@ elif nav_page == "🤝 Agente Terceras":
             if _bor["sospechosos"]:
                 st.error("El borrador tiene cifras que NO están en el análisis: " + ", ".join(_bor["sospechosos"]) + ". Corrígelas antes de enviar.")
             st.text_input("Asunto", key="at_rep_asunto")
+            # Monoespaciado: las tablas del texto plano están alineadas con espacios; con la fuente
+            # proporcional del textarea se ven torcidas (Franco 20-sep). La vista HTML de abajo trae tablas reales.
+            st.markdown('<style>textarea[aria-label="Cuerpo (texto plano)"]{font-family:ui-monospace,Menlo,Consolas,monospace !important;font-size:12px !important;line-height:1.35 !important;}</style>', unsafe_allow_html=True)
             st.text_area("Cuerpo (texto plano)", key="at_rep_cuerpo", height=420)
             with st.expander("Vista para copiar a Outlook (con tablas)", expanded=True):
                 st.markdown(_bor["cuerpo_html"], unsafe_allow_html=True)
