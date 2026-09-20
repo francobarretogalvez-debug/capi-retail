@@ -497,6 +497,7 @@ def hechos_marca(marca: str, foto: dict, b1, b2a, b2b, b3, umbral_b3: float, cor
                "n_paro": int((b1["semanas_sin_venta"] == "1").sum()) if not b1.empty else 0,
                "capital_paro": round(float(b1.loc[b1["semanas_sin_venta"] == "1", "capital_costo"].sum())) if not b1.empty else 0,
                "top": _top(b1, ["sku", "nombre", "categoria", "n_tiendas_stock", "stock_cadena", "capital_costo", "edad_semanas", "accion"], top_n, "capital_costo")}
+    h["b1"]["por_accion"] = {r.accion: {"modelos": int(r.modelos), "capital": round(float(r.capital))} for r in resumen_por_accion(b1).itertuples()} if not b1.empty else {}
     h["b1"]["pct_capital_marca"] = round(h["b1"]["capital"] / foto["capital_total"] * 100, 1) if foto.get("capital_total") else 0.0
     def _por_linea(df):
         if df.empty or "categoria" not in df.columns:
@@ -513,6 +514,7 @@ def hechos_marca(marca: str, foto: dict, b1, b2a, b2b, b3, umbral_b3: float, cor
                 "cobertura_prom": round(float(b2a["cobertura_cadena"].mean()), 1) if not b2a.empty else None,
                 "por_linea": _por_linea(b2a),
                 "top": _top(b2a, ["sku", "nombre", "categoria", "estado_cadena", "stock_cadena", "cobertura_cadena", "capital_costo", "accion"], top_n, "capital_costo")}
+    h["b2a"]["por_accion"] = {r.accion: {"modelos": int(r.modelos), "capital": round(float(r.capital))} for r in resumen_por_accion(b2a).itertuples()} if not b2a.empty else {}
     h["b2b"] = {"n_skus": int(len(b2b)), "uds": _s(b2b, "transf_uds"), "ganancia": _s(b2b, "transf_ganancia"),
                 "top": _top(b2b, ["sku", "nombre", "transf_uds", "transf_tiendas", "transf_ganancia"], top_n, "transf_uds")}
     h["b3"] = {"n_skus": int(len(b3)), "umbral_vta": round(umbral_b3, 1), "vta_sem_total": round(float(b3["vta_sem_prom4"].sum()), 1) if not b3.empty else 0.0,
@@ -648,7 +650,7 @@ def _tabla_txt(rows: list[dict], cols: list[str], fmt: dict) -> str:
     return "\n".join(lines)
 
 
-_FMT_TXT = {"Capital S/": lambda v: _s(v), "Ganancia neta S/": lambda v: _s(v), "Contribución esperada S/": lambda v: _s(v), "Cob sem": lambda v: _s(v, 1), "Vta/sem": lambda v: _s(v, 1),
+_FMT_TXT = {"Capital S/": lambda v: _s(v), "Modelos": lambda v: _s(v), "Ganancia neta S/": lambda v: _s(v), "Contribución esperada S/": lambda v: _s(v), "Cob sem": lambda v: _s(v, 1), "Vta/sem": lambda v: _s(v, 1),
             "Dscto hoy": lambda v: f"{v:.0%}" if v is not None else "—", "Stock uds": lambda v: _s(v), "Uds a mover": lambda v: _s(v),
             "Necesidad uds": lambda v: _s(v), "Stock CD": lambda v: _s(v)}
 _COLS_TXT = {"b1": ["SKU", "Producto", "Tiendas", "Stock uds", "Capital S/", "Edad sem", "⭐", "Acción"],
@@ -657,25 +659,65 @@ _COLS_TXT = {"b1": ["SKU", "Producto", "Tiendas", "Stock uds", "Capital S/", "Ed
              "b3": ["SKU", "Producto", "Vta/sem", "Cob sem", "Tiendas en quiebre", "Stock CD", "Necesidad uds", "Tend", "Acción"]}
 
 
+_CATEGORIAS_ACCION = [("🏷️", "Liquidar con descuento compartido"), ("⬇️", "Descuento compartido 50/50"), ("↩️", "Devolución"),
+                      ("⏸️", "Frenar ingreso"), ("👁️ Exhibición +", "Exhibición + descuento compartido"), ("👁️", "Revisar exhibición")]
+
+
+def categoria_accion(accion: str) -> str:
+    """Normaliza la acción por modelo a su familia (sin % ni precio) para agrupar en el correo."""
+    a = str(accion or "")
+    for pref, cat in _CATEGORIAS_ACCION:
+        if a.startswith(pref):
+            return cat
+    return a.split(":")[0].strip() or "—"
+
+
+def resumen_por_linea(df: pd.DataFrame) -> pd.DataFrame:
+    """Mix B: una fila por línea con modelos, uds, capital y el pedido dominante (conteo por acción)."""
+    if df.empty:
+        return pd.DataFrame(columns=["linea", "modelos", "uds", "capital", "pedido"])
+    d = df.assign(lin_=df["categoria"].map(_linea) if "categoria" in df.columns else "Sin línea", cat_=df["accion"].map(categoria_accion))
+    out = d.groupby("lin_").agg(modelos=("sku", "count"), uds=("stock_cadena", "sum"), capital=("capital_costo", "sum")).reset_index().rename(columns={"lin_": "linea"})
+    ped = d.groupby(["lin_", "cat_"]).size().reset_index(name="n").sort_values(["lin_", "n"], ascending=[True, False])
+    out["pedido"] = out["linea"].map(lambda l: " · ".join(f"{r.n} {r.cat_.lower()}" for r in ped[ped.lin_ == l].itertuples()))
+    return out.sort_values("capital", ascending=False).reset_index(drop=True)
+
+
+def resumen_por_accion(df: pd.DataFrame, top_n: int = 3) -> pd.DataFrame:
+    """Mix C: una fila por acción pedida con modelos, capital y los N modelos de mayor capital."""
+    if df.empty:
+        return pd.DataFrame(columns=["accion", "modelos", "uds", "capital", "top"])
+    d = df.assign(cat_=df["accion"].map(categoria_accion)).sort_values("capital_costo", ascending=False)
+    out = d.groupby("cat_").agg(modelos=("sku", "count"), uds=("stock_cadena", "sum"), capital=("capital_costo", "sum")).reset_index().rename(columns={"cat_": "accion"})
+    out["top"] = out["accion"].map(lambda c: " · ".join(f"{r.sku} {str(r.nombre)[:26]}" for r in d[d.cat_ == c].head(top_n).itertuples()))
+    return out.sort_values("capital", ascending=False).reset_index(drop=True)
+
+
+def _seccion_resumen_txt(df: pd.DataFrame, nombre: str) -> str:
+    pl = resumen_por_linea(df); pa = resumen_por_accion(df)
+    filas_l = [{"Línea": r.linea, "Modelos": r.modelos, "Stock uds": int(r.uds), "Capital S/": r.capital, "Pedido": r.pedido} for r in pl.itertuples()]
+    filas_a = [{"Acción pedida": r.accion, "Modelos": r.modelos, "Capital S/": r.capital, "Los 3 de mayor capital (resto en el Excel)": r.top} for r in pa.itertuples()]
+    return ("Por línea:\n" + _tabla_txt(filas_l, ["Línea", "Modelos", "Stock uds", "Capital S/", "Pedido"], _FMT_TXT)
+            + "\n\nQué pedimos:\n" + _tabla_txt(filas_a, ["Acción pedida", "Modelos", "Capital S/", "Los 3 de mayor capital (resto en el Excel)"], _FMT_TXT))
+
+
 def tablas_texto(bloques: dict, tope_linea: int = TOP_CUERPO_LINEA, tope_plano: int = TOP_CUERPO_PLANO) -> dict:
     """Bloques del cuerpo en texto plano (para el textarea / correo sin formato).
     Devuelve {"b1","b2a","b2b","b3"} → str. B1 y B2a agrupados por línea con subtotal;
     tope de modelos por línea; el resto se remite al Excel. Los TOTALes salen de `hechos`."""
     h = bloques["hechos"]; out = {}
-    for key, filas in (("b1", _filas_b1(bloques["b1"])), ("b2a", _filas_b2a(bloques["b2a"]))):
+    # Mix B+C (Franco 20-sep): resumen por línea + resumen por acción; los modelos completos viven en el Excel.
+    for key, df in (("b1", bloques["b1"]), ("b2a", bloques["b2a"])):
+        if df.empty:
+            out[key] = "  (sin modelos en este bloque)"; continue
         partes = []
-        secciones = ([(GRUPO_B1_4SEM, [f for f in filas if f["Grupo"] == GRUPO_B1_4SEM]), (GRUPO_B1_PARO, [f for f in filas if f["Grupo"] == GRUPO_B1_PARO])]
-                     if key == "b1" else [(None, filas)])
-        for titulo_g, fil in secciones:
-            if titulo_g is not None:
-                cap_g = sum(f["Capital S/"] for f in fil)
-                partes.append(f"■ {titulo_g.upper()} — {len(fil)} modelos · S/ {_s(cap_g)}" + ("" if fil else "  (ninguno esta semana)"))
-            for lin, cap, n, top in _grupos_por_linea(fil, tope_linea):
-                extra = f"  (+{n - len(top)} modelos más en el Excel)" if n > len(top) else ""
-                partes.append(f"▸ {lin} — S/ {_s(cap)} en {n} modelo(s){extra}\n" + _tabla_txt(top, _COLS_TXT[key], _FMT_TXT))
+        if key == "b1":
+            hb = h["b1"]
+            partes.append(f"■ Sin venta en las últimas 4 semanas: {hb['n_4sem']} modelos · S/ {_s(hb['capital_4sem'])}   ■ Vendían y no vendieron la última semana (alerta temprana): {hb['n_paro']} modelos · S/ {_s(hb['capital_paro'])}")
+        partes.append(_seccion_resumen_txt(df, key))
         tot = h[key]
-        partes.append(f"TOTAL {'VENTA CERO' if key == 'b1' else 'SOBRESTOCK'}: {tot['n_skus']} modelos · {_s(tot['stock_uds'])} uds · S/ {_s(tot['capital'])}")
-        out[key] = "\n\n".join(partes) if filas else "  (sin modelos en este bloque)"
+        partes.append(f"TOTAL {'VENTA CERO' if key == 'b1' else 'SOBRESTOCK'}: {tot['n_skus']} modelos · {_s(tot['stock_uds'])} uds · S/ {_s(tot['capital'])} · detalle por modelo en la pestaña {'1' if key == 'b1' else '2a'} del Excel")
+        out[key] = "\n\n".join(partes)
     f2b = _filas_b2b(bloques["b2b"])
     out["b2b"] = (_tabla_txt(f2b[:tope_plano], _COLS_TXT["b2b"], _FMT_TXT)
                   + (f"\n  (+{len(f2b) - tope_plano} modelos más en el Excel)" if len(f2b) > tope_plano else "")
@@ -695,7 +737,7 @@ _TH = _TD + "background:#dce6f1;font-weight:bold;text-align:left;"
 def _tabla_html(rows: list[dict], cols: list[str]) -> str:
     if not rows:
         return "<p style='font-family:Calibri,Arial;font-size:10.5pt;color:#666'>(sin modelos)</p>"
-    num = {"Capital S/", "Ganancia neta S/", "Contribución esperada S/", "Cob sem", "Vta/sem", "Stock uds", "Uds a mover", "Necesidad uds", "Stock CD", "Tiendas", "Tiendas destino", "Edad sem", "Dscto hoy"}
+    num = {"Capital S/", "Ganancia neta S/", "Contribución esperada S/", "Cob sem", "Vta/sem", "Stock uds", "Uds a mover", "Necesidad uds", "Stock CD", "Tiendas", "Tiendas destino", "Edad sem", "Dscto hoy", "Modelos"}
     th = "".join(f"<th style='{_TH}'>{c}</th>" for c in cols)
     trs = []
     for r in rows:
@@ -713,20 +755,21 @@ def tablas_html(bloques: dict, tope_linea: int = TOP_CUERPO_LINEA, tope_plano: i
     """Mismo contenido que tablas_texto, como <table> con estilos inline (Outlook los conserva)."""
     h = bloques["hechos"]; out = {}
     P = "<p style='font-family:Calibri,Arial;font-size:10.5pt;margin:6px 0 2px 0'>"
-    for key, filas in (("b1", _filas_b1(bloques["b1"])), ("b2a", _filas_b2a(bloques["b2a"]))):
+    for key, df in (("b1", bloques["b1"]), ("b2a", bloques["b2a"])):
+        if df.empty:
+            out[key] = f"{P}(sin modelos en este bloque)</p>"; continue
         partes = []
-        secciones = ([(GRUPO_B1_4SEM, [f for f in filas if f["Grupo"] == GRUPO_B1_4SEM]), (GRUPO_B1_PARO, [f for f in filas if f["Grupo"] == GRUPO_B1_PARO])]
-                     if key == "b1" else [(None, filas)])
-        for titulo_g, fil in secciones:
-            if titulo_g is not None:
-                cap_g = sum(f["Capital S/"] for f in fil)
-                partes.append(f"<p style='font-family:Calibri,Arial;font-size:11pt;font-weight:bold;margin:10px 0 2px 0;color:#7f1d1d'>■ {titulo_g} — {len(fil)} modelos · S/ {_s(cap_g)}" + ("" if fil else " (ninguno esta semana)") + "</p>")
-            for lin, cap, n, top in _grupos_por_linea(fil, tope_linea):
-                extra = f" <span style='color:#666'>(+{n - len(top)} modelos más en el Excel)</span>" if n > len(top) else ""
-                partes.append(f"{P}<b>▸ {lin}</b> — S/ {_s(cap)} en {n} modelo(s){extra}</p>" + _tabla_html(top, _COLS_TXT[key]))
+        if key == "b1":
+            hb = h["b1"]
+            partes.append(f"{P}<b>■ Sin venta en las últimas 4 semanas:</b> {hb['n_4sem']} modelos · S/ {_s(hb['capital_4sem'])} &nbsp;&nbsp; <b>■ Vendían y no vendieron la última semana</b> (alerta temprana): {hb['n_paro']} modelos · S/ {_s(hb['capital_paro'])}</p>")
+        pl = resumen_por_linea(df); pa = resumen_por_accion(df)
+        filas_l = [{"Línea": r.linea, "Modelos": r.modelos, "Stock uds": int(r.uds), "Capital S/": r.capital, "Pedido": r.pedido} for r in pl.itertuples()]
+        filas_a = [{"Acción pedida": r.accion, "Modelos": r.modelos, "Capital S/": r.capital, "Los 3 de mayor capital (resto en el Excel)": r.top} for r in pa.itertuples()]
+        partes.append(f"{P}<b>Por línea</b></p>" + _tabla_html(filas_l, ["Línea", "Modelos", "Stock uds", "Capital S/", "Pedido"]))
+        partes.append(f"{P}<b>Qué pedimos</b></p>" + _tabla_html(filas_a, ["Acción pedida", "Modelos", "Capital S/", "Los 3 de mayor capital (resto en el Excel)"]))
         tot = h[key]
-        partes.append(f"{P}<b>TOTAL {'VENTA CERO' if key == 'b1' else 'SOBRESTOCK'}:</b> {tot['n_skus']} modelos · {_s(tot['stock_uds'])} uds · S/ {_s(tot['capital'])}</p>")
-        out[key] = "".join(partes) if filas else f"{P}(sin modelos en este bloque)</p>"
+        partes.append(f"{P}<b>TOTAL {'VENTA CERO' if key == 'b1' else 'SOBRESTOCK'}:</b> {tot['n_skus']} modelos · {_s(tot['stock_uds'])} uds · S/ {_s(tot['capital'])} · detalle por modelo en la pestaña {'1' if key == 'b1' else '2a'} del Excel</p>")
+        out[key] = "".join(partes)
     f2b = _filas_b2b(bloques["b2b"])
     out["b2b"] = (_tabla_html(f2b[:tope_plano], _COLS_TXT["b2b"]) + f"{P}<b>TOTAL TRANSFERENCIAS:</b> {h['b2b']['n_skus']} modelos · {_s(h['b2b']['uds'])} uds a mover · contribución esperada S/ {_s(h['b2b']['ganancia'])}</p>{P}<span style='color:#555'>El detalle de qué unidades salen de qué tienda y a cuál llegan va en la pestaña '2b. Detalle transferencias' del Excel.</span></p>") if f2b else f"{P}(sin transferencias rentables esta semana)</p>"
     f3 = _filas_b3(bloques["b3"])

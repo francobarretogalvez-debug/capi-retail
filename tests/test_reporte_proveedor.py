@@ -236,9 +236,14 @@ def test_tablas_texto_cuadran(bl):
     assert m and int(m[1]) == h["b1"]["n_skus"] and int(m[3].replace(",", "")) == h["b1"]["capital"]
     m = re.search(r"TOTAL SOBRESTOCK: (\d+) modelos · ([\d,]+) uds · S/ ([\d,]+)", t["b2a"])
     assert m and int(m[3].replace(",", "")) == h["b2a"]["capital"]
-    assert "■ SIN VENTA EN LAS ÚLTIMAS 4 SEMANAS — 2 modelos · S/ 1,700" in t["b1"]
-    assert "■ VENDÍA Y NO VENDIÓ LA ÚLTIMA SEMANA — 1 modelos · S/ 2,000" in t["b1"]
-    assert "▸ CAMISAS — S/ 1,600 en 1 modelo(s)" in t["b1"]     # agrupado por línea dentro del grupo
+    assert "■ Sin venta en las últimas 4 semanas: 2 modelos · S/ 1,700" in t["b1"] and "alerta temprana): 1 modelos · S/ 2,000" in t["b1"]
+    # mix B+C: por línea y por acción, sin filas por modelo
+    assert "Por línea:" in t["b1"] and "CAMISAS" in t["b1"] and "Qué pedimos:" in t["b1"]
+    assert "101" not in t["b1"].split("Qué pedimos:")[0].split("Por línea:")[1]        # la tabla por línea no lista SKUs
+    pa = rp.resumen_por_accion(bl["b1"]); assert set(pa["accion"]) <= {"Liquidar con descuento compartido", "Revisar exhibición", "Devolución", "Exhibición + descuento compartido"}
+    assert pa["modelos"].sum() == 3 and pa["capital"].sum() == 3700
+    pl = rp.resumen_por_linea(bl["b2a"]); assert pl["modelos"].sum() == 3 and set(pl["linea"]) == {"POLOS", "PANTALONES"}
+    assert sum(v["capital"] for v in h["b2a"]["por_accion"].values()) == h["b2a"]["capital"]
     assert "TOTAL GANADORES CORTOS: 3 modelos" in t["b3"]
     html = rp.tablas_html(bl)
     assert all("<table" in v for v in html.values())
