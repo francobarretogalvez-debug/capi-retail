@@ -410,3 +410,20 @@ def test_venta_tienda_4sem_desde_snapshots(tmp_path, monkeypatch):
     assert r["vt_sem1"] == 0 and r["vt_sem2"] == 2 and pd.isna(r["vt_sem3"]) and r["vt_sem4"] == 5
     assert rpm.venta_tienda_4sem("2020-01", [101]).empty
     importlib.reload(rpm)
+
+
+def test_obsoletos_por_antiguedad_venda_o_no(bl):
+    """Definición oficial 2026-09-05: pre-obsoleto/obsoleto por ANTIGÜEDAD (rango del maestro), venda o no.
+    Bug del 19-sep: se usaba el estado de la taxonomía y Lacoste salía con S/ 4.8K en vez de S/ 351K."""
+    import obsoletos
+    obs = bl["obs"]; g = bl["g"]
+    esperado = set(g.loc[obsoletos._mask_nivel(g, "ambos"), "sku"])
+    assert set(obs["sku"]) == esperado == {101}                       # el único con RANGO 6_9 en el fixture
+    assert obs["nivel"].iloc[0] == "PRE-OBSOLETO"
+    # un modelo viejo que rota bien no recibe pedido de liquidar/devolver
+    cob = _cob(); cob.loc[cob.sku == 301, "rango_antiguedad"] = "RANGO 9_12"; cob.loc[cob.sku == 301, "edad_semanas"] = 45
+    b = rp.bloques_marca("M", cob, corte="x")
+    f = b["obs"].set_index("sku")
+    assert f.loc[301, "nivel"] == "OBSOLETO" and f.loc[301, "accion"].startswith("✅ Rota bien")
+    assert b["hechos"]["obs"]["n_rota"] == 1 and b["hechos"]["obs"]["n_obsoleto"] == 1
+

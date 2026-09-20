@@ -3592,7 +3592,7 @@ elif nav_page == "🤝 Agente Terceras":
         _tile(_t3, "2b) Transferencias entre tiendas", f"{_h['b2b']['uds']:,} uds", f"{_h['b2b']['n_skus']} modelos · contribución esperada S/ {_h['b2b']['ganancia']:,}", STATUS_SOBRESTOCK)
         _tile(_t4, "3) Ganadores que se quedan cortos", f"{_h['b3']['n_skus']} modelos", f"{_h['b3']['n_sin_cd']} sin stock en CD · necesidad {_h['b3']['necesidad_uds']:,} uds", STATUS_MUERTO)
         _ho = _h.get("obs", {})
-        _tile(_t5, "4) Pre-obsoleto y obsoleto", f"S/ {_ho.get('capital', 0):,}", f"{_ho.get('n_skus', 0)} modelos · {_ho.get('n_obsoleto', 0)} obsoletos · {_ho.get('pct_capital_marca', 0)}% del capital · liquidar {_ho.get('n_liquidar', 0)} · devolución {_ho.get('n_recoger', 0)}", STATUS_LIQUIDAR)
+        _tile(_t5, "4) Pre-obsoleto y obsoleto", f"S/ {_ho.get('capital', 0):,}", f"{_ho.get('n_skus', 0)} modelos · {_ho.get('n_obsoleto', 0)} obsoletos · {_ho.get('pct_capital_marca', 0)}% del capital · rota bien {_ho.get('n_rota', 0)} · liquidar {_ho.get('n_liquidar', 0)} · devolución {_ho.get('n_recoger', 0)}", STATUS_LIQUIDAR)
         _ft = _h["foto"]
         st.caption(f"Foto de {_rep_marca}: S/ {_ft['capital_total']:,} a costo · {_ft['skus']} modelos · {_ft['tiendas']} tiendas · "
                    f"sell-through {_ft['sell_through_pct']}% · margen efectivo {_ft['margen_efectivo_pct'] if _ft['margen_efectivo_pct'] is not None else '—'}%"
@@ -3630,7 +3630,7 @@ elif nav_page == "🤝 Agente Terceras":
         with st.expander(f"3) Ganadores que se quedan cortos — {_h['b3']['n_skus']} modelos (umbral {_h['b3']['umbral_vta']} u/sem)", expanded=False):
             _mostrar(_bl["b3"], ["sku", "nombre", "categoria", "tendencia", "entra_por", "vta_sem_prom4", "stock_cadena", "cobertura_cadena", "n_tiendas_quiebre", "n_tiendas", "stock_cd", "necesidad_uds", "pendiente_sin_cd_uds", "sem_en_quiebre_max", "vp_neto_min", "vp_neto_max", "accion"])
         with st.expander(f"4) Pre-obsoleto y obsoleto (transversal) — {_h.get('obs', {}).get('n_skus', 0)} modelos · S/ {_h.get('obs', {}).get('capital', 0):,}", expanded=False):
-            _mostrar(_bl.get("obs", pd.DataFrame()), ["sku", "nombre", "categoria", "estado_cadena", "en_bloque", "edad_semanas", "n_tiendas_stock", "stock_cadena", "capital_costo", "top_80", "pct_descuento", "dscto_sugerido", "precio_sugerido", "accion"])
+            _mostrar(_bl.get("obs", pd.DataFrame()), ["sku", "nombre", "categoria", "nivel", "estado_cadena", "en_bloque", "edad_semanas", "n_tiendas_stock", "stock_cadena", "capital_costo", "top_80", "pct_descuento", "dscto_sugerido", "precio_sugerido", "accion"])
         with st.expander("📈 Historial de la marca (cortes enviados con Capi)", expanded=False):
             _serie = reporte_proveedor.serie_kpis(_cortes, _bl)
             if _serie.empty or _serie.shape[1] < 2:

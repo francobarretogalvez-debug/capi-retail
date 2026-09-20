@@ -425,25 +425,33 @@ def bloque_ganadores(g: pd.DataFrame, excluir: set, df_rep: pd.DataFrame | None 
 
 # ── Bloque 4: pre-obsoleto y obsoleto (vista transversal, Franco 20-sep) ──────
 def bloque_obsoletos(g: pd.DataFrame, b1: pd.DataFrame, b2a: pd.DataFrame, precio_min_map: dict | None = None) -> pd.DataFrame:
-    """Todos los modelos con estado de CADENA PRE-OBSOLETO u OBSOLETO, vendan o no. No es un bloque
-    excluyente: cada fila dice en qué bloque del correo ya aparece (venta cero / sobrestock) para que el
-    proveedor vea junta la mercadería que hay que liquidar o recoger."""
+    """Todos los modelos con más de 6 meses en tienda, VENDAN O NO (definición oficial 2026-09-05,
+    misma máscara que obsoletos.py: rango del maestro RANGO 6_9 = pre-obsoleto, RANGO 9_12/12_99 =
+    obsoleto; respaldo por edad 26/39 semanas). Corrige el bug del 19-sep, que usaba el estado de
+    la taxonomía y solo veía lo que no vendía o tenía cobertura >52 (Lacoste: S/ 4.8K vs S/ 351K).
+    No es un bloque excluyente: cada fila dice en qué bloque del correo ya aparece."""
     if g.empty:
         return pd.DataFrame()
-    ob = g[g["estado_cadena"].isin(ESTADOS_LIQUIDACION)].copy()
+    import obsoletos
+    pre = obsoletos._mask_nivel(g, "preobsoleto"); obs_m = obsoletos._mask_nivel(g, "obsoleto")
+    ob = g[pre | obs_m].copy()
     if ob.empty:
         return ob
+    ob["nivel"] = np.where(obsoletos._mask_nivel(ob, "obsoleto"), "OBSOLETO", "PRE-OBSOLETO")
     ob = _con_precio(ob, precio_min_map)
     en_b1, en_b2a = set(b1["sku"]) if not b1.empty else set(), set(b2a["sku"]) if not b2a.empty else set()
     ob["en_bloque"] = np.where(ob["sku"].isin(en_b1), "1) Venta cero", np.where(ob["sku"].isin(en_b2a), "2a) Sobrestock", "—"))
     def _acc(r):
-        p = r.get("precio_sugerido")
+        p = r.get("precio_sugerido"); cob = r.get("cobertura_cadena")
+        vende = pd.notna(cob) and cob <= B3_COB_MAX * 2   # ≤16 sem: rota, se agota solo
+        if vende:
+            return "✅ Rota bien: se agota sola, sin acción"
         if pd.notna(p):
             return f"🏷️ Liquidar: descuento compartido {r['dscto_sugerido']:.0%} → S/ {p:,.2f}"
-        return "↩️ Recoger / devolución (ya en piso de precio)" if r["estado_cadena"] == "OBSOLETO" else "↩️ Devolución (ya en piso de precio)"
+        return "↩️ Recoger / devolución (ya en piso de precio)" if r["nivel"] == "OBSOLETO" else "↩️ Devolución (ya en piso de precio)"
     ob["accion"] = ob.apply(_acc, axis=1)
     ob["pct_acum"], ob["top_80"] = pareto_flag(ob["capital_costo"])
-    ob["_o"] = (ob["estado_cadena"] != "OBSOLETO").astype(int)
+    ob["_o"] = (ob["nivel"] != "OBSOLETO").astype(int)
     return ob.sort_values(["_o", "capital_costo"], ascending=[True, False]).drop(columns="_o").reset_index(drop=True)
 
 
@@ -560,13 +568,15 @@ def bloques_marca(marca: str, df_cob: pd.DataFrame, df_trans: pd.DataFrame | Non
     h = hechos_marca(marca, foto, b1, b2a, b2b, b3, umbral, corte, semana_iso)
     h["obs"] = {"n_skus": int(len(obs)), "capital": round(float(obs["capital_costo"].sum())) if not obs.empty else 0,
                 "stock_uds": int(obs["stock_cadena"].sum()) if not obs.empty else 0,
-                "n_obsoleto": int((obs["estado_cadena"] == "OBSOLETO").sum()) if not obs.empty else 0,
-                "capital_obsoleto": round(float(obs.loc[obs["estado_cadena"] == "OBSOLETO", "capital_costo"].sum())) if not obs.empty else 0,
-                "n_preobsoleto": int((obs["estado_cadena"] == "PRE-OBSOLETO").sum()) if not obs.empty else 0,
+                "n_obsoleto": int((obs["nivel"] == "OBSOLETO").sum()) if not obs.empty else 0,
+                "capital_obsoleto": round(float(obs.loc[obs["nivel"] == "OBSOLETO", "capital_costo"].sum())) if not obs.empty else 0,
+                "n_preobsoleto": int((obs["nivel"] == "PRE-OBSOLETO").sum()) if not obs.empty else 0,
                 "n_liquidar": int(obs["accion"].str.startswith("🏷️").sum()) if not obs.empty else 0,
                 "n_recoger": int(obs["accion"].str.startswith("↩️").sum()) if not obs.empty else 0,
+                "n_rota": int(obs["accion"].str.startswith("✅").sum()) if not obs.empty else 0,
+                "capital_rota": round(float(obs.loc[obs["accion"].str.startswith("✅"), "capital_costo"].sum())) if not obs.empty else 0,
                 "pct_capital_marca": round(float(obs["capital_costo"].sum()) / foto["capital_total"] * 100, 1) if (not obs.empty and foto.get("capital_total")) else 0.0,
-                "top": _top(obs, ["sku", "nombre", "categoria", "estado_cadena", "edad_semanas", "stock_cadena", "capital_costo", "en_bloque", "accion"], 5, "capital_costo")}
+                "top": _top(obs, ["sku", "nombre", "categoria", "nivel", "estado_cadena", "edad_semanas", "stock_cadena", "capital_costo", "en_bloque", "accion"], 5, "capital_costo")}
     h["vp"] = {"combos": int(len(vp_marca)), "skus": int(vp_marca["sku"].nunique()) if not vp_marca.empty and "sku" in vp_marca.columns else 0,
                "neto_min": round(float(vp_marca["neto_min"].sum())) if not vp_marca.empty and "neto_min" in vp_marca.columns else None,
                "neto_max": round(float(vp_marca["neto_max"].sum())) if not vp_marca.empty and "neto_max" in vp_marca.columns else None,
@@ -823,7 +833,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             {"Bloque": "2b. Transferencias entre tiendas (las ejecuta la marca)", "Modelos": h["b2b"]["n_skus"], "Stock (uds)": h["b2b"]["uds"], "Capital S/ (costo)": None, "Qué pedimos": f"mover {h['b2b']['uds']:,} uds · contribución esperada S/ {h['b2b']['ganancia']:,} · detalle origen → destino en la pestaña 2b. Detalle"},
             {"Bloque": "3. Ganadores que se quedan cortos", "Modelos": h["b3"]["n_skus"], "Stock (uds)": None, "Capital S/ (costo)": None, "Qué pedimos": f"{h['b3']['n_sin_cd']} sin stock en CD (reorden) · necesidad {h['b3']['necesidad_uds']:,} uds"},
             {"Bloque": "4. Pre-obsoleto y obsoleto (transversal: vendan o no)", "Modelos": h.get("obs", {}).get("n_skus", 0), "Stock (uds)": h.get("obs", {}).get("stock_uds", 0), "Capital S/ (costo)": h.get("obs", {}).get("capital", 0),
-             "Qué pedimos": f"{h.get('obs', {}).get('n_obsoleto', 0)} obsoletos (S/ {_s(h.get('obs', {}).get('capital_obsoleto'))}) + {h.get('obs', {}).get('n_preobsoleto', 0)} pre-obsoletos · liquidar {h.get('obs', {}).get('n_liquidar', 0)} · recoger/devolución {h.get('obs', {}).get('n_recoger', 0)}"},
+             "Qué pedimos": f"{h.get('obs', {}).get('n_obsoleto', 0)} obsoletos (S/ {_s(h.get('obs', {}).get('capital_obsoleto'))}) + {h.get('obs', {}).get('n_preobsoleto', 0)} pre-obsoletos · rota bien {h.get('obs', {}).get('n_rota', 0)} · liquidar {h.get('obs', {}).get('n_liquidar', 0)} · recoger/devolución {h.get('obs', {}).get('n_recoger', 0)}"},
         ])
         ws = vistas_excel._tabla_con_titulo(w, "Resumen", f"{marca} — Reporte semanal Ripley · corte {corte}", res,
                                             {"Stock (uds)": _F["S"], "Capital S/ (costo)": _F["S"]}, anchos={"Bloque": 58, "Qué pedimos": 70})
@@ -843,7 +853,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             ("2b. Rutas tienda a tienda", "Transferencias entre tiendas que ejecuta la marca (modelos con ≥12 uds a mover y demanda en destino; sin flete Ripley): cuánto se mueve de cada tienda origen a cada tienda destino, con modelos, unidades, costo total y valor venta, y fila TOTAL."),
             ("2b. Detalle transferencias", "El detalle de esas transferencias: cuántas unidades de cada modelo salen de qué tienda y llegan a cuál, con stock, venta semanal y cobertura antes/después en ambas tiendas. La cantidad busca dejar ambas en 12 semanas de cobertura."),
             ("3. Ganadores", "Modelos con buena rotación y poca cobertura (≤ 8 semanas) o acelerando: necesidad calculada, stock en CD y acción (reponer desde CD / reorden)."),
-            ("4. Pre-obsoleto y obsoleto", "Vista transversal: todos los modelos con más de 6 meses sin rotación a nivel cadena (pre-obsoleto 6-9 meses, obsoleto 9 o más), vendan o no, con el bloque del correo donde ya aparecen, el descuento sugerido y si toca liquidar o recoger."),
+            ("4. Pre-obsoleto y obsoleto", "Vista transversal: todos los modelos con más de 6 meses en tienda por antigüedad (pre-obsoleto 6-9 meses, obsoleto 9 o más), vendan o no. Los que aún rotan bien se marcan 'sin acción'; el resto con descuento sugerido y si toca liquidar o recoger."),
             ("Leyenda", "Cómo se calculan los estados, la pirámide de descuentos por antigüedad, el piso de margen y las reglas de transferencia."),
         ]
         for i, (hoja_n, desc) in enumerate(guia, start=1):
@@ -964,7 +974,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
                            "A girar hoy (uds)": _F["S"], "Pendiente sin CD (uds)": _F["S"], "Venta perdida S/ (mín)": _F["S"], "Venta perdida S/ (máx)": _F["S"]})
         # 4. Pre-obsoleto y obsoleto (transversal)
         obs = bloques.get("obs", pd.DataFrame()); ho = h.get("obs", {})
-        c5 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("temporada", "Temporada"), ("estado_cadena", "Estado"), ("en_bloque", "Aparece en"),
+        c5 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("temporada", "Temporada"), ("nivel", "Nivel"), ("rango_antiguedad", "Antigüedad"), ("estado_cadena", "Estado"), ("en_bloque", "Aparece en"),
               ("edad_semanas", "Edad (sem)"), ("n_tiendas_stock", "Tiendas con stock"), ("stock_cadena", "Stock (uds)"), ("capital_costo", "Capital S/ (costo)"), ("pct_acum", "% acum."), ("top_80", "Prioridad"),
               ("vta_sem_prom4", "Vta sem (prom 4)"), ("cobertura_cadena", "Cobertura (sem)"), ("costo", "Costo unit."), ("pct_descuento", "Dscto actual"), ("dscto_piramide", "Dscto pirámide"),
               ("dscto_sugerido", "Dscto sugerido"), ("precio_blanco", "P. Blanco"), ("precio_vigente", "P. Vigente"), ("precio_sugerido", "P. Sugerido"), ("margen_resultante", "Margen result."),
@@ -972,9 +982,11 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
         d5 = obs[[a for a, _ in c5 if a in obs.columns]].rename(columns=dict(c5)).copy() if obs is not None and not obs.empty else pd.DataFrame()
         if not d5.empty:
             d5["Prioridad"] = np.where(d5["Prioridad"], "⭐ TOP 80%", "")
+            if "Antigüedad" in d5.columns:
+                d5["Antigüedad"] = d5["Antigüedad"].map(reportes_marcas._RANGO_LABEL).fillna(d5["Antigüedad"])
         _hoja_o_vacia(w, "4. Pre-obsoleto y obsoleto",
-                      f"{marca} — Mercadería pre-obsoleta (6-9 meses) y obsoleta (9 meses a más) a nivel cadena, venda o no: {ho.get('n_skus', 0)} modelos · S/ {_s(ho.get('capital'))} ({ho.get('pct_capital_marca', 0)}% del capital) · "
-                      f"liquidar {ho.get('n_liquidar', 0)} · recoger/devolución {ho.get('n_recoger', 0)} · corte {corte}",
+                      f"{marca} — Mercadería con más de 6 meses en tienda, venda o no (pre-obsoleto 6-9 meses · obsoleto 9 meses a más, por antigüedad del maestro): {ho.get('n_skus', 0)} modelos · S/ {_s(ho.get('capital'))} ({ho.get('pct_capital_marca', 0)}% del capital) · "
+                      f"rota bien {ho.get('n_rota', 0)} · liquidar {ho.get('n_liquidar', 0)} · recoger/devolución {ho.get('n_recoger', 0)} · corte {corte}",
                       d5, {**reportes_marcas._FMTS_PRECIO, "% acum.": _F["PCT"], "Tiendas con stock": _F["S"]}, chips_col="Estado")
         reportes_marcas._hoja_leyenda(w)
     buf.seek(0)

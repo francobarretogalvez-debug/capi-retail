@@ -68,8 +68,8 @@ def redactar_reglas(h: dict) -> dict:
                f"{b1.get('n_liquidar', 0)} con más de 26 semanas, compartir el descuento de liquidación o evaluar la devolución."
                if b1.get("n_skus") else "Venta cero: esta semana no hay modelos sin venta en toda la cadena.")
     obs = h.get("obs", {})
-    obs_txt = (f" Además, {obs.get('n_skus', 0)} modelos de la marca ya son pre-obsoletos u obsoletos (S/ {_sn(obs.get('capital'))}, {obs.get('pct_capital_marca', 0)}% del capital): "
-               f"van marcados en los bloques 1 y 2a y juntos en la pestaña 4 del Excel, con lo que toca liquidar ({obs.get('n_liquidar', 0)}) o recoger ({obs.get('n_recoger', 0)})."
+    obs_txt = (f" Además, {obs.get('n_skus', 0)} modelos de la marca ya tienen más de 6 meses en tienda (S/ {_sn(obs.get('capital'))}, {obs.get('pct_capital_marca', 0)}% del capital): "
+               f"{obs.get('n_rota', 0)} todavía rotan bien y se agotan solos; para el resto, la pestaña 4 del Excel dice qué liquidar ({obs.get('n_liquidar', 0)}) y qué recoger o devolver ({obs.get('n_recoger', 0)})."
                if obs.get("n_skus") else "")
     lead_b2a = (f"Sobrestock: {b2a.get('n_skus', 0)} modelos venden pero cargan de más (S/ {_sn(b2a.get('capital'))}). Propuesta por modelo: "
                 f"descuento compartido 50/50 en {b2a.get('n_markdown', 0)}, devolución con recompra en {b2a.get('n_canje', 0)} y frenar el ingreso en "

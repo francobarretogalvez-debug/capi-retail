@@ -46,7 +46,7 @@ def test_excel_cuadra_con_bloques(wb_bl):
     assert len(_col(wb["3. Ganadores"], "SKU")) == h["b3"]["n_skus"]
     res = wb["Resumen"]
     assert _col(res, "Modelos")[:6] == [h["b1"]["n_4sem"], h["b1"]["n_paro"], h["b2a"]["n_skus"], h["b2b"]["n_skus"], h["b3"]["n_skus"], h["obs"]["n_skus"]]
-    # 101 (30 sem sin venta) es PRE-OBSOLETO de cadena → hoja 4 con 'Aparece en' = 1) Venta cero
+    # 101 (30 sem, RANGO 6_9) es pre-obsoleto por antigüedad → hoja 4 con 'Aparece en' = 1) Venta cero
     assert _col(wb["4. Pre-obsoleto y obsoleto"], "SKU") == [101] and _col(wb["4. Pre-obsoleto y obsoleto"], "Aparece en") == ["1) Venta cero"]
     assert h["obs"]["capital"] == 1600 and h["obs"]["n_preobsoleto"] == 1
     assert h["b1"]["n_4sem"] + h["b1"]["n_paro"] == h["b1"]["n_skus"]
