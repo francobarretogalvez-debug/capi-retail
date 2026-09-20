@@ -173,6 +173,8 @@ def test_b2_estado_cadena_y_precedencia_b1(bl):
 def test_b2b_desbalance(bl):
     b2b = bl["b2b"]
     assert list(b2b["sku"]) == [201]                 # 303 no llega a 12 uds
+    det = bl["b2b_detalle"]
+    assert list(det["sku"]) == [201, 201] and det["uds_transferir"].sum() == 14 and set(det["tienda_destino"]) == {"T2", "T3"}
     assert int(b2b["transf_uds"].iloc[0]) == 14 and b2b["accion"].iloc[0].startswith("🔄 Mover 14 uds a 2 tienda")
 
 

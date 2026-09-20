@@ -57,7 +57,7 @@ def test_ensamblar_estructura(bl):
     h = bl["hechos"]
     out = ap.ensamblar(h, ap.redactar_reglas(h), rp.tablas_texto(bl), rp.tablas_html(bl), firma="Daniela · Ripley")
     t = out["cuerpo_texto"]
-    i1, i2, i3, i4 = (t.index(s) for s in ("1) VENTA CERO", "2a) SOBRESTOCK", "2b) DESBALANCE", "3) GANADORES"))
+    i1, i2, i3, i4 = (t.index(s) for s in ("1) VENTA CERO", "2a) SOBRESTOCK", "2b) TRANSFERENCIAS", "3) GANADORES"))
     assert i1 < i2 < i3 < i4
     assert "TOTAL VENTA CERO" in t and "TOTAL SOBRESTOCK" in t and t.rstrip().endswith("Daniela · Ripley")
     assert out["cuerpo_html"].count("<table") >= 4

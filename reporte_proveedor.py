@@ -307,14 +307,24 @@ def bloque_sobrestock(g: pd.DataFrame, excluir: set, df_trans: pd.DataFrame | No
         b2 = b2.sort_values(["top_80", "capital_costo"], ascending=[False, False]).reset_index(drop=True)
     # 2b
     tr = reportes_marcas.transferencias_por_sku(df_trans, g["sku"]) if df_trans is not None else vacio
+    b2b_det = vacio
     if tr is None or tr.empty:
         b2b = vacio
     else:
+        # Detalle origen → destino de los modelos que pasan el umbral (el proveedor ejecuta las
+        # transferencias en terceras, precisión Franco 18-sep; pedido del detalle 19-sep).
+        _cols_det = [c for c in ("sku", "nombre", "categoria", "tienda_origen", "tienda_destino", "uds_transferir", "ganancia_esperada",
+                                 "cob_origen_pre", "cob_origen_post", "cob_destino_pre", "cob_destino_post", "precio_vigente", "motivo") if c in df_trans.columns]
+        b2b_det = df_trans[df_trans["sku"].isin(tr["sku"])][_cols_det].copy()
+        if "categoria" not in b2b_det.columns and "categoria" in g.columns:
+            b2b_det["categoria"] = b2b_det["sku"].map(g.set_index("sku")["categoria"])
+        b2b_det = b2b_det.sort_values(["sku", "uds_transferir"], ascending=[True, False]).reset_index(drop=True)
         cols = ["sku", "categoria", "estado_cadena", "stock_cadena", "cobertura_cadena", "capital_costo", "n_tiendas_quiebre", "n_tiendas"]
         b2b = tr.merge(g[[c for c in cols if c in g.columns]], on="sku", how="left")
         b2b["accion"] = b2b.apply(lambda r: f"🔄 Mover {int(r['transf_uds'])} uds a {int(r['transf_tiendas'])} tienda(s)"
                                   + (f" · ganancia neta S/ {r['transf_ganancia']:,.0f}" if pd.notna(r.get('transf_ganancia')) else ""), axis=1)
         b2b = b2b.reset_index(drop=True)
+    b2b.attrs["detalle"] = b2b_det
     return b2, b2b
 
 
@@ -476,13 +486,14 @@ def bloques_marca(marca: str, df_cob: pd.DataFrame, df_trans: pd.DataFrame | Non
     b1, vc_tienda = bloque_venta_cero(g, dfm, precio_min_map, tipo_evento_map, semana_iso)
     ex = set(b1["sku"]) if not b1.empty else set()
     b2a, b2b = bloque_sobrestock(g, ex, df_trans, precio_min_map, df_alertas)
+    b2b_det = b2b.attrs.get("detalle", pd.DataFrame()) if hasattr(b2b, "attrs") else pd.DataFrame()
     ex2 = ex | (set(b2a["sku"]) if not b2a.empty else set())
     b3, umbral = bloque_ganadores(g, ex2, df_rep, df_vp, df_alertas, marca=marca)
     foto = foto_marca(dfm, g) if not dfm.empty else {"capital_total": 0, "skus": 0, "tiendas": 0, "stock_uds": 0,
                                                      "sell_through_pct": 0.0, "margen_efectivo_pct": None, "por_estado_cadena": {}}
     h = hechos_marca(marca, foto, b1, b2a, b2b, b3, umbral, corte, semana_iso)
     return {"marca": marca, "corte": corte, "semana_iso": semana_iso, "g": g, "dfm": dfm,
-            "b1": b1, "b2a": b2a, "b2b": b2b, "b3": b3, "vc_tienda": vc_tienda, "umbral_b3": umbral, "hechos": h}
+            "b1": b1, "b2a": b2a, "b2b": b2b, "b2b_detalle": b2b_det, "b3": b3, "vc_tienda": vc_tienda, "umbral_b3": umbral, "hechos": h}
 
 
 def detalle_lote(bloques: dict) -> pd.DataFrame:
@@ -591,7 +602,7 @@ def tablas_texto(bloques: dict, tope_linea: int = TOP_CUERPO_LINEA, tope_plano: 
     f2b = _filas_b2b(bloques["b2b"])
     out["b2b"] = (_tabla_txt(f2b[:tope_plano], _COLS_TXT["b2b"], _FMT_TXT)
                   + (f"\n  (+{len(f2b) - tope_plano} modelos más en el Excel)" if len(f2b) > tope_plano else "")
-                  + f"\nTOTAL DESBALANCE: {h['b2b']['n_skus']} modelos · {_s(h['b2b']['uds'])} uds a mover · ganancia neta S/ {_s(h['b2b']['ganancia'])}") if f2b else "  (sin transferencias rentables esta semana)"
+                  + f"\nTOTAL TRANSFERENCIAS: {h['b2b']['n_skus']} modelos · {_s(h['b2b']['uds'])} uds a mover · ganancia neta S/ {_s(h['b2b']['ganancia'])}\n  (El detalle de qué unidades salen de qué tienda y a cuál llegan va en la pestaña '2b. Detalle transferencias' del Excel.)") if f2b else "  (sin transferencias rentables esta semana)"
     f3 = _filas_b3(bloques["b3"])
     out["b3"] = (_tabla_txt(f3[:tope_plano], _COLS_TXT["b3"], _FMT_TXT)
                  + (f"\n  (+{len(f3) - tope_plano} modelos más en el Excel)" if len(f3) > tope_plano else "")
@@ -640,7 +651,7 @@ def tablas_html(bloques: dict, tope_linea: int = TOP_CUERPO_LINEA, tope_plano: i
         partes.append(f"{P}<b>TOTAL {'VENTA CERO' if key == 'b1' else 'SOBRESTOCK'}:</b> {tot['n_skus']} modelos · {_s(tot['stock_uds'])} uds · S/ {_s(tot['capital'])}</p>")
         out[key] = "".join(partes) if filas else f"{P}(sin modelos en este bloque)</p>"
     f2b = _filas_b2b(bloques["b2b"])
-    out["b2b"] = (_tabla_html(f2b[:tope_plano], _COLS_TXT["b2b"]) + f"{P}<b>TOTAL DESBALANCE:</b> {h['b2b']['n_skus']} modelos · {_s(h['b2b']['uds'])} uds a mover · ganancia neta S/ {_s(h['b2b']['ganancia'])}</p>") if f2b else f"{P}(sin transferencias rentables esta semana)</p>"
+    out["b2b"] = (_tabla_html(f2b[:tope_plano], _COLS_TXT["b2b"]) + f"{P}<b>TOTAL TRANSFERENCIAS:</b> {h['b2b']['n_skus']} modelos · {_s(h['b2b']['uds'])} uds a mover · ganancia neta S/ {_s(h['b2b']['ganancia'])}</p>{P}<span style='color:#555'>El detalle de qué unidades salen de qué tienda y a cuál llegan va en la pestaña '2b. Detalle transferencias' del Excel.</span></p>") if f2b else f"{P}(sin transferencias rentables esta semana)</p>"
     f3 = _filas_b3(bloques["b3"])
     out["b3"] = (_tabla_html(f3[:tope_plano], _COLS_TXT["b3"]) + f"{P}<b>TOTAL GANADORES CORTOS:</b> {h['b3']['n_skus']} modelos · {_s(h['b3']['vta_sem_total'], 1)} uds/sem · {h['b3']['n_sin_cd']} sin stock en CD</p>") if f3 else f"{P}(sin ganadores cortos esta semana)</p>"
     return out
@@ -662,7 +673,7 @@ def _hoja_o_vacia(writer, hoja: str, titulo: str, df: pd.DataFrame, formatos: di
 
 def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict | None = None) -> bytes:
     """Pestañas: Resumen · [0. Evolución] · 1. Venta Cero (SKU) · 1b. Venta Cero x Tienda · 2a. Sobrestock ·
-    2b. Desbalance tiendas · 3. Ganadores · Leyenda. Todas construidas de los mismos DataFrames del
+    2b. Transferencias tiendas · 2b. Detalle transferencias · 3. Ganadores · Leyenda. Todas construidas de los mismos DataFrames del
     correo; los totales del Resumen salen de `hechos`. Con `cortes`/`cmp` (comparar_marca) agrega la
     hoja 0 (serie KPI × semana) y la columna "Semanas en el bloque" en 1, 2a y 3."""
     import io
@@ -680,7 +691,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             {"Bloque": f"1. Venta cero — {GRUPO_B1_4SEM.lower()}", "Modelos": h["b1"]["n_4sem"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_4sem"], "Qué pedimos": f"liquidar / canje lo de más de 26 sem ({h['b1']['n_liquidar']} en todo el bloque) · exhibición y precio en el resto"},
             {"Bloque": f"1. Venta cero — {GRUPO_B1_PARO.lower()} (alerta temprana)", "Modelos": h["b1"]["n_paro"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_paro"], "Qué pedimos": "revisar exhibición y precio esta semana; si repite, pasa al grupo anterior"},
             {"Bloque": "2a. Sobrestock de cadena (venden, pero cargan de más)", "Modelos": h["b2a"]["n_skus"], "Stock (uds)": h["b2a"]["stock_uds"], "Capital S/ (costo)": h["b2a"]["capital"], "Qué pedimos": f"markdown 50/50: {h['b2a']['n_markdown']} · canje/devolución: {h['b2a']['n_canje']} · frenar ingreso: {h['b2a']['n_frenar']}"},
-            {"Bloque": "2b. Desbalance entre tiendas (transferencias rentables)", "Modelos": h["b2b"]["n_skus"], "Stock (uds)": h["b2b"]["uds"], "Capital S/ (costo)": None, "Qué pedimos": f"mover {h['b2b']['uds']:,} uds · ganancia neta S/ {h['b2b']['ganancia']:,}"},
+            {"Bloque": "2b. Transferencias entre tiendas (rentables)", "Modelos": h["b2b"]["n_skus"], "Stock (uds)": h["b2b"]["uds"], "Capital S/ (costo)": None, "Qué pedimos": f"mover {h['b2b']['uds']:,} uds · ganancia neta S/ {h['b2b']['ganancia']:,} · detalle origen → destino en la pestaña 2b. Detalle"},
             {"Bloque": "3. Ganadores que se quedan cortos", "Modelos": h["b3"]["n_skus"], "Stock (uds)": None, "Capital S/ (costo)": None, "Qué pedimos": f"{h['b3']['n_sin_cd']} sin stock en CD (reorden) · necesidad {h['b3']['necesidad_uds']:,} uds"},
         ])
         ws = vistas_excel._tabla_con_titulo(w, "Resumen", f"{marca} — Reporte semanal Ripley · corte {corte}", res,
@@ -698,7 +709,8 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             ("1. Venta Cero (SKU)", "Modelos con stock que NO vendieron ni una unidad en toda la cadena la última semana, en dos grupos: sin venta en las últimas 4 semanas y los que vendían y pararon. ⭐ = concentran el 80% del capital de su grupo. Con la venta del modelo de las 4 últimas semanas y el descuento sugerido (nunca menor al actual)."),
             ("1b. Venta Cero x Tienda", "Los mismos modelos de la pestaña 1, tienda por tienda: dónde está el stock, qué prioridad tiene en esa tienda (⭐ = 80% del capital sin venta de la tienda), la venta de esa tienda en las 4 últimas semanas (de los snapshots; si no hay, la del modelo en cadena), y la acción de piso (etiquetar, cartel o revisar exhibición)."),
             ("2a. Sobrestock", "Modelos que venden pero cargan de más a nivel cadena (cobertura ≥ 26 semanas) o entran en liquidación: acción sugerida por modelo (markdown compartido, canje/devolución, frenar ingreso)."),
-            ("2b. Desbalance tiendas", "Modelos con stock donde no rota y faltante donde sí: unidades a mover entre tiendas con ganancia neta positiva después del flete (≥12 uds por modelo)."),
+            ("2b. Transferencias tiendas", "Modelos con stock donde no rota y faltante donde sí: unidades a mover entre tiendas con ganancia neta positiva después del flete (≥12 uds por modelo), resumen por modelo."),
+            ("2b. Detalle transferencias", "El detalle de esas transferencias: cuántas unidades de cada modelo salen de qué tienda y llegan a cuál, con la cobertura antes y después en ambas."),
             ("3. Ganadores", "Modelos con buena rotación y poca cobertura (≤ 8 semanas) o acelerando: necesidad calculada, stock en CD y acción (reponer desde CD / reorden)."),
             ("Leyenda", "Cómo se calculan los estados, la pirámide de descuentos por antigüedad, el piso de margen y las reglas de transferencia."),
         ]
@@ -776,8 +788,17 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
         c3 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("estado_cadena", "Estado"), ("transf_uds", "Uds a mover"), ("transf_tiendas", "Tiendas destino"),
               ("transf_valor", "Valor S/ (venta)"), ("transf_ganancia", "Ganancia neta S/"), ("stock_cadena", "Stock (uds)"), ("cobertura_cadena", "Cobertura (sem)"), ("accion", "Acción sugerida")]
         d3 = b2b[[a for a, _ in c3 if a in b2b.columns]].rename(columns=dict(c3)) if not b2b.empty else pd.DataFrame()
-        _hoja_o_vacia(w, "2b. Desbalance tiendas", f"{marca} — Transferencias entre tiendas con ganancia neta (≥{reportes_marcas.TRANSF_MIN_UDS} uds por modelo) · corte {corte}",
+        _hoja_o_vacia(w, "2b. Transferencias tiendas", f"{marca} — Transferencias entre tiendas con ganancia neta, resumen por modelo (≥{reportes_marcas.TRANSF_MIN_UDS} uds por modelo) · corte {corte}",
                       d3, {"Uds a mover": _F["S"], "Valor S/ (venta)": _F["S"], "Ganancia neta S/": _F["S"], "Stock (uds)": _F["S"], "Cobertura (sem)": _F["C"]}, chips_col="Estado")
+        # 2b detalle: qué unidades salen de qué tienda y a cuál llegan
+        det = bloques.get("b2b_detalle", pd.DataFrame())
+        ren_det = {"sku": "SKU", "nombre": "Producto", "categoria": "Línea", "tienda_origen": "Tienda origen", "tienda_destino": "Tienda destino",
+                   "uds_transferir": "Uds a mover", "ganancia_esperada": "Ganancia neta S/", "cob_origen_pre": "Cob origen antes (sem)", "cob_origen_post": "Cob origen después (sem)",
+                   "cob_destino_pre": "Cob destino antes (sem)", "cob_destino_post": "Cob destino después (sem)", "precio_vigente": "Precio", "motivo": "Motivo"}
+        d3d = det.rename(columns=ren_det) if det is not None and not det.empty else pd.DataFrame()
+        _hoja_o_vacia(w, "2b. Detalle transferencias", f"{marca} — Detalle de las transferencias: unidades por modelo, tienda origen → tienda destino (suma por modelo = 'Uds a mover' de la pestaña anterior) · corte {corte}",
+                      d3d, {"Uds a mover": _F["S"], "Ganancia neta S/": _F["S"], "Cob origen antes (sem)": _F["C"], "Cob origen después (sem)": _F["C"],
+                            "Cob destino antes (sem)": _F["C"], "Cob destino después (sem)": _F["C"], "Precio": _F["P"]})
         # 3
         c4 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("temporada", "Temporada"), ("tendencia", "Tendencia"), ("entra_por", "Entra por"),
               ("vta_sem_prom4", "Vta sem (prom 4)"), ("stock_cadena", "Stock (uds)"), ("cobertura_cadena", "Cobertura (sem)"), ("n_tiendas_quiebre", "Tiendas en quiebre"),
@@ -970,7 +991,7 @@ def comparar_marca(bloques: dict, cortes_prev: pd.DataFrame) -> dict:
 
 _KPI_LABELS = [("b1", "capital", "Venta cero — capital S/"), ("b1", "n_skus", "Venta cero — modelos"),
                ("b2a", "capital", "Sobrestock — capital S/"), ("b2a", "n_skus", "Sobrestock — modelos"),
-               ("b2b", "uds", "Desbalance — uds a mover"), ("b3", "n_skus", "Ganadores cortos — modelos")]
+               ("b2b", "uds", "Transferencias — uds a mover"), ("b3", "n_skus", "Ganadores cortos — modelos")]
 
 
 def evolucion_texto(cmp: dict, bloques: dict) -> str:
@@ -1045,7 +1066,7 @@ import json as _json
 
 ACCIONES_PROVEEDOR = ["Markdown cofinanciado 50/50", "Transferencia entre tiendas", "Canje / devolución con recompra",
                       "Reposición / reorden", "Exhibición en tienda", "Rechazó", "Otro"]
-BLOQUES_LABEL = {"b1": "1) Venta cero", "b2a": "2a) Sobrestock", "b2b": "2b) Desbalance", "b3": "3) Ganadores"}
+BLOQUES_LABEL = {"b1": "1) Venta cero", "b2a": "2a) Sobrestock", "b2b": "2b) Transferencias", "b3": "3) Ganadores"}
 RESPONDIO = ["Sin respuesta aún", "Sí", "Parcial", "No"]
 _DIR_RESPUESTAS = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "acciones", "proveedor")
 

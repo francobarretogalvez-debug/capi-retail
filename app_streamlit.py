@@ -3584,7 +3584,7 @@ elif nav_page == "🤝 Agente Terceras":
         _t1, _t2, _t3, _t4 = st.columns(4)
         _tile(_t1, "1) Venta cero (cadena, última semana)", f"S/ {_h['b1']['capital']:,}", f"{_h['b1']['n_skus']} modelos · ⭐ {_h['b1']['n_top']} · {_h['b1']['pct_capital_marca']}% del capital", STATUS_CRITICO)
         _tile(_t2, "2a) Sobrestock de cadena", f"S/ {_h['b2a']['capital']:,}", f"{_h['b2a']['n_skus']} modelos · mkd {_h['b2a']['n_markdown']} · canje {_h['b2a']['n_canje']} · frenar {_h['b2a']['n_frenar']}", STATUS_SOBRESTOCK)
-        _tile(_t3, "2b) Desbalance entre tiendas", f"{_h['b2b']['uds']:,} uds", f"{_h['b2b']['n_skus']} modelos · ganancia neta S/ {_h['b2b']['ganancia']:,}", STATUS_SOBRESTOCK)
+        _tile(_t3, "2b) Transferencias entre tiendas", f"{_h['b2b']['uds']:,} uds", f"{_h['b2b']['n_skus']} modelos · ganancia neta S/ {_h['b2b']['ganancia']:,}", STATUS_SOBRESTOCK)
         _tile(_t4, "3) Ganadores que se quedan cortos", f"{_h['b3']['n_skus']} modelos", f"{_h['b3']['n_sin_cd']} sin stock en CD · necesidad {_h['b3']['necesidad_uds']:,} uds", STATUS_MUERTO)
         _ft = _h["foto"]
         st.caption(f"Foto de {_rep_marca}: S/ {_ft['capital_total']:,} a costo · {_ft['skus']} modelos · {_ft['tiendas']} tiendas · "
@@ -3614,8 +3614,12 @@ elif nav_page == "🤝 Agente Terceras":
             _mostrar(_bl["b1"], ["sku", "nombre", "categoria", "estado_cadena", "n_tiendas_stock", "stock_cadena", "capital_costo", "top_80", "semanas_sin_venta", "edad_semanas", "pct_descuento", "dscto_sugerido", "precio_sugerido", "accion"])
         with st.expander(f"2a) Sobrestock de cadena — {_h['b2a']['n_skus']} modelos", expanded=False):
             _mostrar(_bl["b2a"], ["sku", "nombre", "categoria", "grupo", "estado_cadena", "tendencia", "stock_cadena", "vta_sem_prom4", "cobertura_cadena", "capital_costo", "top_80", "pct_descuento", "dscto_sugerido", "precio_sugerido", "accion", "alternativas"])
-        with st.expander(f"2b) Desbalance entre tiendas — {_h['b2b']['n_skus']} modelos", expanded=False):
+        with st.expander(f"2b) Transferencias entre tiendas — {_h['b2b']['n_skus']} modelos", expanded=False):
             _mostrar(_bl["b2b"], ["sku", "nombre", "categoria", "estado_cadena", "transf_uds", "transf_tiendas", "transf_ganancia", "stock_cadena", "cobertura_cadena", "accion"])
+            _det = _bl.get("b2b_detalle")
+            if _det is not None and not _det.empty:
+                st.caption("Detalle origen → destino")
+                _mostrar(_det, ["sku", "nombre", "tienda_origen", "tienda_destino", "uds_transferir", "ganancia_esperada", "cob_origen_pre", "cob_origen_post", "cob_destino_pre", "cob_destino_post"])
         with st.expander(f"3) Ganadores que se quedan cortos — {_h['b3']['n_skus']} modelos (umbral {_h['b3']['umbral_vta']} u/sem)", expanded=False):
             _mostrar(_bl["b3"], ["sku", "nombre", "categoria", "tendencia", "entra_por", "vta_sem_prom4", "stock_cadena", "cobertura_cadena", "n_tiendas_quiebre", "n_tiendas", "stock_cd", "necesidad_uds", "pendiente_sin_cd_uds", "sem_en_quiebre_max", "vp_neto_min", "vp_neto_max", "accion"])
         with st.expander("📈 Historial de la marca (cortes enviados con Capi)", expanded=False):

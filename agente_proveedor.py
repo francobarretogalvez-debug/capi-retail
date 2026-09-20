@@ -71,8 +71,8 @@ def redactar_reglas(h: dict) -> dict:
                 f"markdown compartido 50/50 en {b2a.get('n_markdown', 0)}, canje o devolución con recompra en {b2a.get('n_canje', 0)} y frenar el ingreso en "
                 f"{b2a.get('n_frenar', 0)}."
                 if b2a.get("n_skus") else "Sobrestock: esta semana no hay modelos con sobrestock a nivel cadena.")
-    lead_b2b = (f"Desbalance entre tiendas: {b2b.get('n_skus', 0)} modelos tienen stock donde no rota y faltan donde sí. Son {_sn(b2b.get('uds'))} unidades "
-                f"a mover con ganancia neta de S/ {_sn(b2b.get('ganancia'))} después del flete; te pedimos programar las transferencias."
+    lead_b2b = (f"Transferencias entre tiendas: {b2b.get('n_skus', 0)} modelos tienen stock donde no rota y faltan donde sí. Son {_sn(b2b.get('uds'))} unidades "
+                f"a mover con ganancia neta de S/ {_sn(b2b.get('ganancia'))} después del flete; te pedimos programar las transferencias; el detalle origen → destino va en el Excel."
                 if b2b.get("n_skus") else "Transferencias: esta semana no hay movimientos entre tiendas que superen el flete.")
     lead_b3 = (f"Ganadores que se quedan cortos: {b3.get('n_skus', 0)} modelos con buena rotación y poca cobertura; {b3.get('n_sin_cd', 0)} sin stock en CD. "
                + (f"La necesidad calculada es de {_sn(b3.get('necesidad_uds'))} unidades. " if b3.get("necesidad_uds") else "")
@@ -128,7 +128,7 @@ def redactar(h: dict, api_key: str | None = None) -> dict:
 
 
 # ── Ensamblado del correo ────────────────────────────────────────────────────
-_TITULOS = {"b1": "1) VENTA CERO", "b2a": "2a) SOBRESTOCK DE CADENA", "b2b": "2b) DESBALANCE ENTRE TIENDAS", "b3": "3) GANADORES QUE SE QUEDAN CORTOS"}
+_TITULOS = {"b1": "1) VENTA CERO", "b2a": "2a) SOBRESTOCK DE CADENA", "b2b": "2b) TRANSFERENCIAS ENTRE TIENDAS", "b3": "3) GANADORES QUE SE QUEDAN CORTOS"}
 
 
 def _subtitulo(h: dict, k: str) -> str:
