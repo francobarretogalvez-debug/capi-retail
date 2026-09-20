@@ -696,7 +696,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
         guia = [
             ("0. Evolución", "Serie semana a semana de los indicadores de cada frente (solo con reportes anteriores enviados con Capi)."),
             ("1. Venta Cero (SKU)", "Modelos con stock que NO vendieron ni una unidad en toda la cadena la última semana, en dos grupos: sin venta en las últimas 4 semanas y los que vendían y pararon. ⭐ = concentran el 80% del capital de su grupo. Con la venta del modelo de las 4 últimas semanas y el descuento sugerido (nunca menor al actual)."),
-            ("1b. Venta Cero x Tienda", "Los mismos modelos de la pestaña 1, tienda por tienda: dónde está el stock, qué prioridad tiene en esa tienda (⭐ = 80% del capital sin venta de la tienda), la venta de las 4 últimas semanas del modelo (cadena) y de esa tienda (snapshots), y la acción de piso (etiquetar, cartel o revisar exhibición)."),
+            ("1b. Venta Cero x Tienda", "Los mismos modelos de la pestaña 1, tienda por tienda: dónde está el stock, qué prioridad tiene en esa tienda (⭐ = 80% del capital sin venta de la tienda), la venta de esa tienda en las 4 últimas semanas (de los snapshots; si no hay, la del modelo en cadena), y la acción de piso (etiquetar, cartel o revisar exhibición)."),
             ("2a. Sobrestock", "Modelos que venden pero cargan de más a nivel cadena (cobertura ≥ 26 semanas) o entran en liquidación: acción sugerida por modelo (markdown compartido, canje/devolución, frenar ingreso)."),
             ("2b. Desbalance tiendas", "Modelos con stock donde no rota y faltante donde sí: unidades a mover entre tiendas con ganancia neta positiva después del flete (≥12 uds por modelo)."),
             ("3. Ganadores", "Modelos con buena rotación y poca cobertura (≤ 8 semanas) o acelerando: necesidad calculada, stock en CD y acción (reponer desde CD / reorden)."),
@@ -745,9 +745,14 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
                  "precio_vigente": "Precio", "pct_descuento": "Dscto", "tipo_evento": "Tipo evento", "edad_semanas": "Edad (sem)", "accion": "Acción de piso"}
         d1b = vc.rename(columns=ren1b) if vc is not None and not vc.empty else pd.DataFrame()
         if not d1b.empty:
+            # En 1b solo la venta de ESA tienda (Franco 19-sep). La de cadena ya está en la hoja 1;
+            # se usa como respaldo únicamente si no hay snapshots por tienda para ninguna semana.
             _vt_cols = [c for c in d1b.columns if c.startswith("Vta tienda")]
-            if _vt_cols and d1b[_vt_cols].isna().all().all():
-                d1b = d1b.drop(columns=_vt_cols)          # sin snapshots: no mostrar columnas vacías
+            _vc_cols = [c for c in ("Vta sem -1 (cadena)", "Vta sem -2", "Vta sem -3", "Vta sem -4") if c in d1b.columns]
+            if _vt_cols and not d1b[_vt_cols].isna().all().all():
+                d1b = d1b.drop(columns=_vc_cols)
+            else:
+                d1b = d1b.drop(columns=_vt_cols)
         _hoja_o_vacia(w, "1b. Venta Cero x Tienda",
                       f"{marca} — Los modelos del bloque 1, tienda por tienda: dónde está el stock que no vendió la última semana (⭐ = concentra el 80% del capital sin venta de esa tienda) · corte {corte}",
                       d1b, {"Stock (uds)": _F["S"], "Capital S/": _F["S"], "% acum. en tienda": "0%", "Vta sem -1 (cadena)": _F["S"], "Vta sem -2": _F["S"],
