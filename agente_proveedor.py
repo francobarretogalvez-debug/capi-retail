@@ -42,7 +42,7 @@ REGLAS INVIOLABLES
    {"asunto": "...", "intro": "...", "lead_b1": "...", "lead_b2a": "...", "lead_b2b": "...", "lead_b3": "...", "cierre": "..."}
    - asunto: "<MARCA> — Reporte semanal Ripley al <corte>: ..." (una línea).
    - intro: saludo + para qué es el reporte + la foto de la marca (capital total y % en los frentes).
-   - lead_b1: qué pedimos sobre venta cero (revisar exhibición / descuento compartido / liquidar lo viejo).
+   - lead_b1: qué pedimos sobre venta cero (descuento compartido / liquidar lo viejo / devolución). La exhibición la revisa Ripley en tienda, no es pedido al proveedor.
    - lead_b2a: qué pedimos sobre sobrestock (descuento compartido 50/50, devolución con recompra o frenar ingreso) y, si hay, cuántos modelos ya son pre-obsoletos u obsoletos (clave "obs": pestaña 4 del Excel).
    - lead_b2b: qué pedimos sobre las transferencias entre tiendas (las ejecuta la marca).
    - lead_b3: qué pedimos sobre los ganadores cortos (reponer desde CD / reorden).
@@ -64,7 +64,7 @@ def redactar_reglas(h: dict) -> dict:
              f"{_sn(f.get('skus'))} modelos y {_sn(f.get('tiendas'))} tiendas. Abajo van los tres frentes de la semana con el detalle por modelo; "
              f"el Excel adjunto trae todo el desglose.")
     lead_b1 = (f"Venta cero: {b1.get('n_skus', 0)} modelos con stock no vendieron ni una unidad la última semana (S/ {_sn(b1.get('capital'))}, "
-               f"{pct}% del capital de la marca); {b1.get('n_top', 0)} concentran el 80%. Te pedimos revisar exhibición y precio en tienda, y para los "
+               f"{pct}% del capital de la marca); {b1.get('n_top', 0)} concentran el 80%. La exhibición la revisamos nosotros en tienda; a ustedes les pedimos el descuento compartido donde aplica y, para los "
                f"{b1.get('n_liquidar', 0)} con más de 26 semanas, compartir el descuento de liquidación o evaluar la devolución."
                if b1.get("n_skus") else "Venta cero: esta semana no hay modelos sin venta en toda la cadena.")
     obs = h.get("obs", {})

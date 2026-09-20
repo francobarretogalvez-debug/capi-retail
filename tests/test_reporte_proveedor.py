@@ -240,7 +240,8 @@ def test_tablas_texto_cuadran(bl):
     # mix B+C: por línea y por acción, sin filas por modelo
     assert "Por línea:" in t["b1"] and "CAMISAS" in t["b1"] and "Qué pedimos:" in t["b1"]
     assert "101" not in t["b1"].split("Qué pedimos:")[0].split("Por línea:")[1]        # la tabla por línea no lista SKUs
-    pa = rp.resumen_por_accion(bl["b1"]); assert set(pa["accion"]) <= {"Liquidar con descuento compartido", "Revisar exhibición", "Devolución", "Exhibición + descuento compartido"}
+    pa = rp.resumen_por_accion(bl["b1"]); assert set(pa["accion"]) <= {"Liquidar con descuento compartido", "Revisar exhibición (lo hacemos nosotros en tienda)", "Devolución", "Exhibición + descuento compartido"}
+    assert pa["accion"].iloc[-1].startswith("Revisar exhibición")            # la exhibición va al final: es tarea nuestra
     assert pa["modelos"].sum() == 3 and pa["capital"].sum() == 3700
     pl = rp.resumen_por_linea(bl["b2a"]); assert pl["modelos"].sum() == 3 and set(pl["linea"]) == {"POLOS", "PANTALONES"}
     assert sum(v["capital"] for v in h["b2a"]["por_accion"].values()) == h["b2a"]["capital"]

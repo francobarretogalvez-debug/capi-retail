@@ -679,7 +679,11 @@ def resumen_por_linea(df: pd.DataFrame) -> pd.DataFrame:
     d = df.assign(lin_=df["categoria"].map(_linea) if "categoria" in df.columns else "Sin línea", cat_=df["accion"].map(categoria_accion))
     out = d.groupby("lin_").agg(modelos=("sku", "count"), uds=("stock_cadena", "sum"), capital=("capital_costo", "sum")).reset_index().rename(columns={"lin_": "linea"})
     ped = d.groupby(["lin_", "cat_"]).size().reset_index(name="n").sort_values(["lin_", "n"], ascending=[True, False])
-    out["pedido"] = out["linea"].map(lambda l: " · ".join(f"{r.n} {r.cat_.lower()}" for r in ped[ped.lin_ == l].itertuples()))
+    def _pedido(l):
+        rs = list(ped[ped.lin_ == l].itertuples())
+        txt = " · ".join(f"{r.n} {r.cat_.lower()}" for r in rs[:2])
+        return txt + (f" · +{len(rs) - 2} otras" if len(rs) > 2 else "")
+    out["pedido"] = out["linea"].map(_pedido)
     return out.sort_values("capital", ascending=False).reset_index(drop=True)
 
 
@@ -690,7 +694,11 @@ def resumen_por_accion(df: pd.DataFrame, top_n: int = 3) -> pd.DataFrame:
     d = df.assign(cat_=df["accion"].map(categoria_accion)).sort_values("capital_costo", ascending=False)
     out = d.groupby("cat_").agg(modelos=("sku", "count"), uds=("stock_cadena", "sum"), capital=("capital_costo", "sum")).reset_index().rename(columns={"cat_": "accion"})
     out["top"] = out["accion"].map(lambda c: " · ".join(f"{r.sku} {str(r.nombre)[:26]}" for r in d[d.cat_ == c].head(top_n).itertuples()))
-    return out.sort_values("capital", ascending=False).reset_index(drop=True)
+    # Lo que le toca al proveedor primero (por capital); la exhibición la revisamos nosotros en tienda → al final y etiquetada
+    out["_n"] = (out["accion"] == "Revisar exhibición").astype(int)
+    out = out.sort_values(["_n", "capital"], ascending=[True, False]).drop(columns="_n")
+    out["accion"] = out["accion"].replace({"Revisar exhibición": "Revisar exhibición (lo hacemos nosotros en tienda)"})
+    return out.reset_index(drop=True)
 
 
 def _seccion_resumen_txt(df: pd.DataFrame, nombre: str) -> str:
