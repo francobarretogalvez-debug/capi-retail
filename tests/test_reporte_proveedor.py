@@ -148,7 +148,7 @@ def test_b1_cadena_ultima_semana(bl):
     assert b1["capital_costo"].sum() == pytest.approx((80 + 100 + 5) * 20.0)
     fila = b1.set_index("sku")
     assert fila.loc[101, "semanas_sin_venta"] == "4+" and fila.loc[102, "semanas_sin_venta"] == "1"
-    assert fila.loc[101, "accion"].startswith("🏷️ Liquidar: descuento compartido 40%") and "S/ 60.00" in fila.loc[101, "accion"]  # pirámide 30-34 sem = 40%
+    assert fila.loc[101, "accion"].startswith("🏷️ Liquidar al 40%") and "S/ 60.00" in fila.loc[101, "accion"] and "o devolución" in fila.loc[101, "accion"]  # pirámide 30-34 sem = 40%; el proveedor elige
     assert fila.loc[103, "accion"].startswith("👁️ Revisar exhibición (lanzamiento")
 
 
@@ -173,7 +173,7 @@ def test_b2_estado_cadena_y_precedencia_b1(bl):
     # 202 ya está al 60% y la pirámide dice 30%: el sugerido NUNCA baja del actual (Franco 19-sep)
     assert b2a.loc[202, "dscto_piramide"] == pytest.approx(0.30) and b2a.loc[202, "dscto_sugerido"] == pytest.approx(0.60)
     assert b2a.loc[201, "accion"].startswith("⬇️ Descuento compartido 50/50: 30%")
-    assert pd.isna(b2a.loc[202, "precio_sugerido"]) and b2a.loc[202, "accion"].startswith("↩️ Devolución")
+    assert pd.isna(b2a.loc[202, "precio_sugerido"]) and b2a.loc[202, "accion"].startswith("↩️ Devolución con recompra (ya al 60%")
     assert b2a.loc[203, "accion"].startswith("⏸️ Frenar ingreso")
     assert b2a.loc[202, "tendencia"] == "▼"
     assert (b2a["grupo"] == "Sobrestock").all()
@@ -240,7 +240,7 @@ def test_tablas_texto_cuadran(bl):
     # mix B+C: por línea y por acción, sin filas por modelo
     assert "Por línea:" in t["b1"] and "CAMISAS" in t["b1"] and "Qué pedimos:" in t["b1"]
     assert "101" not in t["b1"].split("Qué pedimos:")[0].split("Por línea:")[1]        # la tabla por línea no lista SKUs
-    pa = rp.resumen_por_accion(bl["b1"]); assert set(pa["accion"]) <= {"Liquidar con descuento compartido", "Revisar exhibición (lo hacemos nosotros en tienda)", "Devolución", "Exhibición + descuento compartido"}
+    pa = rp.resumen_por_accion(bl["b1"]); assert set(pa["accion"]) <= {"Liquidar al % de pirámide o devolución", "Revisar exhibición (lo hacemos nosotros en tienda)", "Devolución", "Exhibición + descuento compartido"}
     assert pa["accion"].iloc[-1].startswith("Revisar exhibición")            # la exhibición va al final: es tarea nuestra
     assert pa["modelos"].sum() == 3 and pa["capital"].sum() == 3700
     pl = rp.resumen_por_linea(bl["b2a"]); assert pl["modelos"].sum() == 3 and set(pl["linea"]) == {"POLOS", "PANTALONES"}
@@ -428,4 +428,34 @@ def test_obsoletos_por_antiguedad_venda_o_no(bl):
     f = b["obs"].set_index("sku")
     assert f.loc[301, "nivel"] == "OBSOLETO" and f.loc[301, "accion"].startswith("✅ Rota bien")
     assert b["hechos"]["obs"]["n_rota"] == 1 and b["hechos"]["obs"]["n_obsoleto"] == 1
+
+
+def test_sin_piso_de_margen_en_terceras(bl):
+    """Decisión Franco 2026-09-20: en terceras no hay piso de margen; si por edad toca X%, se pide X%.
+    202 (ESTANCADO, costo 20, precio vigente 40 = 60% dscto) con el piso viejo era 'ya en piso'; ahora
+    simplemente ya está sobre la pirámide (30%) → devolución. 101 baja a 40% aunque el piso viejo (27.76) lo permitiera igual."""
+    b2a = bl["b2a"].set_index("sku")
+    assert "precio_minimo" not in b2a.columns or b2a["precio_minimo"].isna().all()
+    # un SKU con costo altísimo (piso viejo imposible) igual recibe el descuento de la pirámide
+    cob = _cob(); cob.loc[cob.sku == 201, "costo"] = 95.0          # piso viejo = 95/0.85*1.18 = 131.9 > blanco 100
+    b = rp.bloques_marca("M", cob, _trans_sint(), None, None, None, None, corte="x")
+    f = b["b2a"].set_index("sku")
+    assert f.loc[201, "precio_sugerido"] == pytest.approx(70.0) and f.loc[201, "accion"].startswith("⬇️ Descuento compartido 50/50: 30%")
+
+
+def test_racha_escala_a_devolucion(tmp_path):
+    """3ª semana seguida en venta cero → la acción pasa a 'devolución' aunque la pirámide permitiera bajar."""
+    rp.persistir_corte(_bl_semana("2026-34"), "2026-34", True, base_dir=str(tmp_path))
+    rp.persistir_corte(_bl_semana("2026-35"), "2026-35", True, base_dir=str(tmp_path))
+    cortes = rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path))
+    b36 = rp.bloques_marca("M", _cob(), _trans_sint(), _vp_sint(), None, _rep_sint(), _alertas_sint(), corte="36", semana_iso="2026-36", cortes_prev=cortes)
+    f = b36["b1"].set_index("sku")
+    # 101 aún tiene descuento por aplicar (0% → 40%): a la 3ª semana se ofrece liquidar O devolución, con la racha visible
+    assert f.loc[101, "racha_b1"] == 3 and f.loc[101, "accion"].startswith("🏷️ Liquidar al 40%") and "(3 semanas sin venta)" in f.loc[101, "accion"]
+    # 103 (lanzamiento, 0% y pirámide 0%) no tiene descuento que ofrecer: a la 3ª semana → devolución
+    assert f.loc[103, "accion"].startswith("↩️ Devolución (3 semanas seguidas sin venta")
+    assert f.loc[102, "racha_b1"] == 3
+    # sin cortes previos la racha es 1 y la acción es la normal
+    b0 = rp.bloques_marca("M", _cob(), corte="x", semana_iso="2026-36")
+    assert b0["b1"].set_index("sku").loc[101, "accion"].startswith("🏷️ Liquidar al 40%")
 

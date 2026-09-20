@@ -52,7 +52,7 @@ def cargar(base):
 def checksum_marca(res, marca, df_vp, corte, salida=None, semana_iso=""):
     args = (marca, res["cobertura"], res["reposiciones"], res["transferencias"], res["acciones_precio"], res["alertas"], corte, df_vp)
     wb9 = load_workbook(io.BytesIO(rm.generar_reporte_marca(*args)))
-    bl = rp.bloques_marca(marca, res["cobertura"], res["transferencias"], df_vp, res["acciones_precio"], res["reposiciones"], res["alertas"], corte=corte, semana_iso=semana_iso)
+    bl = rp.bloques_marca(marca, res["cobertura"], res["transferencias"], df_vp, res["acciones_precio"], res["reposiciones"], res["alertas"], corte=corte, semana_iso=semana_iso, cortes_prev=rp.cargar_cortes(marca, hasta=semana_iso) if semana_iso else None)
     xb = rp.excel_proveedor(bl); wbp = load_workbook(io.BytesIO(xb))
     h = bl["hechos"]; filas = []
     def add(nombre, a, b, ok=None, nota=""):
@@ -74,8 +74,8 @@ def checksum_marca(res, marca, df_vp, corte, salida=None, semana_iso=""):
     ref = {}
     for hoja in ("1. Liquidar", "2. Activar"):
         if hoja in wb9.sheetnames:
-            for sku, est, p in zip(_col(wb9[hoja], "SKU"), _col(wb9[hoja], "Estado"), _col(wb9[hoja], "P. Sugerido")):
-                ref.setdefault(int(sku), {})[est] = p
+            for sku, est, p, acc in zip(_col(wb9[hoja], "SKU"), _col(wb9[hoja], "Estado"), _col(wb9[hoja], "P. Sugerido"), _col(wb9[hoja], "Acción")):
+                ref.setdefault(int(sku), {})[est] = None if "piso" in str(acc or "") else p   # la hoja 2 conserva el piso; terceras no (Franco 20-sep)
     b2a = bl["b2a"]; n_sol = sum(int(s) in ref for s in b2a["sku"]) if not b2a.empty else 0
     maxd = 0.0
     if not b2a.empty:
@@ -84,15 +84,15 @@ def checksum_marca(res, marca, df_vp, corte, salida=None, semana_iso=""):
             if p9 is not None and pd.notna(r["precio_sugerido"]):
                 maxd = max(maxd, abs(float(p9) - float(r["precio_sugerido"])))
     filas.append({"cuadre": "SKUs B2a presentes en hojas 1+2 (informativo)", "9 hojas": len(ref), "bloques": f"{n_sol}/{len(b2a)}", "OK": "ℹ️", "nota": "B2a = estado de CADENA; hojas 1+2 = estado por tienda (grano distinto a propósito)"})
-    oks.append(add("P. Sugerido por SKU (max |Δ| hoja 2 vs B2a)", 0, round(maxd, 2), ok=maxd < 0.01))
+    oks.append(add("P. Sugerido por SKU (max |Δ| hoja 2 vs B2a, sin los limitados por piso)", 0, round(maxd, 2), ok=maxd < 0.01))
     margen_min = float(motor_v2.DEFAULT_PARAMS.get("margen_min", 0.15)); viol = 0; n_p = 0
     for df in (bl["b1"], b2a):
         if df.empty or "precio_sugerido" not in df.columns:
             continue
         con = df[df["precio_sugerido"].notna()]
         n_p += len(con)
-        viol += int(((con["precio_sugerido"] >= con["precio_vigente"]) | (con["precio_sugerido"] < con.apply(lambda r: pricing.precio_piso(r["costo"], margen_min) - 0.01, axis=1))).sum())
-    oks.append(add("Precios sugeridos que suben o rompen piso", 0, viol, ok=(viol == 0), nota=f"{n_p} precios revisados"))
+        viol += int((con["precio_sugerido"] >= con["precio_vigente"]).sum())   # sin piso en terceras (Franco 20-sep)
+    oks.append(add("Precios sugeridos que suben (no hay piso en terceras)", 0, viol, ok=(viol == 0), nota=f"{n_p} precios revisados"))
     s1, s2, s3 = set(bl["b1"]["sku"]), set(b2a["sku"]) if not b2a.empty else set(), set(bl["b3"]["sku"]) if not bl["b3"].empty else set()
     oks.append(add("SKUs en más de un bloque", 0, len(s1 & s2) + len(s1 & s3) + len(s2 & s3), ok=not (s1 & s2 or s1 & s3 or s2 & s3)))
     filas.append({"cuadre": "B3 (informativo)", "9 hojas": "", "bloques": f"{h['b3']['n_skus']} SKUs · umbral {h['b3']['umbral_vta']} u/sem · {h['b3']['n_sin_cd']} sin CD · vp {h['b3']['vp_neto_min']}–{h['b3']['vp_neto_max']}", "OK": "ℹ️", "nota": ""})

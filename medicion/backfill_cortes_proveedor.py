@@ -35,7 +35,7 @@ def main(bases):
         for m in rm.marcas_reporte(res["cobertura"]):
             if rp.slice_marca(res["cobertura"], m).empty:
                 continue
-            bl = rp.bloques_marca(m, res["cobertura"], res["transferencias"], vp, res["acciones_precio"], res["reposiciones"], res["alertas"], corte=corte, semana_iso=sem)
+            bl = rp.bloques_marca(m, res["cobertura"], res["transferencias"], vp, res["acciones_precio"], res["reposiciones"], res["alertas"], corte=corte, semana_iso=sem, cortes_prev=rp.cargar_cortes(m, hasta=sem))
             rp.persistir_corte(bl, sem, enviado=False); n += 1
         print(f"[ok] {nombre} → {sem}: {n} marcas persistidas en {time.time()-t0:.0f}s ({rp._ruta_corte(sem)})")
 

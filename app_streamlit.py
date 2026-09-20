@@ -3567,16 +3567,16 @@ elif nav_page == "🤝 Agente Terceras":
         _rep_fp = f"{_rep_marca}|{len(df_cob)}|{df_cob['stock_valor_costo'].sum():.0f}|{_rep_sem}"
         if st.session_state.get("at_rep_bloques_fp") != _rep_fp:
             with st.spinner("Calculando los bloques de la marca…"):
+                try:
+                    _cortes = reporte_proveedor.cargar_cortes(_rep_marca, hasta=_rep_sem)
+                except Exception:
+                    _cortes = pd.DataFrame()
                 _bl = reporte_proveedor.bloques_marca(
                     _rep_marca, df_cob,
                     df_trans if not df_trans.empty else None, _rep_vp,
                     df_prec if not df_prec.empty else None, df_rep if not df_rep.empty else None,
                     df_alertas if not df_alertas.empty else None,
-                    corte=_rep_corte, tipo_evento_map=_rep_tev, semana_iso=_rep_sem)
-                try:
-                    _cortes = reporte_proveedor.cargar_cortes(_rep_marca, hasta=_rep_sem)
-                except Exception:
-                    _cortes = pd.DataFrame()
+                    corte=_rep_corte, tipo_evento_map=_rep_tev, semana_iso=_rep_sem, cortes_prev=_cortes)
                 _cmp = reporte_proveedor.comparar_marca(_bl, _cortes)
             st.session_state["at_rep_bloques"] = (_bl, _cortes, _cmp)
             st.session_state["at_rep_bloques_fp"] = _rep_fp

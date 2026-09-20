@@ -103,13 +103,17 @@ def test_cuadre_precio_sugerido_hoja2():
         for hoja in ("1. Liquidar", "2. Activar"):
             if hoja in wb9.sheetnames:
                 ws = wb9[hoja]
-                for sku, est, p in zip(_col(ws, "SKU"), _col(ws, "Estado"), _col(ws, "P. Sugerido")):
-                    ref.setdefault(int(sku), {})[est] = p
+                for sku, est, p, acc in zip(_col(ws, "SKU"), _col(ws, "Estado"), _col(ws, "P. Sugerido"), _col(ws, "Acción")):
+                    ref.setdefault(int(sku), {})[est] = (p, str(acc or ""))
         for _, r in b2a.iterrows():
-            p9 = ref.get(int(r["sku"]), {}).get(r["estado_cadena"])
-            if p9 is not None and pd.notna(r["precio_sugerido"]):
+            p9, acc9 = ref.get(int(r["sku"]), {}).get(r["estado_cadena"], (None, ""))
+            # misma pirámide; la hoja 2 conserva el piso de margen y el proveedor no (Franco 2026-09-20):
+            # solo se exige igualdad cuando la hoja 2 no quedó limitada por el piso
+            if p9 is not None and pd.notna(r["precio_sugerido"]) and "piso" not in acc9:
                 comparados += 1
                 assert float(p9) == pytest.approx(float(r["precio_sugerido"]), abs=0.01), (marca, r["sku"])
+            if pd.notna(r["precio_sugerido"]):
+                assert float(r["precio_sugerido"]) == pytest.approx(round(r["precio_blanco"] * (1 - pricing.descuento_sugerido(r["edad_semanas"])[0]), 2), abs=0.01), (marca, r["sku"])
     assert comparados > 0, "el fixture debería tener SKUs comparables entre hoja 2 y B2a"
 
 
@@ -137,19 +141,21 @@ def test_cuadre_b2a_es_sobrestock_de_cadena_desde_columnas_crudas():
     assert n > 0
 
 
-def test_cuadre_pricing_nunca_sube_y_respeta_piso():
+def test_cuadre_pricing_nunca_sube():
+    """Nunca se propone un precio mayor al vigente y el descuento sugerido nunca es menor al actual.
+    La pirámide es la de pricing.descuento_sugerido. El piso de margen NO aplica en terceras
+    (decisión Franco 2026-09-20: el descuento es compartido, el margen es del proveedor)."""
     ctx = _res()
-    margen_min = float(motor_v2.DEFAULT_PARAMS.get("margen_min", 0.15))
     n = 0
     for marca in _marcas(ctx):
         bl = rp.bloques_marca(marca, ctx["cobertura"], ctx["transferencias"], None, ctx["acciones_precio"], ctx["reposiciones"], ctx["alertas"], corte="x")
         for df in (bl["b1"], bl["b2a"]):
             if df.empty or "precio_sugerido" not in df.columns:
                 continue
-            con = df[df["precio_sugerido"].notna()]
-            for _, r in con.iterrows():
-                n += 1
-                assert r["precio_sugerido"] < r["precio_vigente"], (marca, r["sku"])
+            for _, r in df.iterrows():
+                assert r["dscto_piramide"] == pytest.approx(pricing.descuento_sugerido(r["edad_semanas"])[0]), (marca, r["sku"])
                 assert r["dscto_sugerido"] >= (r.get("pct_descuento") or 0) - 1e-9, (marca, r["sku"])   # nunca menor al actual
-                assert r["precio_sugerido"] >= pricing.precio_piso(r["costo"], margen_min) - 0.01, (marca, r["sku"])
+                if pd.notna(r["precio_sugerido"]):
+                    n += 1
+                    assert r["precio_sugerido"] < r["precio_vigente"], (marca, r["sku"])
     assert n > 0, "el fixture debería producir al menos un precio sugerido"

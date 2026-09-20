@@ -131,14 +131,34 @@ def por_sku(dfm: pd.DataFrame) -> pd.DataFrame:
     return g1
 
 
-def _con_precio(g: pd.DataFrame, precio_min_map: dict | None) -> pd.DataFrame:
-    """Pirámide + piso + nunca subir, con la MISMA función de la hoja '2. Activar'."""
+def _con_precio(g: pd.DataFrame, precio_min_map: dict | None = None) -> pd.DataFrame:
+    """Descuento por antigüedad SIN piso de margen (decisión Franco 2026-09-20: en terceras el
+    descuento es compartido y el margen es del proveedor; si por edad toca 50%, se pide 50%).
+    El piso de margen sigue vivo en el reporte de 9 pestañas y en la vista de precios de propias.
+      dscto_piramide  lo que dice la pirámide por edad
+      dscto_sugerido  max(pirámide, actual): nunca menor al actual
+      precio_sugerido blanco × (1 − pirámide) solo si implica BAJAR; si no, NaN
+    Se mantiene `precio_min_map` en la firma por compatibilidad; no se usa."""
+    g = g.copy()
     if g.empty:
-        for c in ("dscto_sugerido", "precio_sugerido", "precio_minimo", "margen_resultante", "accion"):
+        for c in ("dscto_piramide", "dscto_sugerido", "precio_sugerido", "margen_resultante", "accion_precio"):
             g[c] = pd.Series(dtype=float)
         return g
-    out = reportes_marcas._con_sugerencias(g, precio_min_map or {})
-    return out.rename(columns={"accion": "accion_precio"})
+    sug = g["edad_semanas"].fillna(0).apply(agente_terceras.descuento_sugerido)
+    g["dscto_piramide"] = sug.map(lambda x: x[0]).astype(float)
+    g["tipo_dscto"] = sug.map(lambda x: x[1])
+    actual = pd.to_numeric(g.get("pct_descuento", 0), errors="coerce").fillna(0).clip(lower=0)
+    blanco = pd.to_numeric(g.get("precio_blanco", np.nan), errors="coerce")
+    vigente = pd.to_numeric(g.get("precio_vigente", np.nan), errors="coerce")
+    p_obj = (blanco * (1 - g["dscto_piramide"])).round(2)
+    bajar = (p_obj < (vigente - 0.01)) & p_obj.notna() & vigente.notna()
+    g["precio_sugerido"] = np.where(bajar, p_obj, np.nan)
+    g["dscto_sugerido"] = np.maximum(np.where(bajar, g["dscto_piramide"], actual), actual)   # nunca menor al actual (sin redondear)
+    g["accion_precio"] = np.where(bajar, "⬇️ Bajar al de pirámide", "✓ Ya en/sobre pirámide")
+    if "costo" in g.columns:
+        base = g["precio_sugerido"] / 1.18
+        g["margen_resultante"] = np.where(base > 0, (base - g["costo"]) / base, np.nan)
+    return g
 
 
 def _tendencia(g: pd.DataFrame, df_alertas: pd.DataFrame | None) -> pd.Series:
@@ -254,14 +274,20 @@ def bloque_venta_cero(g: pd.DataFrame, dfm: pd.DataFrame, precio_min_map: dict |
         pa, tp = pareto_flag(b1.loc[idx, "capital_costo"])
         b1.loc[idx, "pct_acum"] = pa; b1.loc[idx, "top_80"] = tp
     def _acc(r):
-        p = r.get("precio_sugerido")
+        p = r.get("precio_sugerido"); d = r.get("dscto_piramide", 0); act = r.get("pct_descuento", 0) or 0
+        racha = int(r.get("racha_b1", 1) or 1)
+        if racha >= PERSISTENCIA_ALERTA:
+            # 3ª semana seguida: si aún hay descuento por aplicar se ofrece la salida con precio; si ya está
+            # al descuento de la pirámide, ya tuvo su oportunidad → devolución
+            return (f"🏷️ Liquidar al {d:.0%} (→ S/ {p:,.2f}) o devolución ({racha} semanas sin venta)" if pd.notna(p)
+                    else f"↩️ Devolución ({racha} semanas seguidas sin venta, ya al {act:.0%})")
         if r["edad_semanas"] >= EDAD_LIQUIDAR:
-            return (f"🏷️ Liquidar: descuento compartido {r['dscto_sugerido']:.0%} → S/ {p:,.2f}" if pd.notna(p)
-                    else "↩️ Devolución (ya en piso de precio)")
+            return (f"🏷️ Liquidar al {d:.0%} (→ S/ {p:,.2f}) o devolución" if pd.notna(p)
+                    else f"↩️ Devolución (ya al {act:.0%} y sin venta)")
         if r["estado_cadena"] == "NUEVO SIN VENTA":
             return "👁️ Revisar exhibición (lanzamiento sin arranque)"
         if pd.notna(p):
-            return f"👁️ Exhibición + descuento compartido {r['dscto_sugerido']:.0%} → S/ {p:,.2f}"
+            return f"👁️ Exhibición + descuento compartido {d:.0%} → S/ {p:,.2f}"
         return "👁️ Revisar exhibición / comunicación de precio"
     b1["accion"] = b1.apply(_acc, axis=1)
     b1["_g"] = (b1["grupo"] != GRUPO_B1_4SEM).astype(int)
@@ -288,16 +314,18 @@ def bloque_sobrestock(g: pd.DataFrame, excluir: set, df_trans: pd.DataFrame | No
         b2["grupo"] = np.where(b2["estado_cadena"].isin(ESTADOS_LIQUIDACION), "Liquidación", "Sobrestock")
         b2["tendencia"] = _tendencia(b2, df_alertas)
         def _acc(r):
-            p = r.get("precio_sugerido")
+            p = r.get("precio_sugerido"); d = r.get("dscto_piramide", 0); act = r.get("pct_descuento", 0) or 0
             viejo = (r["estado_cadena"] in ("ESTANCADO",) + ESTADOS_LIQUIDACION) or r["edad_semanas"] >= EDAD_LIQUIDAR
-            en_piso = str(r.get("accion_precio", "")).startswith("✋")
+            racha = int(r.get("racha_b2a", 1) or 1)
             alts = []
-            if pd.notna(p):
-                acc = f"⬇️ Descuento compartido 50/50: {r['dscto_sugerido']:.0%} → S/ {p:,.2f}"
-                if viejo:
-                    alts.append("devolución con recompra")
-            elif viejo or en_piso:
-                acc = "↩️ Devolución con recompra"
+            if racha >= PERSISTENCIA_ALERTA and pd.isna(p):
+                acc = f"↩️ Devolución con recompra ({racha} semanas en sobrestock, ya al {act:.0%})"
+            elif viejo and pd.notna(p):
+                acc = f"🏷️ Liquidar al {d:.0%} (→ S/ {p:,.2f}) o devolución"
+            elif viejo:
+                acc = f"↩️ Devolución con recompra (ya al {act:.0%} y no rota)"
+            elif pd.notna(p):
+                acc = f"⬇️ Descuento compartido 50/50: {d:.0%} → S/ {p:,.2f}"
             else:
                 acc = "⏸️ Frenar ingreso / no reponer (dscto ya en pirámide)"
                 alts.append("devolución si no rota en 4 semanas")
@@ -446,9 +474,10 @@ def bloque_obsoletos(g: pd.DataFrame, b1: pd.DataFrame, b2a: pd.DataFrame, preci
         vende = pd.notna(cob) and cob <= B3_COB_MAX * 2   # ≤16 sem: rota, se agota solo
         if vende:
             return "✅ Rota bien: se agota sola, sin acción"
+        act = r.get("pct_descuento", 0) or 0
         if pd.notna(p):
-            return f"🏷️ Liquidar: descuento compartido {r['dscto_sugerido']:.0%} → S/ {p:,.2f}"
-        return "↩️ Recoger / devolución (ya en piso de precio)" if r["nivel"] == "OBSOLETO" else "↩️ Devolución (ya en piso de precio)"
+            return f"🏷️ Liquidar al {r['dscto_piramide']:.0%} (→ S/ {p:,.2f}) o devolución"
+        return f"↩️ Recoger / devolución (ya al {act:.0%} y no rota)" if r["nivel"] == "OBSOLETO" else f"↩️ Devolución (ya al {act:.0%} y no rota)"
     ob["accion"] = ob.apply(_acc, axis=1)
     ob["pct_acum"], ob["top_80"] = pareto_flag(ob["capital_costo"])
     ob["_o"] = (ob["nivel"] != "OBSOLETO").astype(int)
@@ -536,11 +565,31 @@ def hechos_marca(marca: str, foto: dict, b1, b2a, b2b, b3, umbral_b3: float, cor
 
 
 # ── Orquestador ───────────────────────────────────────────────────────────────
+def racha_previa(cortes_prev: pd.DataFrame | None, semana_iso: str, bloque: str) -> dict:
+    """{sku: semanas consecutivas en `bloque` ANTES de `semana_iso`} a partir de los cortes guardados.
+    Un hueco corta la racha. Sirve para que la acción escale con el tiempo ("liquidar o devolución" →
+    "devolución" a la 3ª semana)."""
+    if cortes_prev is None or cortes_prev.empty or not semana_iso or "-" not in str(semana_iso):
+        return {}
+    por_sem = {w: set(d.loc[d["bloque"] == bloque, "sku"].astype(str)) for w, d in cortes_prev.groupby("semana_iso")}
+    out = {}
+    for s in set().union(*por_sem.values()) if por_sem else set():
+        n, w = 0, str(semana_iso)
+        while True:
+            w = _semana_anterior(w)
+            if w not in por_sem or s not in por_sem[w]:
+                break
+            n += 1
+        if n:
+            out[s] = n
+    return out
+
+
 def bloques_marca(marca: str, df_cob: pd.DataFrame, df_trans: pd.DataFrame | None = None,
                   df_vp: pd.DataFrame | None = None, df_prec: pd.DataFrame | None = None,
                   df_rep: pd.DataFrame | None = None, df_alertas: pd.DataFrame | None = None,
                   corte: str | None = None, tipo_evento_map: dict | None = None,
-                  semana_iso: str = "") -> dict:
+                  semana_iso: str = "", cortes_prev: pd.DataFrame | None = None) -> dict:
     """Devuelve {marca, corte, semana_iso, g, b1, b2a, b2b, b3, vc_tienda, umbral_b3, hechos}."""
     from datetime import date
     corte = corte or f"{date.today():%d.%m.%Y}"
@@ -550,6 +599,11 @@ def bloques_marca(marca: str, df_cob: pd.DataFrame, df_trans: pd.DataFrame | Non
     if df_prec is not None and not df_prec.empty and "precio_minimo" in df_prec.columns:
         pm = df_prec[df_prec["sku"].isin(dfm["sku"])]
         precio_min_map = pm.drop_duplicates("sku").set_index("sku")["precio_minimo"].to_dict()
+    r1 = racha_previa(cortes_prev, semana_iso, "b1"); r2 = racha_previa(cortes_prev, semana_iso, "b2a")
+    if not g.empty:
+        k = g["sku"].map(sku_key)
+        g["racha_b1"] = k.map(r1).fillna(0).astype(int) + 1     # semanas incluyendo la actual
+        g["racha_b2a"] = k.map(r2).fillna(0).astype(int) + 1
     b1, vc_tienda = bloque_venta_cero(g, dfm, precio_min_map, tipo_evento_map, semana_iso)
     ex = set(b1["sku"]) if not b1.empty else set()
     b2a, b2b = bloque_sobrestock(g, ex, df_trans, precio_min_map, df_alertas, dfm_ref=dfm)
@@ -670,7 +724,7 @@ _COLS_TXT = {"b1": ["SKU", "Producto", "Tiendas", "Stock uds", "Capital S/", "Ed
              "b3": ["SKU", "Producto", "Vta/sem", "Cob sem", "Tiendas en quiebre", "Stock CD", "Necesidad uds", "Tend", "Acción"]}
 
 
-_CATEGORIAS_ACCION = [("🏷️", "Liquidar con descuento compartido"), ("⬇️", "Descuento compartido 50/50"), ("↩️", "Devolución"),
+_CATEGORIAS_ACCION = [("🏷️", "Liquidar al % de pirámide o devolución"), ("⬇️", "Descuento compartido 50/50"), ("↩️", "Devolución"),
                       ("⏸️", "Frenar ingreso"), ("👁️ Exhibición +", "Exhibición + descuento compartido"), ("👁️", "Revisar exhibición")]
 
 
@@ -886,7 +940,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
               ("stock_cadena", "Stock (uds)"), ("capital_costo", "Capital S/ (costo)"), ("pct_acum", "% acum."), ("top_80", "Prioridad"), ("semanas_sin_venta", "Sem sin venta"),
               ("vta_sem1", "Vta sem -1 (cadena)"), ("vta_sem2", "Vta sem -2"), ("vta_sem3", "Vta sem -3"), ("vta_sem4", "Vta sem -4"),
               ("edad_semanas", "Edad (sem)"), ("pct_descuento", "Dscto actual"), ("dscto_piramide", "Dscto pirámide"), ("dscto_sugerido", "Dscto sugerido"), ("precio_vigente", "P. Vigente"),
-              ("precio_sugerido", "P. Sugerido"), ("precio_minimo", "P. Mínimo (piso)"), ("accion", "Acción sugerida")]
+              ("precio_sugerido", "P. Sugerido"), ("accion", "Acción sugerida")]
         d1 = b1[[a for a, _ in c1 if a in b1.columns]].rename(columns=dict(c1)).copy() if not b1.empty else pd.DataFrame()
         if not d1.empty:
             d1["Prioridad"] = np.where(d1["Prioridad"], "⭐ TOP 80%", "")
@@ -896,7 +950,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
         _hoja_o_vacia(w, "1. Venta Cero (SKU)", f"{marca} — Modelos con stock y SIN venta la última semana en toda la cadena · ⭐ = concentran el 80% del capital · corte {corte}",
                       d1, {"Stock (uds)": _F["S"], "Capital S/ (costo)": _F["S"], "% acum.": _F["PCT"], "Edad (sem)": "0", "Dscto actual": _F["PCT"], "Dscto pirámide": _F["PCT"], "Dscto sugerido": _F["PCT"],
                            "Vta sem -1 (cadena)": _F["S"], "Vta sem -2": _F["S"], "Vta sem -3": _F["S"], "Vta sem -4": _F["S"],
-                           "P. Vigente": _F["P"], "P. Sugerido": _F["P"], "P. Mínimo (piso)": _F["P"]}, chips_col="Estado")
+                           "P. Vigente": _F["P"], "P. Sugerido": _F["P"]}, chips_col="Estado")
         # 1b: detalle por tienda de los modelos del bloque 1
         vc = bloques["vc_tienda"]
         ren1b = {"tienda": "Tienda", "sku": "SKU", "nombre": "Producto", "categoria": "Línea", "grupo": "Grupo", "stock_total": "Stock (uds)",
@@ -923,7 +977,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
         c2 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("temporada", "Temporada"), ("grupo", "Grupo"), ("estado_cadena", "Estado"), ("tendencia", "Tendencia"),
               ("stock_cadena", "Stock (uds)"), ("vta_sem_prom4", "Vta sem (prom 4)"), ("cobertura_cadena", "Cobertura (sem)"), ("capital_costo", "Capital S/ (costo)"),
               ("pct_acum", "% acum."), ("top_80", "Prioridad"), ("edad_semanas", "Edad (sem)"), ("costo", "Costo unit."), ("pct_descuento", "Dscto actual"), ("dscto_piramide", "Dscto pirámide"), ("dscto_sugerido", "Dscto sugerido"),
-              ("precio_blanco", "P. Blanco"), ("precio_vigente", "P. Vigente"), ("precio_sugerido", "P. Sugerido"), ("margen_resultante", "Margen result."), ("precio_minimo", "P. Mínimo (piso)"),
+              ("precio_blanco", "P. Blanco"), ("precio_vigente", "P. Vigente"), ("precio_sugerido", "P. Sugerido"), ("margen_resultante", "Margen result."),
               ("accion", "Acción sugerida"), ("alternativas", "Alternativas")]
         d2 = b2a[[a for a, _ in c2 if a in b2a.columns]].rename(columns=dict(c2)).copy() if not b2a.empty else pd.DataFrame()
         if not d2.empty:
@@ -978,7 +1032,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
               ("edad_semanas", "Edad (sem)"), ("n_tiendas_stock", "Tiendas con stock"), ("stock_cadena", "Stock (uds)"), ("capital_costo", "Capital S/ (costo)"), ("pct_acum", "% acum."), ("top_80", "Prioridad"),
               ("vta_sem_prom4", "Vta sem (prom 4)"), ("cobertura_cadena", "Cobertura (sem)"), ("costo", "Costo unit."), ("pct_descuento", "Dscto actual"), ("dscto_piramide", "Dscto pirámide"),
               ("dscto_sugerido", "Dscto sugerido"), ("precio_blanco", "P. Blanco"), ("precio_vigente", "P. Vigente"), ("precio_sugerido", "P. Sugerido"), ("margen_resultante", "Margen result."),
-              ("precio_minimo", "P. Mínimo (piso)"), ("accion", "Acción sugerida")]
+              ("accion", "Acción sugerida")]
         d5 = obs[[a for a, _ in c5 if a in obs.columns]].rename(columns=dict(c5)).copy() if obs is not None and not obs.empty else pd.DataFrame()
         if not d5.empty:
             d5["Prioridad"] = np.where(d5["Prioridad"], "⭐ TOP 80%", "")

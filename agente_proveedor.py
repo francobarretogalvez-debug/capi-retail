@@ -65,7 +65,7 @@ def redactar_reglas(h: dict) -> dict:
              f"el Excel adjunto trae todo el desglose.")
     lead_b1 = (f"Venta cero: {b1.get('n_skus', 0)} modelos con stock no vendieron ni una unidad la última semana (S/ {_sn(b1.get('capital'))}, "
                f"{pct}% del capital de la marca); {b1.get('n_top', 0)} concentran el 80%. La exhibición la revisamos nosotros en tienda; a ustedes les pedimos el descuento compartido donde aplica y, para los "
-               f"{b1.get('n_liquidar', 0)} con más de 26 semanas, compartir el descuento de liquidación o evaluar la devolución."
+               f"{b1.get('n_liquidar', 0)} con más de 26 semanas, liquidar al descuento que marca la pirámide o devolver; ustedes eligen, pero cada semana que pasa la lista solo crece."
                if b1.get("n_skus") else "Venta cero: esta semana no hay modelos sin venta en toda la cadena.")
     obs = h.get("obs", {})
     obs_txt = (f" Además, {obs.get('n_skus', 0)} modelos de la marca ya tienen más de 6 meses en tienda (S/ {_sn(obs.get('capital'))}, {obs.get('pct_capital_marca', 0)}% del capital): "
@@ -146,7 +146,7 @@ def _subtitulo(h: dict, k: str) -> str:
     return f"{b.get('n_skus', 0)} modelos con buena rotación y poca cobertura · {b.get('n_sin_cd', 0)} sin stock en CD"
 
 
-_CRITERIOS_B2 = ("Criterios: descuento compartido 50/50 según acuerdo vigente, sobre precio regular y nunca bajo el piso de margen; "
+_CRITERIOS_B2 = ("Criterios: descuento compartido 50/50 según acuerdo vigente, sobre precio regular y según la antigüedad del modelo (pirámide: 20% a 80%); "
                  "transferencias desde 12 unidades por modelo y con demanda en la tienda destino (el traslado lo ejecuta y lo asume la marca, sin flete de Ripley); "
                  "devolución para lo que no rota ni con precio.")
 
