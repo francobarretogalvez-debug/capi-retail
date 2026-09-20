@@ -143,9 +143,7 @@ def _subtitulo(h: dict, k: str) -> str:
         return f"S/ {_sn(b.get('capital'))} en {b.get('n_skus', 0)} modelos que venden pero cargan de más"
     if k == "b2b":
         return f"{b.get('n_skus', 0)} modelos · {_sn(b.get('uds'))} uds a mover · contribución esperada S/ {_sn(b.get('ganancia'))}"
-    vp = h.get("vp", {})
-    extra = f" · venta perdida de la semana en toda la marca: S/ {_sn(vp.get('neto_min'))} – {_sn(vp.get('neto_max'))}" if vp.get("neto_max") is not None else ""
-    return f"{b.get('n_skus', 0)} modelos con buena rotación y poca cobertura · {b.get('n_sin_cd', 0)} sin stock en CD{extra}"
+    return f"{b.get('n_skus', 0)} modelos con buena rotación y poca cobertura · {b.get('n_sin_cd', 0)} sin stock en CD"
 
 
 _CRITERIOS_B2 = ("Criterios: markdown compartido 50/50 según acuerdo vigente, sobre precio regular y nunca bajo el piso de margen; "

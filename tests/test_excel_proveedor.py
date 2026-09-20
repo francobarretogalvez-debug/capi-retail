@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 import reporte_proveedor as rp
 from test_reporte_proveedor import _alertas_sint, _cob, _rep_sint, _trans_sint, _vp_sint
 
-HOJAS = ["Resumen", "1. Venta Cero (SKU)", "1b. Venta Cero x Tienda", "2a. Sobrestock", "2b. Rutas tienda a tienda", "2b. Detalle transferencias", "3. Ganadores", "3b. Venta perdida", "4. Pre-obsoleto y obsoleto", "Leyenda"]
+HOJAS = ["Resumen", "1. Venta Cero (SKU)", "1b. Venta Cero x Tienda", "2a. Sobrestock", "2b. Rutas tienda a tienda", "2b. Detalle transferencias", "3. Ganadores", "4. Pre-obsoleto y obsoleto", "Leyenda"]
 
 
 @pytest.fixture(scope="module")
@@ -26,7 +26,7 @@ def _col(ws, header):
 def test_hojas_y_formato(wb_bl):
     wb, bl = wb_bl
     assert wb.sheetnames == HOJAS
-    for h in HOJAS[1:9]:
+    for h in HOJAS[1:8]:
         ws = wb[h]
         assert ws.freeze_panes == "A3" and "M —" in str(ws["A1"].value) and "30.08.2026" in str(ws["A1"].value)
     assert [c.value for c in wb["1. Venta Cero (SKU)"][2]][:3] == ["SKU", "Producto", "Línea"]
@@ -44,9 +44,8 @@ def test_excel_cuadra_con_bloques(wb_bl):
     assert _col(rutas, "Tienda origen") == ["T1", "T1", "TOTAL"] and _col(rutas, "Uds a mover") == [8, 6, 14]
     assert _col(rutas, "Costo total S/") == [160.0, 120.0, 280.0]          # 14 uds × costo 20
     assert len(_col(wb["3. Ganadores"], "SKU")) == h["b3"]["n_skus"]
-    assert len(_col(wb["3b. Venta perdida"], "SKU")) == h["vp"]["combos"] == 2 and h["vp"]["neto_max"] == 230
     res = wb["Resumen"]
-    assert _col(res, "Modelos")[:7] == [h["b1"]["n_4sem"], h["b1"]["n_paro"], h["b2a"]["n_skus"], h["b2b"]["n_skus"], h["b3"]["n_skus"], h["obs"]["n_skus"], h["vp"]["skus"]]
+    assert _col(res, "Modelos")[:6] == [h["b1"]["n_4sem"], h["b1"]["n_paro"], h["b2a"]["n_skus"], h["b2b"]["n_skus"], h["b3"]["n_skus"], h["obs"]["n_skus"]]
     # 101 (30 sem sin venta) es PRE-OBSOLETO de cadena → hoja 4 con 'Aparece en' = 1) Venta cero
     assert _col(wb["4. Pre-obsoleto y obsoleto"], "SKU") == [101] and _col(wb["4. Pre-obsoleto y obsoleto"], "Aparece en") == ["1) Venta cero"]
     assert h["obs"]["capital"] == 1600 and h["obs"]["n_preobsoleto"] == 1
@@ -61,5 +60,4 @@ def test_bloques_vacios_no_rompen():
     wb = load_workbook(io.BytesIO(rp.excel_proveedor(bl)))
     assert wb.sheetnames == HOJAS
     assert wb["2a. Sobrestock"]["A3"].value.startswith("Sin modelos")
-    assert "sin snapshots" in wb["3b. Venta perdida"]["A1"].value
     assert wb["3. Ganadores"]["A3"].value.startswith("Sin modelos")

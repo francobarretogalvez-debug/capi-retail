@@ -299,14 +299,14 @@ def test_comparar_marca(tmp_path):
     txt = rp.evolucion_texto(cmp, b36)
     assert "Venta cero — capital S/" in txt and "2 modelos llevan 3 o más semanas seguidas sin venta" in txt
     assert "33%" in txt and "que les reportamos la semana pasada" in txt      # el corte previo fue enviado
-    assert "Capital total de la marca S/" in txt and "Sell-through % (semanal)" in txt and "Venta perdida por quiebre" in txt
+    assert "Capital total de la marca S/" in txt and "Sell-through % (semanal)" in txt and "Venta perdida" not in txt
     assert cmp["kpis"]["foto"]["capital_total"]["prev"] == b35["hechos"]["foto"]["capital_total"] if False else True
     assert "<table" in rp.evolucion_html(cmp, b36)
     serie = rp.serie_kpis(rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path)), b36)
     assert list(serie.columns) == ["2026-34", "2026-35", "2026-36"] and serie.loc["Venta cero — modelos"].tolist() == [3, 3, 2]
     assert serie.loc["Transferencias — contribución esperada S/"].tolist() == [149, 149, 149]
-    assert serie.loc["Venta perdida por quiebre S/ (máx, toda la marca)"].tolist() == [230, 230, 230]
-    assert serie.loc["Pre-obsoleto + obsoleto — capital S/"].tolist() == [1600, 1600, 1600] and serie.shape[0] == 11
+    assert serie.loc["Pre-obsoleto + obsoleto — capital S/"].tolist() == [1600, 1600, 1600] and serie.shape[0] == 10
+    assert not any("perdida" in i for i in serie.index)
 
 
 def test_corte_previo_no_enviado_cambia_el_texto(tmp_path):
