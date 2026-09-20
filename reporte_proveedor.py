@@ -1380,6 +1380,7 @@ def serie_kpis(cortes: pd.DataFrame, bloques: dict | None = None) -> pd.DataFram
 #  Daniela, viaja a Notion (📈 Proveedores Capi + 📋 Acciones Capi). Score = solo confirmado.
 # ══════════════════════════════════════════════════════════════════════════════
 import json as _json
+import re as _re
 
 ACCIONES_PROVEEDOR = ["Descuento compartido 50/50", "Transferencia entre tiendas", "Devolución con recompra",
                       "Reposición / reorden", "Exhibición en tienda", "Rechazó", "Otro"]
@@ -1446,6 +1447,32 @@ def fecha_iso(v) -> str | None:
     return None
 
 
+def _frac(pct) -> float | None:
+    """Notion formatea las columnas % como fracción (0.569 → 56,9 %). Internamente Capi maneja puntos (56.9)."""
+    try:
+        return None if pct is None or pct != pct else round(float(pct) / 100, 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def compromisos_texto(compromisos: list | None) -> str:
+    """Compromisos del proveedor en texto legible para Notion (Franco 20-sep: el JSON crudo no se entendía).
+    Una línea por compromiso: '⏳ Venta cero · Descuento compartido 50/50 · 71 modelo(s) · para el 2026-09-27 · nota · SKU …'."""
+    lineas = []
+    for c in compromisos or []:
+        bloque = _re.sub(r"^\w+\)\s*", "", BLOQUES_LABEL.get(c.get("bloque"), str(c.get("bloque") or "")))
+        skus = c.get("skus") or []
+        partes = [("✅" if c.get("cumplido") else "⏳") + " " + bloque, str(c.get("accion") or ""), f"{len(skus)} modelo(s)"]
+        if c.get("fecha"):
+            partes.append(f"para el {c['fecha']}")
+        if c.get("nota"):
+            partes.append(str(c["nota"]))
+        if skus:
+            partes.append("SKU " + ", ".join(str(x) for x in skus[:8]) + (f" (+{len(skus) - 8})" if len(skus) > 8 else ""))
+        lineas.append(" · ".join(partes))
+    return "\n".join(lineas)
+
+
 def props_notion_proveedor(bloques: dict, cmp: dict | None = None, enviado: bool = False, respuesta: dict | None = None,
                            fecha_envio: str | None = None) -> dict:
     """Propiedades de la fila marca × semana en 📈 Proveedores Capi (formato Notion vía notion_store.p_*)."""
@@ -1460,18 +1487,22 @@ def props_notion_proveedor(bloques: dict, cmp: dict | None = None, enviado: bool
     sc = score_respuesta(h, resp) if resp else {}
     props = {
         "Marca × Semana": ns.p_title(f"{marca} · {sem}"), "Marca": ns.p_text(marca), "Semana ISO": ns.p_text(sem), "Corte": ns.p_text(str(bloques.get("corte", ""))),
-        "VC capital": ns.p_number(h["b1"]["capital"]), "VC modelos": ns.p_number(h["b1"]["n_skus"]), "VC combos": ns.p_number(len(bloques["vc_tienda"]) if bloques.get("vc_tienda") is not None else 0),
-        "SOB capital": ns.p_number(h["b2a"]["capital"]), "SOB modelos": ns.p_number(h["b2a"]["n_skus"]), "DESB uds": ns.p_number(h["b2b"]["uds"]),
-        "GAN modelos": ns.p_number(h["b3"]["n_skus"]), "GAN vta sem": ns.p_number(h["b3"]["vta_sem_total"]),
-        "Capital total": ns.p_number(h.get("foto", {}).get("capital_total")), "Sell-through %": ns.p_number(h.get("foto", {}).get("sell_through_pct")),
-        "SOB % capital": ns.p_number(h["b2a"].get("pct_capital_marca")), "DESB contribución": ns.p_number(h["b2b"].get("ganancia")),
-        "OBS capital": ns.p_number(h.get("obs", {}).get("capital")), "OBS modelos": ns.p_number(h.get("obs", {}).get("n_skus")), "OBS rota bien": ns.p_number(h.get("obs", {}).get("n_rota")),
-        "Δ VC %": ns.p_number(_d("b1", "capital")), "Δ SOB %": ns.p_number(_d("b2a", "capital")), "Δ GAN": ns.p_number(_d("b3", "n_skus", "delta_abs")),
-        "Persistentes 3 sem": ns.p_number(len((cmp.get("persistentes") or {}).get("b1", []))), "Resolución VC %": ns.p_number(cmp.get("resolucion_b1")),
+        "Venta cero S/": ns.p_number(h["b1"]["capital"]), "Venta cero modelos": ns.p_number(h["b1"]["n_skus"]),
+        "Venta cero SKU×tienda": ns.p_number(len(bloques["vc_tienda"]) if bloques.get("vc_tienda") is not None else 0),
+        "Sobrestock S/": ns.p_number(h["b2a"]["capital"]), "Sobrestock modelos": ns.p_number(h["b2a"]["n_skus"]), "Transferencias uds": ns.p_number(h["b2b"]["uds"]),
+        "Ganadores cortos modelos": ns.p_number(h["b3"]["n_skus"]), "Ganadores venta uds/sem": ns.p_number(h["b3"]["vta_sem_total"]),
+        "Capital total S/": ns.p_number(h.get("foto", {}).get("capital_total")), "Sell-through %": ns.p_number(_frac(h.get("foto", {}).get("sell_through_pct"))),
+        "Sobrestock % del capital": ns.p_number(_frac(h["b2a"].get("pct_capital_marca"))), "Transferencias contribución S/": ns.p_number(h["b2b"].get("ganancia")),
+        "Pre-obsoleto + obsoleto S/": ns.p_number(h.get("obs", {}).get("capital")), "Pre-obsoleto + obsoleto modelos": ns.p_number(h.get("obs", {}).get("n_skus")),
+        "Obsoletos que aún rotan": ns.p_number(h.get("obs", {}).get("n_rota")),
+        "Δ venta cero vs sem. anterior": ns.p_number(_frac(_d("b1", "capital"))), "Δ sobrestock vs sem. anterior": ns.p_number(_frac(_d("b2a", "capital"))),
+        "Δ ganadores (modelos)": ns.p_number(_d("b3", "n_skus", "delta_abs")),
+        "Modelos ≥3 sem sin venta": ns.p_number(len((cmp.get("persistentes") or {}).get("b1", []))),
+        "Venta cero resuelta vs sem. anterior": ns.p_number(_frac(cmp.get("resolucion_b1"))),
         "Respondió": ns.p_select(resp.get("respondio") or RESPONDIO[0]),
         "Compromisos": ns.p_number(sc.get("n_compromisos", 0)), "Cumplidos": ns.p_number(sc.get("n_cumplidos", 0)),
-        "Respuesta %": ns.p_number(sc.get("respuesta_pct")), "Cumplimiento %": ns.p_number(sc.get("cumplimiento_pct")),
-        "Compromisos detalle": ns.p_text(_json.dumps(resp.get("compromisos") or [], ensure_ascii=False)[:ns.MAX_TEXTO]),
+        "Respuesta %": ns.p_number(_frac(sc.get("respuesta_pct"))), "Cumplimiento %": ns.p_number(_frac(sc.get("cumplimiento_pct"))),
+        "Compromisos del proveedor": ns.p_text(compromisos_texto(resp.get("compromisos"))[:ns.MAX_TEXTO]),
         "Notas": ns.p_text(str(resp.get("notas") or "")[:ns.MAX_TEXTO]),
         "Registrado desde": ns.p_select("nube" if ns.en_nube() else "laptop"),
     }
@@ -1493,8 +1524,8 @@ def props_respuesta_solo(marca: str, semana_iso: str, respuesta: dict, hechos: d
                                                        "cumplimiento_pct": (round(sum(1 for c in resp["compromisos"] if c.get("cumplido")) / len(resp["compromisos"]) * 100, 1) if resp.get("compromisos") else None)}
     props = {"Marca × Semana": ns.p_title(f"{str(marca).upper().strip()} · {semana_iso}"), "Marca": ns.p_text(str(marca).upper().strip()), "Semana ISO": ns.p_text(semana_iso),
              "Respondió": ns.p_select(resp.get("respondio") or RESPONDIO[0]), "Compromisos": ns.p_number(sc["n_compromisos"]), "Cumplidos": ns.p_number(sc["n_cumplidos"]),
-             "Respuesta %": ns.p_number(sc.get("respuesta_pct")), "Cumplimiento %": ns.p_number(sc.get("cumplimiento_pct")),
-             "Compromisos detalle": ns.p_text(_json.dumps(resp.get("compromisos") or [], ensure_ascii=False)[:ns.MAX_TEXTO]),
+             "Respuesta %": ns.p_number(_frac(sc.get("respuesta_pct"))), "Cumplimiento %": ns.p_number(_frac(sc.get("cumplimiento_pct"))),
+             "Compromisos del proveedor": ns.p_text(compromisos_texto(resp.get("compromisos"))[:ns.MAX_TEXTO]),
              "Notas": ns.p_text(str(resp.get("notas") or "")[:ns.MAX_TEXTO]), "Registrado desde": ns.p_select("nube" if ns.en_nube() else "laptop")}
     if fecha_iso(resp.get("fecha_respuesta")):
         props["Fecha respuesta"] = ns.p_date(fecha_iso(resp["fecha_respuesta"]))

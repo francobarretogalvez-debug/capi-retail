@@ -3790,7 +3790,7 @@ elif nav_page == "🤝 Agente Terceras":
                         if _c.get("_logueado"):
                             continue
                         acciones_log.agregar(_rp_sem, "Negociación Terceras", str(_rep_marca).upper(),
-                                             f"Compromiso proveedor ({reporte_proveedor.BLOQUES_LABEL.get(_c['bloque'], _c['bloque'])}): {_c['accion']} — {len(_c['skus'])} modelos"
+                                             f"Compromiso {str(_rep_marca).upper()} · {reporte_proveedor.BLOQUES_LABEL.get(_c['bloque'], _c['bloque']).split(') ')[-1]}: {_c['accion']} · {len(_c['skus'])} modelos"
                                              + (f" para el {_c['fecha']}" if _c.get("fecha") else ""),
                                              sku=", ".join(_c["skus"][:20]), estado="Ejecutada" if _c.get("cumplido") else "En curso",
                                              vista="Agente Terceras", corte_base=_nombre_base())

@@ -366,12 +366,18 @@ def test_score_y_props_respuesta_proveedor(bl, tmp_path, monkeypatch):
     cmp = rp.comparar_marca(bl, pd.DataFrame())
     props = rp.props_notion_proveedor(bl, cmp, enviado=True, respuesta=resp, fecha_envio="2026-09-22")
     assert props["Marca × Semana"]["title"][0]["text"]["content"] == "M · 2026-35"
-    assert props["VC capital"]["number"] == h["b1"]["capital"] and props["Respondió"]["select"]["name"] == "Parcial"
-    assert props["Enviado"]["date"]["start"] == "2026-09-22" and props["Respuesta %"]["number"] == pytest.approx(33.3, abs=0.1)
-    assert props["Δ VC %"]["number"] is None                       # sin corte previo no hay delta
-    assert props["Capital total"]["number"] == h["foto"]["capital_total"] and props["SOB % capital"]["number"] == h["b2a"]["pct_capital_marca"]
-    assert props["OBS capital"]["number"] == h["obs"]["capital"] and props["OBS modelos"]["number"] == h["obs"]["n_skus"]
-    assert json.loads(props["Compromisos detalle"]["rich_text"][0]["text"]["content"])[1]["skus"] == ["301", "302"]
+    assert props["Venta cero S/"]["number"] == h["b1"]["capital"] and props["Respondió"]["select"]["name"] == "Parcial"
+    # los % viajan como fracción: las columnas de Notion tienen formato 'percent' (Franco 20-sep: legibilidad)
+    assert props["Enviado"]["date"]["start"] == "2026-09-22" and props["Respuesta %"]["number"] == pytest.approx(0.333, abs=0.001)
+    assert props["Δ venta cero vs sem. anterior"]["number"] is None                       # sin corte previo no hay delta
+    assert props["Capital total S/"]["number"] == h["foto"]["capital_total"]
+    assert props["Sobrestock % del capital"]["number"] == pytest.approx(h["b2a"]["pct_capital_marca"] / 100, abs=1e-4)
+    assert props["Pre-obsoleto + obsoleto S/"]["number"] == h["obs"]["capital"] and props["Pre-obsoleto + obsoleto modelos"]["number"] == h["obs"]["n_skus"]
+    # compromisos en texto legible (no JSON): una línea por compromiso con bloque sin numeral, acción, nº modelos y SKUs
+    lineas = props["Compromisos del proveedor"]["rich_text"][0]["text"]["content"].split("\n")
+    assert len(lineas) == 3 and not lineas[0].startswith("[")
+    assert lineas[1].startswith("⏳ Ganadores · ") and "2 modelo(s)" in lineas[1] and "SKU 301, 302" in lineas[1]
+    assert lineas[0].startswith("✅ ") and "1)" not in lineas[0]
 
 
 def test_upsert_proveedor_actualiza_no_duplica(monkeypatch):
