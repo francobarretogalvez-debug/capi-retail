@@ -43,7 +43,7 @@ REGLAS INVIOLABLES
    - asunto: "<MARCA> — Reporte semanal Ripley al <corte>: ..." (una línea).
    - intro: saludo + para qué es el reporte + la foto de la marca (capital total y % en los frentes).
    - lead_b1: qué pedimos sobre venta cero (descuento compartido / liquidar lo viejo / devolución). La exhibición la revisa Ripley en tienda, no es pedido al proveedor.
-   - lead_b2a: qué pedimos sobre sobrestock (descuento compartido 50/50, devolución con recompra o frenar ingreso) y, si hay, cuántos modelos ya son pre-obsoletos u obsoletos (clave "obs": pestaña 4 del Excel).
+   - lead_b2a: qué pedimos sobre sobrestock (descuento compartido 50/50, devolución con recompra o frenar ingreso); si "n_exhib" > 0, que en esos modelos jóvenes primero revisamos la exhibición en tienda y en dos semanas se evalúa; y, si hay, cuántos modelos ya son pre-obsoletos u obsoletos (clave "obs": pestaña 4 del Excel).
    - lead_b2b: qué pedimos sobre las transferencias entre tiendas (las ejecuta la marca).
    - lead_b3: qué pedimos sobre los ganadores cortos (reponer desde CD / reorden).
    - cierre: pedido de respuesta con fecha o reunión + despedida cordial.
@@ -71,9 +71,12 @@ def redactar_reglas(h: dict) -> dict:
     obs_txt = (f" Además, {obs.get('n_skus', 0)} modelos de la marca ya tienen más de 6 meses en tienda (S/ {_sn(obs.get('capital'))}, {obs.get('pct_capital_marca', 0)}% del capital): "
                f"{obs.get('n_rota', 0)} todavía rotan bien y se agotan solos; para el resto, la pestaña 4 del Excel dice qué liquidar ({obs.get('n_liquidar', 0)}) y qué recoger o devolver ({obs.get('n_recoger', 0)})."
                if obs.get("n_skus") else "")
+    ex_txt = (f" En {b2a.get('n_exhib', 0)} modelos jóvenes con poco descuento estamos revisando primero la exhibición en tienda (mesa, ubicación); "
+              f"si en dos semanas la venta no mejora, pasan a descuento compartido o devolución." if b2a.get("n_exhib") else "")
+    ex_ok = f" {b2a.get('n_exhib_ok', 0)} ya respondieron a la exhibición y siguen sin pedido." if b2a.get("n_exhib_ok") else ""
     lead_b2a = (f"Sobrestock: {b2a.get('n_skus', 0)} modelos venden pero cargan de más (S/ {_sn(b2a.get('capital'))}). Propuesta por modelo: "
                 f"descuento compartido 50/50 en {b2a.get('n_markdown', 0)}, devolución con recompra en {b2a.get('n_canje', 0)} y frenar el ingreso en "
-                f"{b2a.get('n_frenar', 0)}." + obs_txt
+                f"{b2a.get('n_frenar', 0)}." + ex_txt + ex_ok + obs_txt
                 if b2a.get("n_skus") else "Sobrestock: esta semana no hay modelos con sobrestock a nivel cadena." + obs_txt)
     lead_b2b = (f"Transferencias entre tiendas: {b2b.get('n_skus', 0)} modelos tienen stock donde no rota y faltan donde sí. Son {_sn(b2b.get('uds'))} unidades "
                 f"a mover, con S/ {_sn(b2b.get('ganancia'))} de contribución esperada en destino; te pedimos programar las transferencias (el traslado corre por la marca); el detalle origen → destino va en el Excel."

@@ -172,9 +172,9 @@ def test_b2_estado_cadena_y_precedencia_b1(bl):
     assert b2a.loc[201, "dscto_sugerido"] == pytest.approx(0.30) and b2a.loc[201, "dscto_piramide"] == pytest.approx(0.30)
     # 202 ya está al 60% y la pirámide dice 30%: el sugerido NUNCA baja del actual (Franco 19-sep)
     assert b2a.loc[202, "dscto_piramide"] == pytest.approx(0.30) and b2a.loc[202, "dscto_sugerido"] == pytest.approx(0.60)
-    assert b2a.loc[201, "accion"].startswith("⬇️ Descuento compartido 50/50: 30%")
+    assert b2a.loc[201, "accion"].startswith("👁️ Revisar exhibición (sobrestock joven, 1ª semana")   # joven (20 sem), dscto 10% < 20% → exhibición primero
     assert pd.isna(b2a.loc[202, "precio_sugerido"]) and b2a.loc[202, "accion"].startswith("↩️ Devolución con recompra (ya al 60%")
-    assert b2a.loc[203, "accion"].startswith("⏸️ Frenar ingreso")
+    assert b2a.loc[203, "accion"].startswith("👁️ Revisar exhibición")   # joven, 0% dscto → exhibición primero (antes: frenar ingreso)
     assert b2a.loc[202, "tendencia"] == "▼"
     assert (b2a["grupo"] == "Sobrestock").all()
     assert bl["b2a"].sort_values("capital_costo", ascending=False)["top_80"].iloc[0]
@@ -440,7 +440,7 @@ def test_sin_piso_de_margen_en_terceras(bl):
     cob = _cob(); cob.loc[cob.sku == 201, "costo"] = 95.0          # piso viejo = 95/0.85*1.18 = 131.9 > blanco 100
     b = rp.bloques_marca("M", cob, _trans_sint(), None, None, None, None, corte="x")
     f = b["b2a"].set_index("sku")
-    assert f.loc[201, "precio_sugerido"] == pytest.approx(70.0) and f.loc[201, "accion"].startswith("⬇️ Descuento compartido 50/50: 30%")
+    assert f.loc[201, "precio_sugerido"] == pytest.approx(70.0) and f.loc[201, "accion"].startswith("👁️ Revisar exhibición")
 
 
 def test_racha_escala_a_devolucion(tmp_path):
@@ -458,4 +458,33 @@ def test_racha_escala_a_devolucion(tmp_path):
     # sin cortes previos la racha es 1 y la acción es la normal
     b0 = rp.bloques_marca("M", _cob(), corte="x", semana_iso="2026-36")
     assert b0["b1"].set_index("sku").loc[101, "accion"].startswith("🏷️ Liquidar al 40%")
+
+
+def test_sobrestock_exhibicion_primero_y_escalado(tmp_path):
+    """Franco 20-sep: sobrestock JOVEN con dscto < 20% pide primero revisar exhibición; a las 2 semanas se mide
+    la venta semanal vs la del primer pedido: +20% → 'funcionó, seguir'; si no → precio/devolución con el registro."""
+    cob = _cob()
+    # semana 34 y 35: 201 (joven, 10% dscto) pide exhibición; venta semanal de referencia = 5 (vta_sem1_total)
+    rp.persistir_corte(rp.bloques_marca("M", cob, _trans_sint(), corte="34", semana_iso="2026-34"), "2026-34", True, base_dir=str(tmp_path))
+    c35 = rp.cargar_cortes("M", hasta="2026-35", base_dir=str(tmp_path))
+    b35 = rp.bloques_marca("M", cob, _trans_sint(), corte="35", semana_iso="2026-35", cortes_prev=c35)
+    assert b35["b2a"].set_index("sku").loc[201, "accion"].startswith("👁️ Revisar exhibición (2ª semana")
+    rp.persistir_corte(b35, "2026-35", True, base_dir=str(tmp_path))
+    c36 = rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path))
+    # caso A: la venta mejoró +40% (7 vs 5) → funcionó
+    cobA = cob.copy(); cobA.loc[cobA.sku == 201, "vta_sem1_total"] = 7
+    fA = rp.bloques_marca("M", cobA, _trans_sint(), corte="36", semana_iso="2026-36", cortes_prev=c36)["b2a"].set_index("sku")
+    assert fA.loc[201, "accion"].startswith("✅ Exhibición funcionó") and "+40%" in fA.loc[201, "accion"]
+    # caso B: no mejoró (5 → 5) → pasa a descuento compartido con el registro de las 2 semanas
+    fB = rp.bloques_marca("M", cob, _trans_sint(), corte="36", semana_iso="2026-36", cortes_prev=c36)["b2a"].set_index("sku")
+    assert fB.loc[201, "accion"].startswith("⬇️ Descuento compartido 50/50: 30%") and "exhibición revisada 2 sem sin mejora (5 → 5" in fB.loc[201, "accion"]
+    h = rp.bloques_marca("M", cob, _trans_sint(), corte="36", semana_iso="2026-36", cortes_prev=c36)["hechos"]["b2a"]
+    assert h["n_exhib_fallo"] >= 1
+    # el registro vive en el corte: vta_sem1 persistida
+    assert "vta_sem1" in c36.columns and c36.loc[(c36.bloque == "b2a") & (c36.sku == "201"), "vta_sem1"].tolist() == [5.0, 5.0]
+    # caso C: la semana siguiente al fallo NO vuelve a pedir exhibición (la oportunidad fue una sola)
+    rp.persistir_corte(rp.bloques_marca("M", cob, _trans_sint(), corte="36", semana_iso="2026-36", cortes_prev=c36), "2026-36", True, base_dir=str(tmp_path))
+    c37 = rp.cargar_cortes("M", hasta="2026-37", base_dir=str(tmp_path))
+    fC = rp.bloques_marca("M", cob, _trans_sint(), corte="37", semana_iso="2026-37", cortes_prev=c37)["b2a"].set_index("sku")
+    assert not fC.loc[201, "accion"].startswith("👁️") and fC.loc[201, "exhib_ya_probada"]
 

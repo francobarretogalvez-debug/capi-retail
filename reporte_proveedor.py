@@ -317,7 +317,19 @@ def bloque_sobrestock(g: pd.DataFrame, excluir: set, df_trans: pd.DataFrame | No
             p = r.get("precio_sugerido"); d = r.get("dscto_piramide", 0); act = r.get("pct_descuento", 0) or 0
             viejo = (r["estado_cadena"] in ("ESTANCADO",) + ESTADOS_LIQUIDACION) or r["edad_semanas"] >= EDAD_LIQUIDAR
             racha = int(r.get("racha_b2a", 1) or 1)
-            alts = []
+            ex_n = int(r.get("exhib_sem", 0) or 0); ex_base = r.get("exhib_vta_base", np.nan); v1 = r.get("vta_sem1", np.nan)
+            alts = []; sufijo = ""
+            # ── Exhibición primero (Franco 20-sep): sobrestock JOVEN con descuento bajo. Dos semanas de plazo;
+            #    si la venta semanal no mejora ≥ EXHIB_MEJORA vs la semana del primer pedido, pasa a precio/devolución.
+            ya_probada = bool(r.get("exhib_ya_probada", False))
+            if not viejo and act < EXHIB_DSCTO_MAX and (ex_n > 0 or not ya_probada):
+                if ex_n == 0:
+                    return pd.Series({"accion": "👁️ Revisar exhibición (sobrestock joven, 1ª semana: mesa/ubicación antes de tocar precio)", "alternativas": ""})
+                if ex_n < EXHIB_SEMANAS:
+                    return pd.Series({"accion": f"👁️ Revisar exhibición ({ex_n + 1}ª semana; se evalúa la venta la próxima)", "alternativas": ""})
+                if pd.notna(ex_base) and pd.notna(v1) and ex_base > 0 and v1 >= ex_base * (1 + EXHIB_MEJORA):
+                    return pd.Series({"accion": f"✅ Exhibición funcionó: venta {v1:.0f} vs {ex_base:.0f} u/sem (+{(v1 / ex_base - 1) * 100:.0f}%) · seguir", "alternativas": ""})
+                sufijo = f" · exhibición revisada {ex_n} sem sin mejora ({ex_base:.0f} → {v1:.0f} u/sem)" if pd.notna(ex_base) and pd.notna(v1) else f" · exhibición revisada {ex_n} sem sin mejora"
             if racha >= PERSISTENCIA_ALERTA and pd.isna(p):
                 acc = f"↩️ Devolución con recompra ({racha} semanas en sobrestock, ya al {act:.0%})"
             elif viejo and pd.notna(p):
@@ -329,7 +341,7 @@ def bloque_sobrestock(g: pd.DataFrame, excluir: set, df_trans: pd.DataFrame | No
             else:
                 acc = "⏸️ Frenar ingreso / no reponer (dscto ya en pirámide)"
                 alts.append("devolución si no rota en 4 semanas")
-            return pd.Series({"accion": acc, "alternativas": " · ".join(alts)})
+            return pd.Series({"accion": acc + sufijo, "alternativas": " · ".join(alts)})
         b2 = pd.concat([b2, b2.apply(_acc, axis=1)], axis=1)
         b2["pct_acum"], b2["top_80"] = pareto_flag(b2["capital_costo"])
         b2 = b2.sort_values(["top_80", "capital_costo"], ascending=[False, False]).reset_index(drop=True)
@@ -547,6 +559,9 @@ def hechos_marca(marca: str, foto: dict, b1, b2a, b2b, b3, umbral_b3: float, cor
                 "n_markdown": int(b2a["accion"].str.startswith("⬇️").sum()) if not b2a.empty else 0,
                 "n_canje": int(b2a["accion"].str.startswith("↩️").sum()) if not b2a.empty else 0,
                 "n_frenar": int(b2a["accion"].str.startswith("⏸️").sum()) if not b2a.empty else 0,
+                "n_exhib": int(b2a["accion"].str.startswith("👁️").sum()) if not b2a.empty else 0,
+                "n_exhib_ok": int(b2a["accion"].str.startswith("✅").sum()) if not b2a.empty else 0,
+                "n_exhib_fallo": int(b2a["accion"].str.contains("sin mejora", regex=False).sum()) if not b2a.empty else 0,
                 "n_liquidacion": int((b2a["grupo"] == "Liquidación").sum()) if not b2a.empty else 0,
                 "cobertura_prom": round(float(b2a["cobertura_cadena"].mean()), 1) if not b2a.empty else None,
                 "por_linea": _por_linea(b2a),
@@ -585,6 +600,30 @@ def racha_previa(cortes_prev: pd.DataFrame | None, semana_iso: str, bloque: str)
     return out
 
 
+def historial_exhibicion(cortes_prev: pd.DataFrame | None, semana_iso: str, bloque: str = "b2a") -> dict:
+    """{sku: (semanas_consecutivas_con_pedido_de_exhibición_ANTES_de_semana_iso, vta_sem1_base)}.
+    vta_sem1_base = venta de la semana en que se pidió por primera vez (la más antigua de la racha).
+    Registro auditable: sale de los cortes guardados semana a semana, no de memoria."""
+    if cortes_prev is None or cortes_prev.empty or not semana_iso or "-" not in str(semana_iso):
+        return {}
+    c = cortes_prev[(cortes_prev["bloque"] == bloque) & cortes_prev["accion"].astype(str).str.startswith("👁️")]
+    if c.empty:
+        return {}
+    por_sem = {w: d.set_index(d["sku"].astype(str))["vta_sem1"] if "vta_sem1" in d.columns else d.set_index(d["sku"].astype(str))["vta_sem"]
+               for w, d in c.groupby("semana_iso")}
+    out = {}
+    for s in set().union(*[set(v.index) for v in por_sem.values()]):
+        n, w, base = 0, str(semana_iso), np.nan
+        while True:
+            w = _semana_anterior(w)
+            if w not in por_sem or s not in por_sem[w].index:
+                break
+            n += 1; base = por_sem[w].loc[s]
+        total = sum(1 for v in por_sem.values() if s in v.index)     # alguna vez se le pidió exhibición (aunque la racha se haya cortado)
+        out[s] = (n, float(base) if pd.notna(base) else np.nan, total)
+    return out
+
+
 def bloques_marca(marca: str, df_cob: pd.DataFrame, df_trans: pd.DataFrame | None = None,
                   df_vp: pd.DataFrame | None = None, df_prec: pd.DataFrame | None = None,
                   df_rep: pd.DataFrame | None = None, df_alertas: pd.DataFrame | None = None,
@@ -604,6 +643,10 @@ def bloques_marca(marca: str, df_cob: pd.DataFrame, df_trans: pd.DataFrame | Non
         k = g["sku"].map(sku_key)
         g["racha_b1"] = k.map(r1).fillna(0).astype(int) + 1     # semanas incluyendo la actual
         g["racha_b2a"] = k.map(r2).fillna(0).astype(int) + 1
+        hx = historial_exhibicion(cortes_prev, semana_iso, "b2a")
+        g["exhib_sem"] = k.map(lambda s: hx.get(s, (0, np.nan, 0))[0]).astype(int)
+        g["exhib_vta_base"] = k.map(lambda s: hx.get(s, (0, np.nan, 0))[1]).astype(float)
+        g["exhib_ya_probada"] = k.map(lambda s: hx.get(s, (0, np.nan, 0))[2] > 0).astype(bool)
     b1, vc_tienda = bloque_venta_cero(g, dfm, precio_min_map, tipo_evento_map, semana_iso)
     ex = set(b1["sku"]) if not b1.empty else set()
     b2a, b2b = bloque_sobrestock(g, ex, df_trans, precio_min_map, df_alertas, dfm_ref=dfm)
@@ -725,7 +768,7 @@ _COLS_TXT = {"b1": ["SKU", "Producto", "Tiendas", "Stock uds", "Capital S/", "Ed
 
 
 _CATEGORIAS_ACCION = [("🏷️", "Liquidar al % de pirámide o devolución"), ("⬇️", "Descuento compartido 50/50"), ("↩️", "Devolución"),
-                      ("⏸️", "Frenar ingreso"), ("👁️ Exhibición +", "Exhibición + descuento compartido"), ("👁️", "Revisar exhibición")]
+                      ("⏸️", "Frenar ingreso"), ("👁️ Exhibición +", "Exhibición + descuento compartido"), ("👁️", "Revisar exhibición"), ("✅", "Exhibición funcionó · seguir")]
 
 
 def categoria_accion(accion: str) -> str:
@@ -883,7 +926,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
         res = pd.DataFrame([
             {"Bloque": f"1. Venta cero — {GRUPO_B1_4SEM.lower()}", "Modelos": h["b1"]["n_4sem"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_4sem"], "Qué pedimos": f"liquidar / devolución lo de más de 26 sem ({h['b1']['n_liquidar']} en todo el bloque) · exhibición y precio en el resto"},
             {"Bloque": f"1. Venta cero — {GRUPO_B1_PARO.lower()} (alerta temprana)", "Modelos": h["b1"]["n_paro"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_paro"], "Qué pedimos": "revisar exhibición y precio esta semana; si repite, pasa al grupo anterior"},
-            {"Bloque": "2a. Sobrestock de cadena (venden, pero cargan de más)", "Modelos": h["b2a"]["n_skus"], "Stock (uds)": h["b2a"]["stock_uds"], "Capital S/ (costo)": h["b2a"]["capital"], "Qué pedimos": f"descuento compartido 50/50: {h['b2a']['n_markdown']} · devolución: {h['b2a']['n_canje']} · frenar ingreso: {h['b2a']['n_frenar']}"},
+            {"Bloque": "2a. Sobrestock de cadena (venden, pero cargan de más)", "Modelos": h["b2a"]["n_skus"], "Stock (uds)": h["b2a"]["stock_uds"], "Capital S/ (costo)": h["b2a"]["capital"], "Qué pedimos": f"revisar exhibición (2 sem de plazo): {h['b2a'].get('n_exhib', 0)} · descuento compartido 50/50: {h['b2a']['n_markdown']} · liquidar o devolución: {int(b2a['accion'].str.startswith('🏷️').sum()) if not b2a.empty else 0} · devolución: {h['b2a']['n_canje']} · frenar ingreso: {h['b2a']['n_frenar']}"},
             {"Bloque": "2b. Transferencias entre tiendas (las ejecuta la marca)", "Modelos": h["b2b"]["n_skus"], "Stock (uds)": h["b2b"]["uds"], "Capital S/ (costo)": None, "Qué pedimos": f"mover {h['b2b']['uds']:,} uds · contribución esperada S/ {h['b2b']['ganancia']:,} · detalle origen → destino en la pestaña 2b. Detalle"},
             {"Bloque": "3. Ganadores que se quedan cortos", "Modelos": h["b3"]["n_skus"], "Stock (uds)": None, "Capital S/ (costo)": None, "Qué pedimos": f"{h['b3']['n_sin_cd']} sin stock en CD (reorden) · necesidad {h['b3']['necesidad_uds']:,} uds"},
             {"Bloque": "4. Pre-obsoleto y obsoleto (transversal: vendan o no)", "Modelos": h.get("obs", {}).get("n_skus", 0), "Stock (uds)": h.get("obs", {}).get("stock_uds", 0), "Capital S/ (costo)": h.get("obs", {}).get("capital", 0),
@@ -1066,9 +1109,12 @@ _SNAPSHOTS_DIR = _os.environ.get("CAPI_SNAPSHOTS_DIR") or _SNAPSHOTS_DIR
 ARCHIVO_CORTE = "proveedor.parquet"
 COLS_CORTE = ["marca", "semana_iso", "corte", "bloque", "sku", "nombre", "categoria", "estado", "capital", "uds",
               "cobertura", "vta_sem", "n_tiendas", "n_tiendas_quiebre", "stock_cd", "accion", "top_80",
-              "ganancia", "vp_neto_max", "capital_obsoleto", "enviado", "fecha_envio", "generado"]
+              "ganancia", "vp_neto_max", "capital_obsoleto", "vta_sem1", "enviado", "fecha_envio", "generado"]
 # bloque "foto": una fila por marca con capital total (capital), stock (uds), sell-through % (vta_sem), margen % (cobertura)
 PERSISTENCIA_ALERTA = 3   # semanas consecutivas en el mismo bloque → presión explícita en el correo
+EXHIB_DSCTO_MAX = 0.20      # sobrestock joven con dscto < 20% → primero revisar exhibición (Franco 20-sep)
+EXHIB_SEMANAS = 2           # semanas de plazo para que la exhibición muestre efecto
+EXHIB_MEJORA = 0.20         # +20% de venta semanal vs la semana en que se pidió → "funcionó"
 
 
 def _ruta_corte(semana_iso: str, base_dir: str | None = None) -> str:
@@ -1107,6 +1153,7 @@ def filas_corte(bloques: dict, semana_iso: str, enviado: bool = False) -> pd.Dat
             "ganancia": df[ganancia].astype(float).values if ganancia and ganancia in df.columns else np.nan,
             "vp_neto_max": df[vp].astype(float).values if vp and vp in df.columns else np.nan,
             "capital_obsoleto": np.nan,
+            "vta_sem1": df["vta_sem1"].astype(float).values if "vta_sem1" in df.columns else np.nan,
             "enviado": bool(enviado), "fecha_envio": ahora if enviado else "", "generado": ahora,
         })
         partes.append(d)
@@ -1119,7 +1166,7 @@ def filas_corte(bloques: dict, semana_iso: str, enviado: bool = False) -> pd.Dat
                           "estado": "", "capital": float(f.get("capital_total") or 0), "uds": float(f.get("stock_uds") or 0), "cobertura": float(f["margen_efectivo_pct"]) if f.get("margen_efectivo_pct") is not None else np.nan,
                           "vta_sem": float(f.get("sell_through_pct") or 0), "n_tiendas": int(f.get("tiendas") or 0), "n_tiendas_quiebre": 0, "stock_cd": 0.0, "accion": "", "top_80": False,
                           "ganancia": np.nan, "vp_neto_max": float(bloques["hechos"].get("vp", {}).get("neto_max") or 0) if bloques["hechos"].get("vp", {}).get("neto_max") is not None else np.nan,
-                          "capital_obsoleto": float(bloques["hechos"].get("obs", {}).get("capital") or 0),
+                          "capital_obsoleto": float(bloques["hechos"].get("obs", {}).get("capital") or 0), "vta_sem1": np.nan,
                           "enviado": bool(enviado), "fecha_envio": ahora if enviado else "", "generado": ahora}])
     partes.append(foto)
     return pd.concat(partes, ignore_index=True)[COLS_CORTE]
