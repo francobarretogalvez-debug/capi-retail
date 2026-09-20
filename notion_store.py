@@ -222,7 +222,7 @@ def upsert_proveedor(marca: str, semana_iso: str, props: dict, archivos: list | 
     if not disponible():
         return {"ok": False, "error": "sin NOTION_TOKEN", "page_id": None, "url": None, "creada": False}
     try:
-        subidos = [(n, subir_archivo(n, d)) for n, d in (archivos or [])]
+        subidos = [(subir_archivo(n, d), n) for n, d in (archivos or [])]   # p_files espera (file_upload_id, nombre)
         pag = buscar_proveedor(marca, semana_iso)
         if pag:
             r = actualizar_pagina(pag["id"], props={**props, **({"Archivos": p_files(subidos)} if subidos else {})})

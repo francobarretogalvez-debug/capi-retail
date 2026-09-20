@@ -3689,7 +3689,7 @@ elif nav_page == "🤝 Agente Terceras":
             _n_lote = len(_bor["detalle_lote"])
             if _rb1.button(f"📨 Ya lo envié → registrar (correo + lote venta cero, {_n_lote:,} combos)", key="at_rep_enviado", type="primary"):
                 with st.spinner("Registrando…"):
-                    acciones_log.agregar("", "Negociación Terceras", str(_bor["marca"]).upper(),
+                    acciones_log.agregar(_bor["semana_iso"], "Negociación Terceras", str(_bor["marca"]).upper(),
                                          f"Reporte semanal al proveedor enviado: {st.session_state.get('at_rep_asunto', '')[:100]}",
                                          magnitud=f"S/ {_bor['capital_total']:,.0f}", vista="Agente Terceras", corte_base=_nombre_base())
                     _r_lote = None
@@ -3789,7 +3789,7 @@ elif nav_page == "🤝 Agente Terceras":
                     for _c in _comps:
                         if _c.get("_logueado"):
                             continue
-                        acciones_log.agregar("", "Negociación Terceras", str(_rep_marca).upper(),
+                        acciones_log.agregar(_rp_sem, "Negociación Terceras", str(_rep_marca).upper(),
                                              f"Compromiso proveedor ({reporte_proveedor.BLOQUES_LABEL.get(_c['bloque'], _c['bloque'])}): {_c['accion']} — {len(_c['skus'])} modelos"
                                              + (f" para el {_c['fecha']}" if _c.get("fecha") else ""),
                                              sku=", ".join(_c["skus"][:20]), estado="Ejecutada" if _c.get("cumplido") else "En curso",

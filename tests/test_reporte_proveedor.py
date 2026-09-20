@@ -380,6 +380,7 @@ def test_upsert_proveedor_actualiza_no_duplica(monkeypatch):
     paginas = []
     monkeypatch.setattr(ns, "token", lambda: "ntn_x")
     monkeypatch.setattr(ns, "subir_archivo", lambda n, d, ct=None: llamadas["subidos"].append(n) or f"id-{n}")
+    monkeypatch.setattr(ns, "p_files", lambda archivos: {"files": [{"type": "file_upload", "file_upload": {"id": fid}, "name": nombre} for fid, nombre in archivos]})
     monkeypatch.setattr(ns, "consultar", lambda db, filtro=None, **k: list(paginas))
     def _crear(db, props, archivos=None, prop_archivos=None):
         assert db == ns.DB_PROVEEDORES
@@ -390,6 +391,8 @@ def test_upsert_proveedor_actualiza_no_duplica(monkeypatch):
     props = {"Marca": ns.p_text("M"), "Semana ISO": ns.p_text("2026-35")}
     r1 = ns.upsert_proveedor("M", "2026-35", props, archivos=[("x.xlsx", b"abc")])
     assert r1["ok"] and r1["creada"] and llamadas["subidos"] == ["x.xlsx"] and len(llamadas["crear"]) == 1
+    # el adjunto llega a crear_pagina como (file_upload_id, nombre): Notion rechazaba el orden invertido (20-sep, fila sin Excel ni fecha de envío)
+    assert llamadas["crear"][0][1] == [("id-x.xlsx", "x.xlsx")]
     r2 = ns.upsert_proveedor("M", "2026-35", props)
     assert r2["ok"] and not r2["creada"] and llamadas["actualizar"][0][0] == "pg1" and len(llamadas["crear"]) == 1
     monkeypatch.setattr(ns, "token", lambda: "")
