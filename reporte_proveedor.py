@@ -4,7 +4,7 @@ reporte_proveedor.py — motor del "Reporte semanal al proveedor" (marcas tercer
 Decisión 2026-09-18 (Franco): un correo + un Excel por marca, tres frentes:
   B1  VENTA CERO        modelos sin venta en toda la cadena la última semana (ranking Pareto 80%)
   B2a SOBRESTOCK        modelos que venden pero cargan de más (estado de CADENA) → markdown 50/50,
-                        canje/devolución o frenar ingreso
+                        devolución o frenar ingreso
   B2b DESBALANCE        modelos con transferencias entre tiendas rentables (≥12 uds, ganancia > 0)
   B3  GANADORES CORTOS  buena rotación y poca cobertura → reponer desde CD o reorden al proveedor
 
@@ -256,12 +256,12 @@ def bloque_venta_cero(g: pd.DataFrame, dfm: pd.DataFrame, precio_min_map: dict |
     def _acc(r):
         p = r.get("precio_sugerido")
         if r["edad_semanas"] >= EDAD_LIQUIDAR:
-            return (f"🏷️ Liquidar: cofinanciar {r['dscto_sugerido']:.0%} → S/ {p:,.2f}" if pd.notna(p)
-                    else "↩️ Canje / devolución (ya en piso de precio)")
+            return (f"🏷️ Liquidar: descuento compartido {r['dscto_sugerido']:.0%} → S/ {p:,.2f}" if pd.notna(p)
+                    else "↩️ Devolución (ya en piso de precio)")
         if r["estado_cadena"] == "NUEVO SIN VENTA":
             return "👁️ Revisar exhibición (lanzamiento sin arranque)"
         if pd.notna(p):
-            return f"👁️ Exhibición + cofinanciar {r['dscto_sugerido']:.0%} → S/ {p:,.2f}"
+            return f"👁️ Exhibición + descuento compartido {r['dscto_sugerido']:.0%} → S/ {p:,.2f}"
         return "👁️ Revisar exhibición / comunicación de precio"
     b1["accion"] = b1.apply(_acc, axis=1)
     b1["_g"] = (b1["grupo"] != GRUPO_B1_4SEM).astype(int)
@@ -275,7 +275,7 @@ def bloque_sobrestock(g: pd.DataFrame, excluir: set, df_trans: pd.DataFrame | No
                       df_alertas: pd.DataFrame | None = None, dfm_ref: pd.DataFrame | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(b2a, b2b).
     b2a: estado de CADENA ∈ ESTADOS_B2 con venta, menos los SKUs de B1. Acción primaria:
-         markdown cofinanciado (si la pirámide deja bajar) → canje/devolución (viejo, estancado
+         descuento compartido (si la pirámide deja bajar) → devolución (viejo, estancado
          o ya en piso) → frenar ingreso (compra reciente sobredimensionada, dscto ya ≥ pirámide).
     b2b: transferencias rentables por modelo (reportes_marcas.transferencias_por_sku), cualquier
          estado. La ejecuta el proveedor (habilitadas para terceras, precisión Franco 18-sep)."""
@@ -293,14 +293,14 @@ def bloque_sobrestock(g: pd.DataFrame, excluir: set, df_trans: pd.DataFrame | No
             en_piso = str(r.get("accion_precio", "")).startswith("✋")
             alts = []
             if pd.notna(p):
-                acc = f"⬇️ Markdown cofinanciado 50/50: {r['dscto_sugerido']:.0%} → S/ {p:,.2f}"
+                acc = f"⬇️ Descuento compartido 50/50: {r['dscto_sugerido']:.0%} → S/ {p:,.2f}"
                 if viejo:
-                    alts.append("canje / devolución con recompra")
+                    alts.append("devolución con recompra")
             elif viejo or en_piso:
-                acc = "↩️ Canje / devolución con recompra"
+                acc = "↩️ Devolución con recompra"
             else:
                 acc = "⏸️ Frenar ingreso / no reponer (dscto ya en pirámide)"
-                alts.append("canje si no rota en 4 semanas")
+                alts.append("devolución si no rota en 4 semanas")
             return pd.Series({"accion": acc, "alternativas": " · ".join(alts)})
         b2 = pd.concat([b2, b2.apply(_acc, axis=1)], axis=1)
         b2["pct_acum"], b2["top_80"] = pareto_flag(b2["capital_costo"])
@@ -439,8 +439,8 @@ def bloque_obsoletos(g: pd.DataFrame, b1: pd.DataFrame, b2a: pd.DataFrame, preci
     def _acc(r):
         p = r.get("precio_sugerido")
         if pd.notna(p):
-            return f"🏷️ Liquidar: cofinanciar {r['dscto_sugerido']:.0%} → S/ {p:,.2f}"
-        return "↩️ Recoger / canje (ya en piso de precio)" if r["estado_cadena"] == "OBSOLETO" else "↩️ Canje / devolución (ya en piso de precio)"
+            return f"🏷️ Liquidar: descuento compartido {r['dscto_sugerido']:.0%} → S/ {p:,.2f}"
+        return "↩️ Recoger / devolución (ya en piso de precio)" if r["estado_cadena"] == "OBSOLETO" else "↩️ Devolución (ya en piso de precio)"
     ob["accion"] = ob.apply(_acc, axis=1)
     ob["pct_acum"], ob["top_80"] = pareto_flag(ob["capital_costo"])
     ob["_o"] = (ob["estado_cadena"] != "OBSOLETO").astype(int)
@@ -765,13 +765,13 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         foto = h["foto"]
         res = pd.DataFrame([
-            {"Bloque": f"1. Venta cero — {GRUPO_B1_4SEM.lower()}", "Modelos": h["b1"]["n_4sem"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_4sem"], "Qué pedimos": f"liquidar / canje lo de más de 26 sem ({h['b1']['n_liquidar']} en todo el bloque) · exhibición y precio en el resto"},
+            {"Bloque": f"1. Venta cero — {GRUPO_B1_4SEM.lower()}", "Modelos": h["b1"]["n_4sem"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_4sem"], "Qué pedimos": f"liquidar / devolución lo de más de 26 sem ({h['b1']['n_liquidar']} en todo el bloque) · exhibición y precio en el resto"},
             {"Bloque": f"1. Venta cero — {GRUPO_B1_PARO.lower()} (alerta temprana)", "Modelos": h["b1"]["n_paro"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_paro"], "Qué pedimos": "revisar exhibición y precio esta semana; si repite, pasa al grupo anterior"},
-            {"Bloque": "2a. Sobrestock de cadena (venden, pero cargan de más)", "Modelos": h["b2a"]["n_skus"], "Stock (uds)": h["b2a"]["stock_uds"], "Capital S/ (costo)": h["b2a"]["capital"], "Qué pedimos": f"markdown 50/50: {h['b2a']['n_markdown']} · canje/devolución: {h['b2a']['n_canje']} · frenar ingreso: {h['b2a']['n_frenar']}"},
+            {"Bloque": "2a. Sobrestock de cadena (venden, pero cargan de más)", "Modelos": h["b2a"]["n_skus"], "Stock (uds)": h["b2a"]["stock_uds"], "Capital S/ (costo)": h["b2a"]["capital"], "Qué pedimos": f"descuento compartido 50/50: {h['b2a']['n_markdown']} · devolución: {h['b2a']['n_canje']} · frenar ingreso: {h['b2a']['n_frenar']}"},
             {"Bloque": "2b. Transferencias entre tiendas (las ejecuta la marca)", "Modelos": h["b2b"]["n_skus"], "Stock (uds)": h["b2b"]["uds"], "Capital S/ (costo)": None, "Qué pedimos": f"mover {h['b2b']['uds']:,} uds · contribución esperada S/ {h['b2b']['ganancia']:,} · detalle origen → destino en la pestaña 2b. Detalle"},
             {"Bloque": "3. Ganadores que se quedan cortos", "Modelos": h["b3"]["n_skus"], "Stock (uds)": None, "Capital S/ (costo)": None, "Qué pedimos": f"{h['b3']['n_sin_cd']} sin stock en CD (reorden) · necesidad {h['b3']['necesidad_uds']:,} uds"},
             {"Bloque": "4. Pre-obsoleto y obsoleto (transversal: vendan o no)", "Modelos": h.get("obs", {}).get("n_skus", 0), "Stock (uds)": h.get("obs", {}).get("stock_uds", 0), "Capital S/ (costo)": h.get("obs", {}).get("capital", 0),
-             "Qué pedimos": f"{h.get('obs', {}).get('n_obsoleto', 0)} obsoletos (S/ {_s(h.get('obs', {}).get('capital_obsoleto'))}) + {h.get('obs', {}).get('n_preobsoleto', 0)} pre-obsoletos · liquidar {h.get('obs', {}).get('n_liquidar', 0)} · recoger/canje {h.get('obs', {}).get('n_recoger', 0)}"},
+             "Qué pedimos": f"{h.get('obs', {}).get('n_obsoleto', 0)} obsoletos (S/ {_s(h.get('obs', {}).get('capital_obsoleto'))}) + {h.get('obs', {}).get('n_preobsoleto', 0)} pre-obsoletos · liquidar {h.get('obs', {}).get('n_liquidar', 0)} · recoger/devolución {h.get('obs', {}).get('n_recoger', 0)}"},
         ])
         ws = vistas_excel._tabla_con_titulo(w, "Resumen", f"{marca} — Reporte semanal Ripley · corte {corte}", res,
                                             {"Stock (uds)": _F["S"], "Capital S/ (costo)": _F["S"]}, anchos={"Bloque": 58, "Qué pedimos": 70})
@@ -787,7 +787,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             ("0. Evolución", "Serie semana a semana de los indicadores de cada frente (solo con reportes anteriores enviados con Capi)."),
             ("1. Venta Cero (SKU)", "Modelos con stock que NO vendieron ni una unidad en toda la cadena la última semana, en dos grupos: sin venta en las últimas 4 semanas y los que vendían y pararon. ⭐ = concentran el 80% del capital de su grupo. Con la venta del modelo de las 4 últimas semanas y el descuento sugerido (nunca menor al actual)."),
             ("1b. Venta Cero x Tienda", "Los mismos modelos de la pestaña 1, tienda por tienda: dónde está el stock, qué prioridad tiene en esa tienda (⭐ = 80% del capital sin venta de la tienda), la venta de esa tienda en las 4 últimas semanas (de los snapshots; si no hay, la del modelo en cadena), y la acción de piso (etiquetar, cartel o revisar exhibición)."),
-            ("2a. Sobrestock", "Modelos que venden pero cargan de más a nivel cadena (cobertura ≥ 26 semanas) o entran en liquidación: acción sugerida por modelo (markdown compartido, canje/devolución, frenar ingreso)."),
+            ("2a. Sobrestock", "Modelos que venden pero cargan de más a nivel cadena (cobertura ≥ 26 semanas) o entran en liquidación: acción sugerida por modelo (markdown compartido, devolución, frenar ingreso)."),
             ("2b. Rutas tienda a tienda", "Transferencias entre tiendas que ejecuta la marca (modelos con ≥12 uds a mover y demanda en destino; sin flete Ripley): cuánto se mueve de cada tienda origen a cada tienda destino, con modelos, unidades, costo total y valor venta, y fila TOTAL."),
             ("2b. Detalle transferencias", "El detalle de esas transferencias: cuántas unidades de cada modelo salen de qué tienda y llegan a cuál, con stock, venta semanal y cobertura antes/después en ambas tiendas. La cantidad busca dejar ambas en 12 semanas de cobertura."),
             ("3. Ganadores", "Modelos con buena rotación y poca cobertura (≤ 8 semanas) o acelerando: necesidad calculada, stock en CD y acción (reponer desde CD / reorden)."),
@@ -922,7 +922,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             d5["Prioridad"] = np.where(d5["Prioridad"], "⭐ TOP 80%", "")
         _hoja_o_vacia(w, "4. Pre-obsoleto y obsoleto",
                       f"{marca} — Mercadería pre-obsoleta (6-9 meses) y obsoleta (9 meses a más) a nivel cadena, venda o no: {ho.get('n_skus', 0)} modelos · S/ {_s(ho.get('capital'))} ({ho.get('pct_capital_marca', 0)}% del capital) · "
-                      f"liquidar {ho.get('n_liquidar', 0)} · recoger/canje {ho.get('n_recoger', 0)} · corte {corte}",
+                      f"liquidar {ho.get('n_liquidar', 0)} · recoger/devolución {ho.get('n_recoger', 0)} · corte {corte}",
                       d5, {**reportes_marcas._FMTS_PRECIO, "% acum.": _F["PCT"], "Tiendas con stock": _F["S"]}, chips_col="Estado")
         reportes_marcas._hoja_leyenda(w)
     buf.seek(0)
@@ -1210,7 +1210,7 @@ def serie_kpis(cortes: pd.DataFrame, bloques: dict | None = None) -> pd.DataFram
 # ══════════════════════════════════════════════════════════════════════════════
 import json as _json
 
-ACCIONES_PROVEEDOR = ["Markdown cofinanciado 50/50", "Transferencia entre tiendas", "Canje / devolución con recompra",
+ACCIONES_PROVEEDOR = ["Descuento compartido 50/50", "Transferencia entre tiendas", "Devolución con recompra",
                       "Reposición / reorden", "Exhibición en tienda", "Rechazó", "Otro"]
 BLOQUES_LABEL = {"b1": "1) Venta cero", "b2a": "2a) Sobrestock", "b2b": "2b) Transferencias", "b3": "3) Ganadores"}
 RESPONDIO = ["Sin respuesta aún", "Sí", "Parcial", "No"]

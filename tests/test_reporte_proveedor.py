@@ -84,7 +84,7 @@ def _cob():
       102 VC-1SEM  sin venta SOLO la última semana, vendía 4/sem, stock 100 → B1 (gana a B2a)
       103 VC-NEW   venta cero, edad 5, stock 5                              → B1, lanzamiento
       201 SOB-MKD  5/sem, stock 150 (cob 30) SOBRESTOCK, dscto 10%, edad 20 → B2a markdown 30% → S/ 70
-      202 SOB-CANJ 2/sem, stock 120 (cob 60) ESTANCADO, dscto 60%           → B2a canje
+      202 SOB-CANJ 2/sem, stock 120 (cob 60) ESTANCADO, dscto 60%           → B2a devolución
       203 SOB-FREN 4/sem, stock 130 (cob 32.5) SOBRESTOCK, edad 6 (pirám 0%)→ B2a frenar ingreso
       301 GAN-CD   20/sem, stock 60 (cob 3), 2 de 3 tiendas en quiebre, CD 50 → B3 reponer desde CD
       302 GAN-SIN  10/sem, stock 70 (cob 7), CD 0                            → B3 reorden proveedor
@@ -148,7 +148,7 @@ def test_b1_cadena_ultima_semana(bl):
     assert b1["capital_costo"].sum() == pytest.approx((80 + 100 + 5) * 20.0)
     fila = b1.set_index("sku")
     assert fila.loc[101, "semanas_sin_venta"] == "4+" and fila.loc[102, "semanas_sin_venta"] == "1"
-    assert fila.loc[101, "accion"].startswith("🏷️ Liquidar: cofinanciar 40%") and "S/ 60.00" in fila.loc[101, "accion"]  # pirámide 30-34 sem = 40%
+    assert fila.loc[101, "accion"].startswith("🏷️ Liquidar: descuento compartido 40%") and "S/ 60.00" in fila.loc[101, "accion"]  # pirámide 30-34 sem = 40%
     assert fila.loc[103, "accion"].startswith("👁️ Revisar exhibición (lanzamiento")
 
 
@@ -172,8 +172,8 @@ def test_b2_estado_cadena_y_precedencia_b1(bl):
     assert b2a.loc[201, "dscto_sugerido"] == pytest.approx(0.30) and b2a.loc[201, "dscto_piramide"] == pytest.approx(0.30)
     # 202 ya está al 60% y la pirámide dice 30%: el sugerido NUNCA baja del actual (Franco 19-sep)
     assert b2a.loc[202, "dscto_piramide"] == pytest.approx(0.30) and b2a.loc[202, "dscto_sugerido"] == pytest.approx(0.60)
-    assert b2a.loc[201, "accion"].startswith("⬇️ Markdown cofinanciado 50/50: 30%")
-    assert pd.isna(b2a.loc[202, "precio_sugerido"]) and b2a.loc[202, "accion"].startswith("↩️ Canje")
+    assert b2a.loc[201, "accion"].startswith("⬇️ Descuento compartido 50/50: 30%")
+    assert pd.isna(b2a.loc[202, "precio_sugerido"]) and b2a.loc[202, "accion"].startswith("↩️ Devolución")
     assert b2a.loc[203, "accion"].startswith("⏸️ Frenar ingreso")
     assert b2a.loc[202, "tendencia"] == "▼"
     assert (b2a["grupo"] == "Sobrestock").all()
@@ -343,7 +343,7 @@ def test_score_y_props_respuesta_proveedor(bl, tmp_path, monkeypatch):
     import notion_store as ns
     h = bl["hechos"]
     resp = {"respondio": "Parcial", "fecha_respuesta": "2026-09-22", "notas": "llamada con Raúl",
-            "compromisos": [{"bloque": "b1", "accion": "Markdown cofinanciado 50/50", "skus": ["101"], "fecha": "2026-09-26", "cumplido": True},
+            "compromisos": [{"bloque": "b1", "accion": "Descuento compartido 50/50", "skus": ["101"], "fecha": "2026-09-26", "cumplido": True},
                             {"bloque": "b3", "accion": "Reposición / reorden", "skus": ["301", "302"], "fecha": "", "cumplido": False},
                             {"bloque": "b2a", "accion": "Rechazó", "skus": ["202"], "fecha": "", "cumplido": False}]}
     sc = rp.score_respuesta(h, resp)

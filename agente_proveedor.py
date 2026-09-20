@@ -42,8 +42,8 @@ REGLAS INVIOLABLES
    {"asunto": "...", "intro": "...", "lead_b1": "...", "lead_b2a": "...", "lead_b2b": "...", "lead_b3": "...", "cierre": "..."}
    - asunto: "<MARCA> — Reporte semanal Ripley al <corte>: ..." (una línea).
    - intro: saludo + para qué es el reporte + la foto de la marca (capital total y % en los frentes).
-   - lead_b1: qué pedimos sobre venta cero (revisar exhibición / cofinanciar / liquidar lo viejo).
-   - lead_b2a: qué pedimos sobre sobrestock (markdown compartido 50/50, canje o frenar ingreso) y, si hay, cuántos modelos ya son pre-obsoletos u obsoletos (clave "obs": pestaña 4 del Excel).
+   - lead_b1: qué pedimos sobre venta cero (revisar exhibición / descuento compartido / liquidar lo viejo).
+   - lead_b2a: qué pedimos sobre sobrestock (descuento compartido 50/50, devolución con recompra o frenar ingreso) y, si hay, cuántos modelos ya son pre-obsoletos u obsoletos (clave "obs": pestaña 4 del Excel).
    - lead_b2b: qué pedimos sobre las transferencias entre tiendas (las ejecuta la marca).
    - lead_b3: qué pedimos sobre los ganadores cortos (reponer desde CD / reorden).
    - cierre: pedido de respuesta con fecha o reunión + despedida cordial.
@@ -65,14 +65,14 @@ def redactar_reglas(h: dict) -> dict:
              f"el Excel adjunto trae todo el desglose.")
     lead_b1 = (f"Venta cero: {b1.get('n_skus', 0)} modelos con stock no vendieron ni una unidad la última semana (S/ {_sn(b1.get('capital'))}, "
                f"{pct}% del capital de la marca); {b1.get('n_top', 0)} concentran el 80%. Te pedimos revisar exhibición y precio en tienda, y para los "
-               f"{b1.get('n_liquidar', 0)} con más de 26 semanas, cofinanciar la liquidación o evaluar el canje."
+               f"{b1.get('n_liquidar', 0)} con más de 26 semanas, compartir el descuento de liquidación o evaluar la devolución."
                if b1.get("n_skus") else "Venta cero: esta semana no hay modelos sin venta en toda la cadena.")
     obs = h.get("obs", {})
     obs_txt = (f" Además, {obs.get('n_skus', 0)} modelos de la marca ya son pre-obsoletos u obsoletos (S/ {_sn(obs.get('capital'))}, {obs.get('pct_capital_marca', 0)}% del capital): "
                f"van marcados en los bloques 1 y 2a y juntos en la pestaña 4 del Excel, con lo que toca liquidar ({obs.get('n_liquidar', 0)}) o recoger ({obs.get('n_recoger', 0)})."
                if obs.get("n_skus") else "")
     lead_b2a = (f"Sobrestock: {b2a.get('n_skus', 0)} modelos venden pero cargan de más (S/ {_sn(b2a.get('capital'))}). Propuesta por modelo: "
-                f"markdown compartido 50/50 en {b2a.get('n_markdown', 0)}, canje o devolución con recompra en {b2a.get('n_canje', 0)} y frenar el ingreso en "
+                f"descuento compartido 50/50 en {b2a.get('n_markdown', 0)}, devolución con recompra en {b2a.get('n_canje', 0)} y frenar el ingreso en "
                 f"{b2a.get('n_frenar', 0)}." + obs_txt
                 if b2a.get("n_skus") else "Sobrestock: esta semana no hay modelos con sobrestock a nivel cadena." + obs_txt)
     lead_b2b = (f"Transferencias entre tiendas: {b2b.get('n_skus', 0)} modelos tienen stock donde no rota y faltan donde sí. Son {_sn(b2b.get('uds'))} unidades "
@@ -146,9 +146,9 @@ def _subtitulo(h: dict, k: str) -> str:
     return f"{b.get('n_skus', 0)} modelos con buena rotación y poca cobertura · {b.get('n_sin_cd', 0)} sin stock en CD"
 
 
-_CRITERIOS_B2 = ("Criterios: markdown compartido 50/50 según acuerdo vigente, sobre precio regular y nunca bajo el piso de margen; "
+_CRITERIOS_B2 = ("Criterios: descuento compartido 50/50 según acuerdo vigente, sobre precio regular y nunca bajo el piso de margen; "
                  "transferencias desde 12 unidades por modelo y con demanda en la tienda destino (el traslado lo ejecuta y lo asume la marca, sin flete de Ripley); "
-                 "canje o devolución para lo que no rota ni con precio.")
+                 "devolución para lo que no rota ni con precio.")
 
 
 def ensamblar(h: dict, prosa: dict, tablas_texto: dict, tablas_html: dict, firma: str = "", evolucion_texto: str = "",

@@ -18,8 +18,8 @@ Cada lunes, después de cargar la Base Micro del cierre del domingo en Capi.
 ## Qué significa cada bloque
 | Bloque | Qué es | Qué le pedimos al proveedor |
 |---|---|---|
-| 1) Venta cero | Modelos con stock que no vendieron ni una unidad en toda la cadena la última semana. ⭐ = concentran el 80% del capital | Revisar exhibición y precio; para lo de más de 26 semanas, cofinanciar la liquidación o canje |
-| 2a) Sobrestock | Modelos que venden pero cargan de más (cobertura de cadena ≥ 26 semanas) | Markdown compartido 50/50, canje/devolución, o frenar el ingreso |
+| 1) Venta cero | Modelos con stock que no vendieron ni una unidad en toda la cadena la última semana. ⭐ = concentran el 80% del capital | Revisar exhibición y precio; para lo de más de 26 semanas, compartir el descuento de liquidación o devolución |
+| 2a) Sobrestock | Modelos que venden pero cargan de más (cobertura de cadena ≥ 26 semanas) | Markdown compartido 50/50, devolución, o frenar el ingreso |
 | 2b) Desbalance | Modelos con stock donde no rota y faltantes donde sí (transferencias rentables ≥ 12 uds) | Programar las transferencias entre tiendas |
 | 3) Ganadores cortos | Modelos con buena rotación y poca cobertura (≤ 8 semanas) o acelerando | Reponer desde CD o confirmar reorden si no hay CD |
 
