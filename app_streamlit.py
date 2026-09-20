@@ -3622,6 +3622,8 @@ elif nav_page == "🤝 Agente Terceras":
                 _mostrar(_det, ["sku", "nombre", "tienda_origen", "tienda_destino", "uds_transferir", "ganancia_esperada", "cob_origen_pre", "cob_origen_post", "cob_destino_pre", "cob_destino_post"])
         with st.expander(f"3) Ganadores que se quedan cortos — {_h['b3']['n_skus']} modelos (umbral {_h['b3']['umbral_vta']} u/sem)", expanded=False):
             _mostrar(_bl["b3"], ["sku", "nombre", "categoria", "tendencia", "entra_por", "vta_sem_prom4", "stock_cadena", "cobertura_cadena", "n_tiendas_quiebre", "n_tiendas", "stock_cd", "necesidad_uds", "pendiente_sin_cd_uds", "sem_en_quiebre_max", "vp_neto_min", "vp_neto_max", "accion"])
+        with st.expander(f"4) Pre-obsoleto y obsoleto (transversal) — {_h.get('obs', {}).get('n_skus', 0)} modelos · S/ {_h.get('obs', {}).get('capital', 0):,}", expanded=False):
+            _mostrar(_bl.get("obs", pd.DataFrame()), ["sku", "nombre", "categoria", "estado_cadena", "en_bloque", "edad_semanas", "n_tiendas_stock", "stock_cadena", "capital_costo", "top_80", "pct_descuento", "dscto_sugerido", "precio_sugerido", "accion"])
         with st.expander("📈 Historial de la marca (cortes enviados con Capi)", expanded=False):
             _serie = reporte_proveedor.serie_kpis(_cortes, _bl)
             if _serie.empty or _serie.shape[1] < 2:
