@@ -1119,7 +1119,9 @@ def comparar_marca(bloques: dict, cortes_prev: pd.DataFrame) -> dict:
                 n += 1
             racha[s] = n
         out["semanas_en_bloque"][b] = racha
-        out["persistentes"][b] = sorted([s for s, n in racha.items() if n >= PERSISTENCIA_ALERTA], key=lambda s: (-racha[s], s))
+        # orden: más semanas primero y, a igual racha, más capital (que el correo cite lo que pesa, no billeteras sueltas)
+        cap_b = actual.loc[actual["bloque"] == b].set_index("sku")["capital"].to_dict()
+        out["persistentes"][b] = sorted([s for s, n in racha.items() if n >= PERSISTENCIA_ALERTA], key=lambda s: (-racha[s], -cap_b.get(s, 0), s))
     p1 = set(prev.loc[prev["bloque"] == "b1", "sku"])
     if p1:
         out["resolucion_b1"] = round(len(p1 - set(actual.loc[actual["bloque"] == "b1", "sku"])) / len(p1) * 100, 1)

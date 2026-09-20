@@ -670,8 +670,12 @@ if "results" not in st.session_state:
 # ── Modo demo (?demo=1 en la URL): nav simplificada + auto-carga de base ──
 try:
     _DEMO_MODE = st.query_params.get("demo") == "1"
+    # ?autoload=1: misma auto-carga de la base más reciente de data2/bases antiguas/ pero con la
+    # navegación COMPLETA (uso local: pruebas y demos internas; en la nube esa carpeta no existe).
+    _AUTOLOAD = st.query_params.get("autoload") == "1"
 except Exception:
     _DEMO_MODE = False
+    _AUTOLOAD = False
 
 # ══════════════════════════════════════════════════════════════
 #  SIDEBAR
@@ -1164,7 +1168,7 @@ if st.session_state.get("_modo_seguro_activo"):
 #  crítico para que la demo muestre insights en segundos.
 # ══════════════════════════════════════════════════════════════
 
-if _DEMO_MODE and st.session_state["results"] is None and not st.session_state.get("_demo_autoload_done"):
+if (_DEMO_MODE or _AUTOLOAD) and st.session_state["results"] is None and not st.session_state.get("_demo_autoload_done"):
     st.session_state["_demo_autoload_done"] = True
     import re as _re_demo
 
@@ -1188,10 +1192,11 @@ if _DEMO_MODE and st.session_state["results"] is None and not st.session_state.g
         _demo_base = max(_demo_bases, key=_demo_fecha_archivo)
         _demo_path = os.path.join(_demo_dir, _demo_base)
         try:
-            with st.spinner(f"Modo demo: cargando {_demo_base}…"):
+            with st.spinner(f"{'Modo demo' if _DEMO_MODE else 'Auto-carga'}: cargando {_demo_base}…"):
                 if _is_base_profundidad(_demo_path):
                     _demo_plantilla = os.path.join(tempfile.gettempdir(), "capi_demo_plantilla.xlsx")
-                    etl_profundidad.transform(_demo_path, output_path=_demo_plantilla)
+                    etl_profundidad.transform(_demo_path, output_path=_demo_plantilla,
+                                              fecha_corte=etl_profundidad.fecha_corte_desde_nombre(_demo_base))
                     _demo_input = _demo_plantilla
                     # Rendimiento por Tienda relee el Micro crudo (la plantilla ya
                     # perdió las columnas por tienda), así que hay que dejar la ruta.
@@ -3583,8 +3588,8 @@ elif nav_page == "🤝 Agente Terceras":
                          f'<div style="font-size:0.72rem; color:var(--capi-text2);">{sub}</div></div>', unsafe_allow_html=True)
         _t1, _t2, _t3, _t4 = st.columns(4)
         _tile(_t1, "1) Venta cero (cadena, última semana)", f"S/ {_h['b1']['capital']:,}", f"{_h['b1']['n_skus']} modelos · ⭐ {_h['b1']['n_top']} · {_h['b1']['pct_capital_marca']}% del capital", STATUS_CRITICO)
-        _tile(_t2, "2a) Sobrestock de cadena", f"S/ {_h['b2a']['capital']:,}", f"{_h['b2a']['n_skus']} modelos · dscto {_h['b2a']['n_markdown']} · canje {_h['b2a']['n_canje']} · frenar {_h['b2a']['n_frenar']}", STATUS_SOBRESTOCK)
-        _tile(_t3, "2b) Transferencias entre tiendas", f"{_h['b2b']['uds']:,} uds", f"{_h['b2b']['n_skus']} modelos · ganancia neta S/ {_h['b2b']['ganancia']:,}", STATUS_SOBRESTOCK)
+        _tile(_t2, "2a) Sobrestock de cadena", f"S/ {_h['b2a']['capital']:,}", f"{_h['b2a']['n_skus']} modelos · dscto compartido {_h['b2a']['n_markdown']} · devolución {_h['b2a']['n_canje']} · frenar {_h['b2a']['n_frenar']}", STATUS_SOBRESTOCK)
+        _tile(_t3, "2b) Transferencias entre tiendas", f"{_h['b2b']['uds']:,} uds", f"{_h['b2b']['n_skus']} modelos · contribución esperada S/ {_h['b2b']['ganancia']:,}", STATUS_SOBRESTOCK)
         _tile(_t4, "3) Ganadores que se quedan cortos", f"{_h['b3']['n_skus']} modelos", f"{_h['b3']['n_sin_cd']} sin stock en CD · necesidad {_h['b3']['necesidad_uds']:,} uds", STATUS_MUERTO)
         _ft = _h["foto"]
         st.caption(f"Foto de {_rep_marca}: S/ {_ft['capital_total']:,} a costo · {_ft['skus']} modelos · {_ft['tiendas']} tiendas · "

@@ -294,7 +294,7 @@ def test_comparar_marca(tmp_path):
     assert k["capital"]["delta_abs"] == -100 and k["capital"]["delta_pct"] == pytest.approx(-100 / 3700 * 100, abs=0.1)
     assert cmp["skus"]["b1"] == {"persisten": ["101", "102"], "salieron": ["103"], "nuevos": []}
     assert cmp["semanas_en_bloque"]["b1"] == {"101": 3, "102": 3}          # 34, 35, 36 seguidas
-    assert cmp["persistentes"]["b1"] == ["101", "102"]                       # ≥3 semanas → presión en el correo
+    assert cmp["persistentes"]["b1"] == ["102", "101"]                       # ≥3 semanas; a igual racha, mayor capital primero (102 = 2.000)
     assert cmp["resolucion_b1"] == pytest.approx(100 / 3, abs=0.1)
     txt = rp.evolucion_texto(cmp, b36)
     assert "Venta cero — capital S/" in txt and "2 modelos llevan 3 o más semanas seguidas sin venta" in txt
