@@ -3740,7 +3740,9 @@ elif nav_page == "🤝 Agente Terceras":
             _resp = st.session_state["at_rep_resp"]
             _resp["respondio"] = _rp_c2.selectbox("¿Respondió?", reporte_proveedor.RESPONDIO,
                                                   index=reporte_proveedor.RESPONDIO.index(_resp.get("respondio", reporte_proveedor.RESPONDIO[0])), key="at_rep_resp_si")
-            _resp["fecha_respuesta"] = _rp_c3.text_input("Fecha de respuesta (AAAA-MM-DD)", value=_resp.get("fecha_respuesta", ""), key="at_rep_resp_fecha")
+            _f_prev = reporte_proveedor.fecha_iso(_resp.get("fecha_respuesta"))
+            _f_sel = _rp_c3.date_input("Fecha de respuesta", value=(pd.Timestamp(_f_prev).date() if _f_prev else None), key="at_rep_resp_fecha", format="DD/MM/YYYY")
+            _resp["fecha_respuesta"] = _f_sel.isoformat() if _f_sel else ""
             _resp["notas"] = st.text_area("Notas de la respuesta", value=_resp.get("notas", ""), height=80, key="at_rep_resp_notas")
 
             # modelos enviados de esa semana (del corte persistido; si es la semana actual, de los bloques vivos)
@@ -3754,7 +3756,8 @@ elif nav_page == "🤝 Agente Terceras":
             _cc1, _cc2, _cc3 = st.columns([1, 1.4, 1])
             _c_bloque = _cc1.selectbox("Bloque", list(reporte_proveedor.BLOQUES_LABEL), format_func=lambda b: reporte_proveedor.BLOQUES_LABEL[b], key="at_rep_c_bloque")
             _c_accion = _cc2.selectbox("Acción comprometida", reporte_proveedor.ACCIONES_PROVEEDOR, key="at_rep_c_accion")
-            _c_fecha = _cc3.text_input("Fecha compromiso (AAAA-MM-DD)", key="at_rep_c_fecha")
+            _c_fecha_sel = _cc3.date_input("Fecha compromiso", value=None, key="at_rep_c_fecha", format="DD/MM/YYYY")
+            _c_fecha = _c_fecha_sel.isoformat() if _c_fecha_sel else ""
             _c_todos = st.checkbox("Aplica a todos los modelos del bloque", key="at_rep_c_todos")
             _c_skus = st.multiselect("Modelos", _opts.get(_c_bloque, []), key="at_rep_c_skus", disabled=_c_todos)
             _c_nota = st.text_input("Nota (opcional)", key="at_rep_c_nota")

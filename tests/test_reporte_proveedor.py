@@ -488,3 +488,15 @@ def test_sobrestock_exhibicion_primero_y_escalado(tmp_path):
     fC = rp.bloques_marca("M", cob, _trans_sint(), corte="37", semana_iso="2026-37", cortes_prev=c37)["b2a"].set_index("sku")
     assert not fC.loc[201, "accion"].startswith("👁️") and fC.loc[201, "exhib_ya_probada"]
 
+
+def test_fecha_iso_normaliza_lo_que_escribe_daniela(bl):
+    """Notion rechazó '20/09/26' (validation_error, 20-sep). Cualquier formato manual → ISO; vacío → None."""
+    import datetime as dt
+    assert rp.fecha_iso("20/09/26") == "2026-09-20" and rp.fecha_iso("20/09/2026") == "2026-09-20"
+    assert rp.fecha_iso("2026-09-20") == "2026-09-20" and rp.fecha_iso("20.09.26") == "2026-09-20"
+    assert rp.fecha_iso(dt.date(2026, 9, 22)) == "2026-09-22" and rp.fecha_iso("") is None and rp.fecha_iso("ayer") is None
+    props = rp.props_notion_proveedor(bl, None, enviado=False, respuesta={"respondio": "Sí", "fecha_respuesta": "20/09/26", "compromisos": []})
+    assert props["Fecha respuesta"]["date"]["start"] == "2026-09-20"
+    props2 = rp.props_respuesta_solo("M", "2026-35", {"respondio": "Sí", "fecha_respuesta": "ayer", "compromisos": []})
+    assert "Fecha respuesta" not in props2
+

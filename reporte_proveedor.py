@@ -1427,6 +1427,25 @@ def score_respuesta(hechos: dict, respuesta: dict) -> dict:
             "cumplimiento_pct": round(n_cump / len(comps) * 100, 1) if comps else None}
 
 
+def fecha_iso(v) -> str | None:
+    """Cualquier fecha escrita a mano → 'AAAA-MM-DD' (Notion solo acepta ISO 8601). Acepta 20/09/26,
+    20-09-2026, 2026-09-20, objetos date/datetime. Vacío o inválido → None (Notion rechazaba '20/09/26'
+    con validation_error, visto por Franco 2026-09-20)."""
+    if v is None:
+        return None
+    if hasattr(v, "isoformat"):
+        return v.isoformat()[:10]
+    s = str(v).strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%m-%y", "%d.%m.%Y", "%d.%m.%y", "%Y/%m/%d"):
+        try:
+            return _datetime.strptime(s[:10], fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
 def props_notion_proveedor(bloques: dict, cmp: dict | None = None, enviado: bool = False, respuesta: dict | None = None,
                            fecha_envio: str | None = None) -> dict:
     """Propiedades de la fila marca × semana en 📈 Proveedores Capi (formato Notion vía notion_store.p_*)."""
@@ -1458,8 +1477,8 @@ def props_notion_proveedor(bloques: dict, cmp: dict | None = None, enviado: bool
     }
     if enviado:
         props["Enviado"] = ns.p_date((fecha_envio or _date.today().isoformat())[:10])
-    if resp.get("fecha_respuesta"):
-        props["Fecha respuesta"] = ns.p_date(str(resp["fecha_respuesta"])[:10])
+    if fecha_iso(resp.get("fecha_respuesta")):
+        props["Fecha respuesta"] = ns.p_date(fecha_iso(resp["fecha_respuesta"]))
     return props
 
 
@@ -1477,7 +1496,7 @@ def props_respuesta_solo(marca: str, semana_iso: str, respuesta: dict, hechos: d
              "Respuesta %": ns.p_number(sc.get("respuesta_pct")), "Cumplimiento %": ns.p_number(sc.get("cumplimiento_pct")),
              "Compromisos detalle": ns.p_text(_json.dumps(resp.get("compromisos") or [], ensure_ascii=False)[:ns.MAX_TEXTO]),
              "Notas": ns.p_text(str(resp.get("notas") or "")[:ns.MAX_TEXTO]), "Registrado desde": ns.p_select("nube" if ns.en_nube() else "laptop")}
-    if resp.get("fecha_respuesta"):
-        props["Fecha respuesta"] = ns.p_date(str(resp["fecha_respuesta"])[:10])
+    if fecha_iso(resp.get("fecha_respuesta")):
+        props["Fecha respuesta"] = ns.p_date(fecha_iso(resp["fecha_respuesta"]))
     return props
 
