@@ -716,7 +716,7 @@ def _hoja_o_vacia(writer, hoja: str, titulo: str, df: pd.DataFrame, formatos: di
 
 def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict | None = None) -> bytes:
     """Pestañas: Resumen · [0. Evolución] · 1. Venta Cero (SKU) · 1b. Venta Cero x Tienda · 2a. Sobrestock ·
-    2b. Transferencias tiendas · 2b. Detalle transferencias · 3. Ganadores · Leyenda. Todas construidas de los mismos DataFrames del
+    2b. Rutas tienda a tienda · 2b. Detalle transferencias · 3. Ganadores · 3b. Venta perdida · Leyenda. Todas construidas de los mismos DataFrames del
     correo; los totales del Resumen salen de `hechos`. Con `cortes`/`cmp` (comparar_marca) agrega la
     hoja 0 (serie KPI × semana) y la columna "Semanas en el bloque" en 1, 2a y 3."""
     import io
@@ -754,8 +754,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             ("1. Venta Cero (SKU)", "Modelos con stock que NO vendieron ni una unidad en toda la cadena la última semana, en dos grupos: sin venta en las últimas 4 semanas y los que vendían y pararon. ⭐ = concentran el 80% del capital de su grupo. Con la venta del modelo de las 4 últimas semanas y el descuento sugerido (nunca menor al actual)."),
             ("1b. Venta Cero x Tienda", "Los mismos modelos de la pestaña 1, tienda por tienda: dónde está el stock, qué prioridad tiene en esa tienda (⭐ = 80% del capital sin venta de la tienda), la venta de esa tienda en las 4 últimas semanas (de los snapshots; si no hay, la del modelo en cadena), y la acción de piso (etiquetar, cartel o revisar exhibición)."),
             ("2a. Sobrestock", "Modelos que venden pero cargan de más a nivel cadena (cobertura ≥ 26 semanas) o entran en liquidación: acción sugerida por modelo (markdown compartido, canje/devolución, frenar ingreso)."),
-            ("2b. Transferencias tiendas", "Modelos con stock donde no rota y faltante donde sí: unidades a mover entre tiendas (≥12 uds por modelo, con demanda en destino), resumen por modelo. El traslado lo ejecuta y lo asume la marca, por eso no se resta flete."),
-            ("2b. Rutas tienda a tienda", "Cuánto se mueve de cada tienda origen a cada tienda destino: modelos, unidades, costo total y valor venta, con fila TOTAL."),
+            ("2b. Rutas tienda a tienda", "Transferencias entre tiendas que ejecuta la marca (modelos con ≥12 uds a mover y demanda en destino; sin flete Ripley): cuánto se mueve de cada tienda origen a cada tienda destino, con modelos, unidades, costo total y valor venta, y fila TOTAL."),
             ("2b. Detalle transferencias", "El detalle de esas transferencias: cuántas unidades de cada modelo salen de qué tienda y llegan a cuál, con stock, venta semanal y cobertura antes/después en ambas tiendas. La cantidad busca dejar ambas en 12 semanas de cobertura."),
             ("3. Ganadores", "Modelos con buena rotación y poca cobertura (≤ 8 semanas) o acelerando: necesidad calculada, stock en CD y acción (reponer desde CD / reorden)."),
             ("3b. Venta perdida", "La venta perdida de la última semana de TODA la marca, SKU por tienda en quiebre (cobertura ≤ 4 semanas): cuánto vendió, cuánto dejó de vender (banda mín–máx), stock en CD y acción. Es el indicador del cuadro de evolución."),
@@ -838,12 +837,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
                 d2.insert(min(13, len(d2.columns)), "Semanas en el bloque", r2.values)
         _hoja_o_vacia(w, "2a. Sobrestock", f"{marca} — Sobrestock y liquidación a nivel cadena (venden, pero cargan de más) · corte {corte}",
                       d2, {**reportes_marcas._FMTS_PRECIO, "% acum.": _F["PCT"]}, chips_col="Estado")
-        # 2b
-        c3 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("estado_cadena", "Estado"), ("transf_uds", "Uds a mover"), ("transf_tiendas", "Tiendas destino"),
-              ("transf_valor", "Valor S/ (venta)"), ("transf_ganancia", "Contribución esperada S/ (sin flete)"), ("stock_cadena", "Stock (uds)"), ("cobertura_cadena", "Cobertura (sem)"), ("accion", "Acción sugerida")]
-        d3 = b2b[[a for a, _ in c3 if a in b2b.columns]].rename(columns=dict(c3)) if not b2b.empty else pd.DataFrame()
-        _hoja_o_vacia(w, "2b. Transferencias tiendas", f"{marca} — Transferencias entre tiendas que ejecuta la marca, resumen por modelo (≥{reportes_marcas.TRANSF_MIN_UDS} uds y demanda en destino; sin flete Ripley) · corte {corte}",
-                      d3, {"Uds a mover": _F["S"], "Valor S/ (venta)": _F["S"], "Contribución esperada S/ (sin flete)": _F["S"], "Stock (uds)": _F["S"], "Cobertura (sem)": _F["C"]}, chips_col="Estado")
+        # 2b: el consolidado por modelo se retiró del Excel (Franco 20-sep: todo se ve en el detalle); queda en el correo y en la app
         # 2b rutas: cuadro tienda origen → tienda destino
         rutas = bloques.get("b2b_rutas", pd.DataFrame())
         d3r = rutas.rename(columns={"tienda_origen": "Tienda origen", "tienda_destino": "Tienda destino", "modelos": "Modelos", "uds": "Uds a mover",
@@ -865,7 +859,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
         d3d = det[[a for a, _ in orden_det if a in det.columns]].rename(columns=dict(orden_det)) if det is not None and not det.empty else pd.DataFrame()
         _hoja_o_vacia(w, "2b. Detalle transferencias",
                       f"{marca} — Detalle de las transferencias, tienda origen → tienda destino. Cantidad = min(exceso origen, déficit destino) con cobertura objetivo de 12 semanas "
-                      f"(exceso = stock − 12 × venta/sem; déficit = 12 × venta/sem − stock). Suma por modelo = 'Uds a mover' de la pestaña anterior · corte {corte}",
+                      f"(exceso = stock − 12 × venta/sem; déficit = 12 × venta/sem − stock). Suma por modelo = 'Uds a mover' del bloque 2b del correo · corte {corte}",
                       d3d, {"Uds a mover": _F["S"], "Costo total S/": _F["S"], "Valor venta S/": _F["S"], "Uds vendibles 8 sem": _F["C"], "Contribución esperada S/ (sin flete)": _F["S"], "Stock origen": _F["S"], "Stock destino": _F["S"], "Vta/sem origen": "0.00", "Vta/sem destino": "0.00",
                             "Cob origen antes (sem)": _F["C"], "Cob origen después (sem)": _F["C"], "Cob destino antes (sem)": _F["C"], "Cob destino después (sem)": _F["C"], "Precio": _F["P"]})
         # 3

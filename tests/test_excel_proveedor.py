@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 import reporte_proveedor as rp
 from test_reporte_proveedor import _alertas_sint, _cob, _rep_sint, _trans_sint, _vp_sint
 
-HOJAS = ["Resumen", "1. Venta Cero (SKU)", "1b. Venta Cero x Tienda", "2a. Sobrestock", "2b. Transferencias tiendas", "2b. Rutas tienda a tienda", "2b. Detalle transferencias", "3. Ganadores", "3b. Venta perdida", "Leyenda"]
+HOJAS = ["Resumen", "1. Venta Cero (SKU)", "1b. Venta Cero x Tienda", "2a. Sobrestock", "2b. Rutas tienda a tienda", "2b. Detalle transferencias", "3. Ganadores", "3b. Venta perdida", "Leyenda"]
 
 
 @pytest.fixture(scope="module")
@@ -26,7 +26,7 @@ def _col(ws, header):
 def test_hojas_y_formato(wb_bl):
     wb, bl = wb_bl
     assert wb.sheetnames == HOJAS
-    for h in HOJAS[1:9]:
+    for h in HOJAS[1:8]:
         ws = wb[h]
         assert ws.freeze_panes == "A3" and "M —" in str(ws["A1"].value) and "30.08.2026" in str(ws["A1"].value)
     assert [c.value for c in wb["1. Venta Cero (SKU)"][2]][:3] == ["SKU", "Producto", "Línea"]
@@ -38,7 +38,6 @@ def test_excel_cuadra_con_bloques(wb_bl):
     assert sum(_col(wb["1. Venta Cero (SKU)"], "Capital S/ (costo)")) == pytest.approx(h["b1"]["capital"])
     assert len(_col(wb["1. Venta Cero (SKU)"], "SKU")) == h["b1"]["n_skus"]
     assert sum(_col(wb["2a. Sobrestock"], "Capital S/ (costo)")) == pytest.approx(h["b2a"]["capital"])
-    assert sum(_col(wb["2b. Transferencias tiendas"], "Uds a mover")) == h["b2b"]["uds"]
     assert sum(_col(wb["2b. Detalle transferencias"], "Uds a mover")) == h["b2b"]["uds"]      # detalle origen→destino suma lo mismo
     assert set(_col(wb["2b. Detalle transferencias"], "Tienda destino")) == {"T3", "T2"}
     rutas = wb["2b. Rutas tienda a tienda"]
