@@ -354,3 +354,21 @@ def test_upsert_proveedor_actualiza_no_duplica(monkeypatch):
     assert r2["ok"] and not r2["creada"] and llamadas["actualizar"][0][0] == "pg1" and len(llamadas["crear"]) == 1
     monkeypatch.setattr(ns, "token", lambda: "")
     assert ns.upsert_proveedor("M", "2026-35", props)["error"] == "sin NOTION_TOKEN"
+
+
+def test_venta_tienda_4sem_desde_snapshots(tmp_path, monkeypatch):
+    """1b trae la venta por tienda de las 4 semanas hasta el corte desde tienda.parquet; códigos → nombres;
+    semanas sin snapshot quedan NaN; sin ningún snapshot no se agregan columnas."""
+    monkeypatch.setenv("CAPI_SNAPSHOTS_DIR", str(tmp_path))
+    import importlib, reporte_proveedor as rpm
+    importlib.reload(rpm)
+    import transformar_profundidad as etl
+    cod = next(k for k, v in etl.STORE_NAMES.items() if v == "Jockey Plaza")
+    for sem, v in (("2026-35", 0), ("2026-34", 2), ("2026-32", 5)):          # falta la 33
+        d = tmp_path / sem; d.mkdir()
+        pd.DataFrame({"semana_iso": [sem, sem], "sku": ["0101", "999"], "tienda": [cod, cod], "stock_uds": [3, 1], "vta_uds_sem": [v, 9]}).to_parquet(d / "tienda.parquet")
+    vt = rpm.venta_tienda_4sem("2026-35", [101])
+    r = vt.set_index(["sku", "tienda"]).loc[("101", "Jockey Plaza")]
+    assert r["vt_sem1"] == 0 and r["vt_sem2"] == 2 and pd.isna(r["vt_sem3"]) and r["vt_sem4"] == 5
+    assert rpm.venta_tienda_4sem("2020-01", [101]).empty
+    importlib.reload(rpm)

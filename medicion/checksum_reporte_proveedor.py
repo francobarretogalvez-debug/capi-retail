@@ -49,10 +49,10 @@ def cargar(base):
     return motor_v2.run_analysis(pl)
 
 
-def checksum_marca(res, marca, df_vp, corte, salida=None):
+def checksum_marca(res, marca, df_vp, corte, salida=None, semana_iso=""):
     args = (marca, res["cobertura"], res["reposiciones"], res["transferencias"], res["acciones_precio"], res["alertas"], corte, df_vp)
     wb9 = load_workbook(io.BytesIO(rm.generar_reporte_marca(*args)))
-    bl = rp.bloques_marca(marca, res["cobertura"], res["transferencias"], df_vp, res["acciones_precio"], res["reposiciones"], res["alertas"], corte=corte)
+    bl = rp.bloques_marca(marca, res["cobertura"], res["transferencias"], df_vp, res["acciones_precio"], res["reposiciones"], res["alertas"], corte=corte, semana_iso=semana_iso)
     xb = rp.excel_proveedor(bl); wbp = load_workbook(io.BytesIO(xb))
     h = bl["hechos"]; filas = []
     def add(nombre, a, b, ok=None, nota=""):
@@ -60,9 +60,12 @@ def checksum_marca(res, marca, df_vp, corte, salida=None):
         filas.append({"cuadre": nombre, "9 hojas": a, "bloques": b, "OK": "✅" if ok else "❌", "nota": nota})
         return ok
     oks = []
-    cap9 = sum(v or 0 for v in _col(wb9["5. Venta Cero"], "Capital S/")) if "5. Venta Cero" in wb9.sheetnames else 0
     capp = sum(v or 0 for v in _col(wbp["1b. Venta Cero x Tienda"], "Capital S/"))
-    oks.append(add("Capital venta cero x tienda (hoja 5 vs 1b)", round(cap9), round(capp)))
+    oks.append(add("Capital 1b (detalle por tienda) vs B1 (correo)", round(float(bl["b1"]["capital_costo"].sum())) if not bl["b1"].empty else 0, round(capp)))
+    h5 = set(zip(_col(wb9["5. Venta Cero"], "Tienda"), [int(x) for x in _col(wb9["5. Venta Cero"], "SKU")])) if "5. Venta Cero" in wb9.sheetnames else set()
+    vc = bl["vc_tienda"]; duros = vc[vc["grupo"] == rp.GRUPO_B1_4SEM] if not vc.empty else vc
+    falt = [(t_, s_) for t_, s_ in zip(duros["tienda"], duros["sku"]) if (t_, int(s_)) not in h5] if not duros.empty else []
+    oks.append(add("Filas del grupo 'sin venta 4 sem' presentes en hoja 5 (9 pestañas)", len(duros), len(duros) - len(falt), ok=not falt, nota=f"faltantes={falt[:3]}"))
     oks.append(add("Capital B1 hoja '1. Venta Cero (SKU)' vs hechos", round(sum(v or 0 for v in _col(wbp["1. Venta Cero (SKU)"], "Capital S/ (costo)"))), h["b1"]["capital"]))
     oks.append(add("Capital B2a hoja '2a' vs hechos", round(sum(v or 0 for v in _col(wbp["2a. Sobrestock"], "Capital S/ (costo)"))), h["b2a"]["capital"]))
     h4 = {int(k): int(v) for k, v in zip(_col(wb9["4. Transferir"], "SKU"), _col(wb9["4. Transferir"], "Uds a mover"))} if "4. Transferir" in wb9.sheetnames else {}
@@ -111,12 +114,18 @@ def main():
     except Exception as e:
         df_vp = None; print(f"[df_vp] no disponible: {e}")
     corte = str(etl.fecha_corte_desde_nombre(os.path.basename(a.base)) or "s-f").replace("/", ".")
+    try:
+        from snapshots_engine import tienda as _tsem
+        semana_iso = _tsem.semana_de_nombre(os.path.basename(a.base)) or ""
+    except Exception:
+        semana_iso = ""
+    print(f"[semana] {semana_iso or 'no detectada (1b sin venta por tienda)'}")
     marcas = rm.marcas_reporte(res["cobertura"]) if a.marca.upper() == "ALL" else [a.marca]
     todo_ok = True
     for m in marcas:
         if rp.slice_marca(res["cobertura"], m).empty:
             print(f"\n== {m}: sin filas en la base"); continue
-        df, ok, h = checksum_marca(res, m, df_vp, str(corte), a.salida)
+        df, ok, h = checksum_marca(res, m, df_vp, str(corte), a.salida, semana_iso)
         todo_ok &= ok
         print(f"\n== {m} · B1 {h['b1']['n_skus']} / B2a {h['b2a']['n_skus']} / B2b {h['b2b']['n_skus']} / B3 {h['b3']['n_skus']} · {'OK' if ok else 'FALLA'}")
         print(df.to_string(index=False))

@@ -54,18 +54,25 @@ def _marcas(ctx):
     return [m for m in rm.marcas_reporte(ctx["cobertura"]) if not rp.slice_marca(ctx["cobertura"], m).empty][:6]
 
 
-def test_cuadre_venta_cero_vs_hoja5():
+def test_cuadre_venta_cero_1b_vs_correo_y_hoja5():
+    """1b es el detalle por tienda de los modelos del correo: su capital == capital de B1 (exacto).
+    El grupo 'sin venta 4 semanas' de B1 tiene todas sus tiendas sin venta en 4 semanas → cada una de
+    sus filas está en la hoja '5. Venta Cero' del reporte de 9 pestañas (misma base, motor_v2)."""
     ctx = _res()
+    n = 0
     for marca in _marcas(ctx):
         wb9, wbp, bl = _ambos(ctx, marca)
-        cap9 = sum(v or 0 for v in _col(wb9["5. Venta Cero"], "Capital S/")) if "5. Venta Cero" in wb9.sheetnames else 0
+        b1, vc = bl["b1"], bl["vc_tienda"]
         capp = sum(v or 0 for v in _col(wbp["1b. Venta Cero x Tienda"], "Capital S/"))
-        assert capp == pytest.approx(cap9), marca                     # misma función, igualdad exacta
-        assert capp == pytest.approx(bl["vc_tienda"]["stock_valor_costo"].sum()), marca
-        # B1 (cadena, última semana) es un subconjunto de los SKUs con alguna tienda sin venta
-        if not bl["b1"].empty and not bl["vc_tienda"].empty:
-            b1_4sem = bl["b1"][bl["b1"]["semanas_sin_venta"] == "4+"]
-            assert set(b1_4sem["sku"]) <= set(bl["vc_tienda"]["sku"]), marca
+        assert capp == pytest.approx(b1["capital_costo"].sum()), marca
+        assert set(vc["sku"]) == set(b1["sku"]), marca
+        if "5. Venta Cero" in wb9.sheetnames and not b1.empty:
+            h5 = set(zip(_col(wb9["5. Venta Cero"], "Tienda"), [int(x) for x in _col(wb9["5. Venta Cero"], "SKU")]))
+            duros = vc[vc["grupo"] == rp.GRUPO_B1_4SEM]
+            for tienda, sku in zip(duros["tienda"], duros["sku"]):
+                n += 1
+                assert (tienda, int(sku)) in h5, (marca, tienda, sku)
+    assert n > 0
 
 
 def test_cuadre_transferencias_hoja4():

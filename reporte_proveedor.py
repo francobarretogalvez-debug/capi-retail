@@ -112,13 +112,18 @@ def por_sku(dfm: pd.DataFrame) -> pd.DataFrame:
     por = dfm.groupby("sku")
     extra = pd.DataFrame({
         "vta_sem1": por[ "vta_sem1_total"].first() if "vta_sem1_total" in dfm.columns else por["prom_vta_uds"].sum(),
+        "vta_sem2": por["vta_sem2_total"].first() if "vta_sem2_total" in dfm.columns else np.nan,
+        "vta_sem3": por["vta_sem3_total"].first() if "vta_sem3_total" in dfm.columns else np.nan,
+        "vta_sem4": por["vta_sem4_total"].first() if "vta_sem4_total" in dfm.columns else np.nan,
         "n_tiendas_stock": dfm[dfm["stock_total"] > 0].groupby("sku")["tienda"].nunique(),
+        "n_tiendas_venta4": dfm[dfm["prom_vta_uds"].fillna(0) > 0].groupby("sku")["tienda"].nunique(),
         "n_tiendas_quiebre": dfm.assign(_q=dfm["estado"].isin(ESTADOS_QUIEBRE)).groupby("sku")["_q"].sum(),
         "stock_cd": por["stock_cd"].first() if "stock_cd" in dfm.columns else 0,
         "rango_antiguedad": por["rango_antiguedad"].first() if "rango_antiguedad" in dfm.columns else None,
     })
     g1 = g1.merge(extra, left_on="sku", right_index=True, how="left")
     g1["n_tiendas_stock"] = g1["n_tiendas_stock"].fillna(0).astype(int)
+    g1["n_tiendas_venta4"] = g1["n_tiendas_venta4"].fillna(0).astype(int)
     g1["n_tiendas_quiebre"] = g1["n_tiendas_quiebre"].fillna(0).astype(int)
     g1["pct_tiendas_quiebre"] = np.where(g1["n_tiendas"] > 0, g1["n_tiendas_quiebre"] / g1["n_tiendas"], 0.0)
     g1["estado_cadena"] = taxonomia.classify_series(g1["cobertura_cadena"], g1["edad_semanas"], g1["rango_antiguedad"])
@@ -152,21 +157,97 @@ def _tendencia(g: pd.DataFrame, df_alertas: pd.DataFrame | None) -> pd.Series:
 
 
 # ── Bloque 1: venta cero de cadena, última semana ─────────────────────────────
+COLS_DETALLE_TIENDA = ["tienda", "sku", "nombre", "categoria", "grupo", "stock_total", "stock_valor_costo", "pct_acum_tienda", "top_80",
+                       "vta_sem1", "vta_sem2", "vta_sem3", "vta_sem4", "vt_sem1", "vt_sem2", "vt_sem3", "vt_sem4",
+                       "precio_vigente", "pct_descuento", "tipo_evento", "edad_semanas", "accion"]
+
+
+def venta_tienda_4sem(semana_iso: str, skus, base_dir: str | None = None) -> pd.DataFrame:
+    """Venta semanal POR TIENDA de las 4 semanas hasta `semana_iso` (incluida), leída de
+    snapshots/<sem>/tienda.parquet (pedido Franco 2026-09-19). Columnas vt_sem1 (la última) .. vt_sem4.
+    Tiendas en código (JP, AQP…) se traducen al nombre del df_cob con STORE_NAMES. Semanas sin
+    snapshot quedan en NaN; si no hay ninguna, devuelve vacío y la pestaña 1b sale sin esas columnas."""
+    if not semana_iso or "-" not in str(semana_iso):
+        return pd.DataFrame()
+    try:
+        from transformar_profundidad import STORE_NAMES
+    except Exception:
+        STORE_NAMES = {}
+    base = base_dir or _SNAPSHOTS_DIR
+    keys = {sku_key(s) for s in skus}
+    semanas, w = [], str(semana_iso)
+    for _ in range(4):
+        semanas.append(w); w = _semana_anterior(w)
+    partes = []
+    for i, sem in enumerate(semanas, start=1):
+        ruta = _os.path.join(base, sem, "tienda.parquet")
+        if not _os.path.exists(ruta):
+            continue
+        try:
+            d = pd.read_parquet(ruta, columns=["sku", "tienda", "vta_uds_sem"])
+        except Exception:
+            continue
+        d["sku"] = d["sku"].map(sku_key); d = d[d["sku"].isin(keys)]
+        d["tienda"] = d["tienda"].map(lambda x: STORE_NAMES.get(x, x))
+        partes.append(d.groupby(["sku", "tienda"])["vta_uds_sem"].sum().rename(f"vt_sem{i}"))
+    if not partes:
+        return pd.DataFrame()
+    out = pd.concat(partes, axis=1).reset_index()
+    for i in (1, 2, 3, 4):
+        if f"vt_sem{i}" not in out.columns:
+            out[f"vt_sem{i}"] = np.nan
+    return out[["sku", "tienda", "vt_sem1", "vt_sem2", "vt_sem3", "vt_sem4"]]
+
+
+def detalle_tienda_b1(dfm: pd.DataFrame, b1: pd.DataFrame, tipo_evento_map: dict | None = None, semana_iso: str = "") -> pd.DataFrame:
+    """Pestaña 1b: una fila por modelo de B1 × tienda con stock. Por definición cada fila vendió 0 en
+    esa tienda la última semana (el modelo vendió 0 en toda la cadena). Pareto 80% del capital POR
+    TIENDA (lo que la tienda debe atacar primero), acción de piso del módulo 📲 y la venta semanal
+    del modelo a nivel cadena (sem -1..-4) para ver cómo venía vendiendo. Es el mismo universo que
+    `detalle_lote` (lo que se mide como activación la semana siguiente)."""
+    if b1.empty or dfm.empty:
+        return pd.DataFrame(columns=COLS_DETALLE_TIENDA)
+    d = dfm[dfm["sku"].isin(b1["sku"]) & (dfm["stock_total"].fillna(0) > 0)].copy()
+    if d.empty:
+        return pd.DataFrame(columns=COLS_DETALLE_TIENDA)
+    info = b1.set_index("sku")
+    d["grupo"] = d["sku"].map(info["grupo"])
+    for i in (1, 2, 3, 4):
+        d[f"vta_sem{i}"] = d["sku"].map(info[f"vta_sem{i}"]) if f"vta_sem{i}" in info.columns else np.nan
+    d["tipo_evento"] = d["sku"].map(tipo_evento_map or {}).fillna("") if tipo_evento_map else ""
+    d["accion"] = d.apply(vistas_excel._accion_venta_cero, axis=1)
+    vt = venta_tienda_4sem(semana_iso, d["sku"]) if semana_iso else pd.DataFrame()
+    if not vt.empty:
+        d["_k"] = d["sku"].map(sku_key)
+        d = d.merge(vt, left_on=["_k", "tienda"], right_on=["sku", "tienda"], how="left", suffixes=("", "_vt")).drop(columns=[c for c in ("sku_vt", "_k") if c in d.columns] or [])
+    d = d.sort_values(["tienda", "stock_valor_costo"], ascending=[True, False], kind="mergesort")
+    tot = d.groupby("tienda")["stock_valor_costo"].transform("sum")
+    acum = d.groupby("tienda")["stock_valor_costo"].cumsum() / tot.replace(0, np.nan)
+    share = d["stock_valor_costo"] / tot.replace(0, np.nan)
+    d["pct_acum_tienda"] = acum.fillna(0)
+    d["top_80"] = np.where((acum - share).fillna(0).round(6) < PARETO, "⭐ TOP 80%", "")
+    for c in COLS_DETALLE_TIENDA:
+        if c not in d.columns:
+            d[c] = np.nan
+    return d[COLS_DETALLE_TIENDA].reset_index(drop=True)
+
+
 def bloque_venta_cero(g: pd.DataFrame, dfm: pd.DataFrame, precio_min_map: dict | None = None,
-                      tipo_evento_map: dict | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(b1, vc_tienda). b1 = SKUs con stock y SIN venta en toda la cadena la última semana,
-    Pareto 80% del capital dentro de la marca. vc_tienda = detalle por tienda del módulo
-    📲 (vistas_excel.venta_cero) para la ejecución en piso — se adjunta, no se rankea."""
-    vc_tienda = vistas_excel.venta_cero(dfm, min_capital=0, tipo_evento_map=tipo_evento_map)
+                      tipo_evento_map: dict | None = None, semana_iso: str = "") -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(b1, vc_tienda). b1 = SKUs con stock y SIN venta en toda la cadena la última semana, en dos
+    grupos (sin venta 4 semanas · vendía y paró), Pareto 80% por grupo. vc_tienda = detalle por
+    tienda de esos mismos modelos (detalle_tienda_b1), que va a la pestaña 1b y al lote de K1."""
     if g.empty:
-        return g, vc_tienda
+        return g, pd.DataFrame(columns=COLS_DETALLE_TIENDA)
     b1 = g[(g["vta_sem1"].fillna(0) <= 0) & (g["stock_cadena"] > 0)].copy()
     b1 = _con_precio(b1, precio_min_map)
     if b1.empty:
-        return b1, vc_tienda
+        return b1, pd.DataFrame(columns=COLS_DETALLE_TIENDA)
     # Dos grupos (Franco 2026-09-19): sin venta en las 4 últimas semanas vs vendía y paró la última.
     # Pareto 80% DENTRO de cada grupo: cada lista tiene su propio TOP.
-    b1["semanas_sin_venta"] = np.where(b1["vta_sem_prom4"] <= 0, "4+", "1")
+    # "4+" = cero en la cadena las 4 semanas Y ninguna tienda con venta positiva en 4 semanas (una
+    # tienda puede tener +0.25 con devoluciones en otra que netean a 0: eso es "vendía y paró").
+    b1["semanas_sin_venta"] = np.where((b1["vta_sem_prom4"] <= 0) & (b1["n_tiendas_venta4"] <= 0), "4+", "1")
     b1["grupo"] = np.where(b1["semanas_sin_venta"] == "4+", GRUPO_B1_4SEM, GRUPO_B1_PARO)
     b1["pct_acum"] = 0.0; b1["top_80"] = False
     for gname, idx in b1.groupby("grupo").groups.items():
@@ -185,7 +266,7 @@ def bloque_venta_cero(g: pd.DataFrame, dfm: pd.DataFrame, precio_min_map: dict |
     b1["accion"] = b1.apply(_acc, axis=1)
     b1["_g"] = (b1["grupo"] != GRUPO_B1_4SEM).astype(int)
     b1 = b1.sort_values(["_g", "top_80", "capital_costo"], ascending=[True, False, False]).drop(columns="_g").reset_index(drop=True)
-    return b1, vc_tienda
+    return b1, detalle_tienda_b1(dfm, b1, tipo_evento_map, semana_iso)
 
 
 # ── Bloque 2a: sobrestock de cadena · 2b: desbalance entre tiendas ────────────
@@ -392,7 +473,7 @@ def bloques_marca(marca: str, df_cob: pd.DataFrame, df_trans: pd.DataFrame | Non
     if df_prec is not None and not df_prec.empty and "precio_minimo" in df_prec.columns:
         pm = df_prec[df_prec["sku"].isin(dfm["sku"])]
         precio_min_map = pm.drop_duplicates("sku").set_index("sku")["precio_minimo"].to_dict()
-    b1, vc_tienda = bloque_venta_cero(g, dfm, precio_min_map, tipo_evento_map)
+    b1, vc_tienda = bloque_venta_cero(g, dfm, precio_min_map, tipo_evento_map, semana_iso)
     ex = set(b1["sku"]) if not b1.empty else set()
     b2a, b2b = bloque_sobrestock(g, ex, df_trans, precio_min_map, df_alertas)
     ex2 = ex | (set(b2a["sku"]) if not b2a.empty else set())
@@ -610,6 +691,20 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
         ws.cell(row=fila + 1, column=1, value=f"Los bloques 1 y 2a suman S/ {h['b1']['capital'] + h['b2a']['capital']:,} = {round((h['b1']['capital'] + h['b2a']['capital']) / foto['capital_total'] * 100, 1) if foto['capital_total'] else 0}% del capital de la marca. Un modelo aparece en un solo bloque.")
         ws.cell(row=fila + 2, column=1, value=reportes_marcas._SUPUESTOS)
         ws.cell(row=fila + 3, column=1, value="Cifras al corte de la base (no a la fecha de envío). Generado por Capi.")
+        fila += 5
+        ws.cell(row=fila, column=1, value="Qué contiene cada pestaña").font = vistas_excel.F_TITULO
+        guia = [
+            ("0. Evolución", "Serie semana a semana de los indicadores de cada frente (solo con reportes anteriores enviados con Capi)."),
+            ("1. Venta Cero (SKU)", "Modelos con stock que NO vendieron ni una unidad en toda la cadena la última semana, en dos grupos: sin venta en las últimas 4 semanas y los que vendían y pararon. ⭐ = concentran el 80% del capital de su grupo. Con la venta del modelo de las 4 últimas semanas y el descuento sugerido (nunca menor al actual)."),
+            ("1b. Venta Cero x Tienda", "Los mismos modelos de la pestaña 1, tienda por tienda: dónde está el stock, qué prioridad tiene en esa tienda (⭐ = 80% del capital sin venta de la tienda), la venta de las 4 últimas semanas del modelo (cadena) y de esa tienda (snapshots), y la acción de piso (etiquetar, cartel o revisar exhibición)."),
+            ("2a. Sobrestock", "Modelos que venden pero cargan de más a nivel cadena (cobertura ≥ 26 semanas) o entran en liquidación: acción sugerida por modelo (markdown compartido, canje/devolución, frenar ingreso)."),
+            ("2b. Desbalance tiendas", "Modelos con stock donde no rota y faltante donde sí: unidades a mover entre tiendas con ganancia neta positiva después del flete (≥12 uds por modelo)."),
+            ("3. Ganadores", "Modelos con buena rotación y poca cobertura (≤ 8 semanas) o acelerando: necesidad calculada, stock en CD y acción (reponer desde CD / reorden)."),
+            ("Leyenda", "Cómo se calculan los estados, la pirámide de descuentos por antigüedad, el piso de margen y las reglas de transferencia."),
+        ]
+        for i, (hoja_n, desc) in enumerate(guia, start=1):
+            ws.cell(row=fila + i, column=1, value=hoja_n).font = vistas_excel.F_HEADER
+            ws.cell(row=fila + i, column=2, value=desc)
         # 0. Evolución (solo si hay cortes previos reales)
         if cortes is not None and not cortes.empty:
             serie = serie_kpis(cortes, bloques)
@@ -628,6 +723,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
         # 1
         c1 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("grupo", "Grupo"), ("temporada", "Temporada"), ("estado_cadena", "Estado"), ("n_tiendas_stock", "Tiendas con stock"),
               ("stock_cadena", "Stock (uds)"), ("capital_costo", "Capital S/ (costo)"), ("pct_acum", "% acum."), ("top_80", "Prioridad"), ("semanas_sin_venta", "Sem sin venta"),
+              ("vta_sem1", "Vta sem -1 (cadena)"), ("vta_sem2", "Vta sem -2"), ("vta_sem3", "Vta sem -3"), ("vta_sem4", "Vta sem -4"),
               ("edad_semanas", "Edad (sem)"), ("pct_descuento", "Dscto actual"), ("dscto_piramide", "Dscto pirámide"), ("dscto_sugerido", "Dscto sugerido"), ("precio_vigente", "P. Vigente"),
               ("precio_sugerido", "P. Sugerido"), ("precio_minimo", "P. Mínimo (piso)"), ("accion", "Acción sugerida")]
         d1 = b1[[a for a, _ in c1 if a in b1.columns]].rename(columns=dict(c1)).copy() if not b1.empty else pd.DataFrame()
@@ -638,14 +734,25 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
                 d1.insert(min(11, len(d1.columns)), "Semanas en el bloque", r1.values)
         _hoja_o_vacia(w, "1. Venta Cero (SKU)", f"{marca} — Modelos con stock y SIN venta la última semana en toda la cadena · ⭐ = concentran el 80% del capital · corte {corte}",
                       d1, {"Stock (uds)": _F["S"], "Capital S/ (costo)": _F["S"], "% acum.": _F["PCT"], "Edad (sem)": "0", "Dscto actual": _F["PCT"], "Dscto pirámide": _F["PCT"], "Dscto sugerido": _F["PCT"],
+                           "Vta sem -1 (cadena)": _F["S"], "Vta sem -2": _F["S"], "Vta sem -3": _F["S"], "Vta sem -4": _F["S"],
                            "P. Vigente": _F["P"], "P. Sugerido": _F["P"], "P. Mínimo (piso)": _F["P"]}, chips_col="Estado")
-        # 1b
+        # 1b: detalle por tienda de los modelos del bloque 1
         vc = bloques["vc_tienda"]
-        if vc is not None and not vc.empty:
-            vistas_excel.hoja_venta_cero(w, vc, hoja="1b. Venta Cero x Tienda",
-                                         titulo=f"{marca} — Detalle por tienda: SKU con stock y sin venta en esa tienda (⭐ TOP 80% del capital sin venta de la tienda) · corte {corte}")
-        else:
-            _hoja_o_vacia(w, "1b. Venta Cero x Tienda", f"{marca} — sin combos SKU×tienda sin venta · corte {corte}", pd.DataFrame(), {})
+        ren1b = {"tienda": "Tienda", "sku": "SKU", "nombre": "Producto", "categoria": "Línea", "grupo": "Grupo", "stock_total": "Stock (uds)",
+                 "stock_valor_costo": "Capital S/", "pct_acum_tienda": "% acum. en tienda", "top_80": "Prioridad en tienda",
+                 "vta_sem1": "Vta sem -1 (cadena)", "vta_sem2": "Vta sem -2", "vta_sem3": "Vta sem -3", "vta_sem4": "Vta sem -4",
+                 "vt_sem1": "Vta tienda sem -1", "vt_sem2": "Vta tienda sem -2", "vt_sem3": "Vta tienda sem -3", "vt_sem4": "Vta tienda sem -4",
+                 "precio_vigente": "Precio", "pct_descuento": "Dscto", "tipo_evento": "Tipo evento", "edad_semanas": "Edad (sem)", "accion": "Acción de piso"}
+        d1b = vc.rename(columns=ren1b) if vc is not None and not vc.empty else pd.DataFrame()
+        if not d1b.empty:
+            _vt_cols = [c for c in d1b.columns if c.startswith("Vta tienda")]
+            if _vt_cols and d1b[_vt_cols].isna().all().all():
+                d1b = d1b.drop(columns=_vt_cols)          # sin snapshots: no mostrar columnas vacías
+        _hoja_o_vacia(w, "1b. Venta Cero x Tienda",
+                      f"{marca} — Los modelos del bloque 1, tienda por tienda: dónde está el stock que no vendió la última semana (⭐ = concentra el 80% del capital sin venta de esa tienda) · corte {corte}",
+                      d1b, {"Stock (uds)": _F["S"], "Capital S/": _F["S"], "% acum. en tienda": "0%", "Vta sem -1 (cadena)": _F["S"], "Vta sem -2": _F["S"],
+                            "Vta sem -3": _F["S"], "Vta sem -4": _F["S"], "Vta tienda sem -1": _F["S"], "Vta tienda sem -2": _F["S"], "Vta tienda sem -3": _F["S"],
+                            "Vta tienda sem -4": _F["S"], "Precio": _F["P"], "Dscto": "0%", "Edad (sem)": "0"})
         # 2a
         c2 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("temporada", "Temporada"), ("grupo", "Grupo"), ("estado_cadena", "Estado"), ("tendencia", "Tendencia"),
               ("stock_cadena", "Stock (uds)"), ("vta_sem_prom4", "Vta sem (prom 4)"), ("cobertura_cadena", "Cobertura (sem)"), ("capital_costo", "Capital S/ (costo)"),
