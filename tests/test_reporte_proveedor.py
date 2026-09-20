@@ -305,6 +305,7 @@ def test_comparar_marca(tmp_path):
     serie = rp.serie_kpis(rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path)), b36)
     assert list(serie.columns) == ["2026-34", "2026-35", "2026-36"] and serie.loc["Venta cero — modelos"].tolist() == [3, 3, 2]
     assert serie.shape[0] == 10 and serie.loc["Transferencias — contribución esperada S/"].tolist() == [149, 149, 149]
+    assert serie.loc["Venta perdida por quiebre S/ (máx, toda la marca)"].tolist() == [230, 230, 230]
 
 
 def test_corte_previo_no_enviado_cambia_el_texto(tmp_path):

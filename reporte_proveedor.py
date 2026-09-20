@@ -522,11 +522,21 @@ def bloques_marca(marca: str, df_cob: pd.DataFrame, df_trans: pd.DataFrame | Non
     b2b_rutas = b2b.attrs.get("rutas", pd.DataFrame()) if hasattr(b2b, "attrs") else pd.DataFrame()
     ex2 = ex | (set(b2a["sku"]) if not b2a.empty else set())
     b3, umbral = bloque_ganadores(g, ex2, df_rep, df_vp, df_alertas, marca=marca)
+    vp_marca = pd.DataFrame()
+    if df_vp is not None and not df_vp.empty and "marca" in df_vp.columns:
+        vp_marca = df_vp[df_vp["marca"].astype(str).str.upper().str.strip() == str(marca).upper().strip()].copy()
+        if "neto_max" in vp_marca.columns:
+            vp_marca = vp_marca.sort_values("neto_max", ascending=False).reset_index(drop=True)
     foto = foto_marca(dfm, g) if not dfm.empty else {"capital_total": 0, "skus": 0, "tiendas": 0, "stock_uds": 0,
                                                      "sell_through_pct": 0.0, "margen_efectivo_pct": None, "por_estado_cadena": {}}
     h = hechos_marca(marca, foto, b1, b2a, b2b, b3, umbral, corte, semana_iso)
+    h["vp"] = {"combos": int(len(vp_marca)), "skus": int(vp_marca["sku"].nunique()) if not vp_marca.empty and "sku" in vp_marca.columns else 0,
+               "neto_min": round(float(vp_marca["neto_min"].sum())) if not vp_marca.empty and "neto_min" in vp_marca.columns else None,
+               "neto_max": round(float(vp_marca["neto_max"].sum())) if not vp_marca.empty and "neto_max" in vp_marca.columns else None,
+               "evitables": int(vp_marca["evitable"].sum()) if not vp_marca.empty and "evitable" in vp_marca.columns else 0,
+               "disponible": bool(df_vp is not None and not df_vp.empty)}
     return {"marca": marca, "corte": corte, "semana_iso": semana_iso, "g": g, "dfm": dfm,
-            "b1": b1, "b2a": b2a, "b2b": b2b, "b2b_detalle": b2b_det, "b2b_rutas": b2b_rutas, "b3": b3, "vc_tienda": vc_tienda, "umbral_b3": umbral, "hechos": h}
+            "b1": b1, "b2a": b2a, "b2b": b2b, "b2b_detalle": b2b_det, "b2b_rutas": b2b_rutas, "b3": b3, "vp_marca": vp_marca, "vc_tienda": vc_tienda, "umbral_b3": umbral, "hechos": h}
 
 
 def detalle_lote(bloques: dict) -> pd.DataFrame:
@@ -726,6 +736,8 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             {"Bloque": "2a. Sobrestock de cadena (venden, pero cargan de más)", "Modelos": h["b2a"]["n_skus"], "Stock (uds)": h["b2a"]["stock_uds"], "Capital S/ (costo)": h["b2a"]["capital"], "Qué pedimos": f"markdown 50/50: {h['b2a']['n_markdown']} · canje/devolución: {h['b2a']['n_canje']} · frenar ingreso: {h['b2a']['n_frenar']}"},
             {"Bloque": "2b. Transferencias entre tiendas (las ejecuta la marca)", "Modelos": h["b2b"]["n_skus"], "Stock (uds)": h["b2b"]["uds"], "Capital S/ (costo)": None, "Qué pedimos": f"mover {h['b2b']['uds']:,} uds · contribución esperada S/ {h['b2b']['ganancia']:,} · detalle origen → destino en la pestaña 2b. Detalle"},
             {"Bloque": "3. Ganadores que se quedan cortos", "Modelos": h["b3"]["n_skus"], "Stock (uds)": None, "Capital S/ (costo)": None, "Qué pedimos": f"{h['b3']['n_sin_cd']} sin stock en CD (reorden) · necesidad {h['b3']['necesidad_uds']:,} uds"},
+            {"Bloque": "3b. Venta perdida por quiebre (toda la marca, última semana)", "Modelos": h.get("vp", {}).get("skus", 0), "Stock (uds)": None, "Capital S/ (costo)": None,
+             "Qué pedimos": (f"{h['vp']['combos']} combos SKU×tienda · S/ {_s(h['vp']['neto_min'])} – {_s(h['vp']['neto_max'])} de venta perdida · {h['vp']['evitables']} evitables con CD" if h.get("vp", {}).get("disponible") else "sin snapshots suficientes esta semana")},
         ])
         ws = vistas_excel._tabla_con_titulo(w, "Resumen", f"{marca} — Reporte semanal Ripley · corte {corte}", res,
                                             {"Stock (uds)": _F["S"], "Capital S/ (costo)": _F["S"]}, anchos={"Bloque": 58, "Qué pedimos": 70})
@@ -746,6 +758,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             ("2b. Rutas tienda a tienda", "Cuánto se mueve de cada tienda origen a cada tienda destino: modelos, unidades, costo total y valor venta, con fila TOTAL."),
             ("2b. Detalle transferencias", "El detalle de esas transferencias: cuántas unidades de cada modelo salen de qué tienda y llegan a cuál, con stock, venta semanal y cobertura antes/después en ambas tiendas. La cantidad busca dejar ambas en 12 semanas de cobertura."),
             ("3. Ganadores", "Modelos con buena rotación y poca cobertura (≤ 8 semanas) o acelerando: necesidad calculada, stock en CD y acción (reponer desde CD / reorden)."),
+            ("3b. Venta perdida", "La venta perdida de la última semana de TODA la marca, SKU por tienda en quiebre (cobertura ≤ 4 semanas): cuánto vendió, cuánto dejó de vender (banda mín–máx), stock en CD y acción. Es el indicador del cuadro de evolución."),
             ("Leyenda", "Cómo se calculan los estados, la pirámide de descuentos por antigüedad, el piso de margen y las reglas de transferencia."),
         ]
         for i, (hoja_n, desc) in enumerate(guia, start=1):
@@ -869,6 +882,20 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
         _hoja_o_vacia(w, "3. Ganadores", f"{marca} — Modelos con buena rotación que se están quedando cortos (venta ≥ {h['b3']['umbral_vta']} u/sem y cobertura ≤ {B3_COB_MAX:.0f} sem o tendencia ▲) · corte {corte}",
                       d4, {"Vta sem (prom 4)": _F["C"], "Stock (uds)": _F["S"], "Cobertura (sem)": _F["C"], "Stock CD": _F["S"], "On order": _F["S"], "Necesidad (uds)": _F["S"],
                            "A girar hoy (uds)": _F["S"], "Pendiente sin CD (uds)": _F["S"], "Venta perdida S/ (mín)": _F["S"], "Venta perdida S/ (máx)": _F["S"]})
+        # 3b. Venta perdida de la semana, toda la marca (SKU × tienda en quiebre) — mismas columnas que la hoja 6 del reporte por marca
+        vpm = bloques.get("vp_marca", pd.DataFrame())
+        ren_vp = {"tienda": "Tienda", "sku": "SKU", "descripcion": "Modelo", "departamento": "Depto", "linea": "Línea", "semanas_en_quiebre": "Sem en quiebre",
+                  "cobertura_sem": "Cob (sem)", "stock_uds": "Stock tienda", "vta_uds_sem": "Vendió (uds)", "uds_max": "Perdió (uds, máx)", "neto_min": "Venta perdida S/ (mín)",
+                  "neto_max": "Venta perdida S/ (máx)", "margen_max": "Margen perdido S/ (máx)", "stock_cd": "Stock CD", "on_order": "On order", "accion": "Acción"}
+        dvp = vpm[[c for c in ren_vp if c in vpm.columns]].rename(columns=ren_vp) if vpm is not None and not vpm.empty else pd.DataFrame()
+        hv = h.get("vp", {})
+        tit_vp = (f"{marca} — Venta perdida de la última semana por SKU × tienda: {hv.get('combos', 0)} combos en quiebre (cobertura ≤ 4 sem) · "
+                  f"S/ {_s(hv.get('neto_min'))} – {_s(hv.get('neto_max'))} · {hv.get('evitables', 0)} evitables con stock en CD · corte {corte}")
+        if not hv.get("disponible"):
+            tit_vp = f"{marca} — Venta perdida: sin snapshots suficientes esta semana para calcularla · corte {corte}"
+        _hoja_o_vacia(w, "3b. Venta perdida", tit_vp, dvp,
+                      {"Cob (sem)": _F["C"], "Stock tienda": _F["S"], "Vendió (uds)": _F["S"], "Perdió (uds, máx)": _F["S"], "Venta perdida S/ (mín)": _F["S"],
+                       "Venta perdida S/ (máx)": _F["S"], "Margen perdido S/ (máx)": _F["S"], "Stock CD": _F["S"], "On order": _F["S"], "Sem en quiebre": "0"})
         reportes_marcas._hoja_leyenda(w)
     buf.seek(0)
     return buf.read()
@@ -944,7 +971,8 @@ def filas_corte(bloques: dict, semana_iso: str, enviado: bool = False) -> pd.Dat
     foto = pd.DataFrame([{"marca": marca, "semana_iso": semana_iso, "corte": corte, "bloque": "foto", "sku": "", "nombre": "FOTO DE LA MARCA", "categoria": "",
                           "estado": "", "capital": float(f.get("capital_total") or 0), "uds": float(f.get("stock_uds") or 0), "cobertura": float(f["margen_efectivo_pct"]) if f.get("margen_efectivo_pct") is not None else np.nan,
                           "vta_sem": float(f.get("sell_through_pct") or 0), "n_tiendas": int(f.get("tiendas") or 0), "n_tiendas_quiebre": 0, "stock_cd": 0.0, "accion": "", "top_80": False,
-                          "ganancia": np.nan, "vp_neto_max": np.nan, "enviado": bool(enviado), "fecha_envio": ahora if enviado else "", "generado": ahora}])
+                          "ganancia": np.nan, "vp_neto_max": float(bloques["hechos"].get("vp", {}).get("neto_max") or 0) if bloques["hechos"].get("vp", {}).get("neto_max") is not None else np.nan,
+                          "enviado": bool(enviado), "fecha_envio": ahora if enviado else "", "generado": ahora}])
     partes.append(foto)
     return pd.concat(partes, ignore_index=True)[COLS_CORTE]
 
@@ -995,7 +1023,8 @@ def _kpis_de_filas(df: pd.DataFrame) -> dict:
             "b2b": {"n_skus": len(b2b), "uds": float(b2b["uds"].sum()), "ganancia": float(g_col.fillna(0).sum())},
             "b3": {"n_skus": len(b3), "vta_sem_total": float(b3["vta_sem"].fillna(0).sum()), "vp_neto_max": float(vp_col.fillna(0).sum())},
             "foto": {"capital_total": float(foto["capital"].sum()) if len(foto) else None,
-                     "sell_through_pct": float(foto["vta_sem"].iloc[0]) if len(foto) else None}}
+                     "sell_through_pct": float(foto["vta_sem"].iloc[0]) if len(foto) else None,
+                     "vp_marca_max": float(foto["vp_neto_max"].iloc[0]) if len(foto) and "vp_neto_max" in foto.columns and pd.notna(foto["vp_neto_max"].iloc[0]) else None}}
 
 
 def _kpis_de_hechos(h: dict) -> dict:
@@ -1004,7 +1033,8 @@ def _kpis_de_hechos(h: dict) -> dict:
             "b2a": {"n_skus": h["b2a"]["n_skus"], "capital": float(h["b2a"]["capital"])},
             "b2b": {"n_skus": h["b2b"]["n_skus"], "uds": float(h["b2b"]["uds"]), "ganancia": float(h["b2b"].get("ganancia") or 0)},
             "b3": {"n_skus": h["b3"]["n_skus"], "vta_sem_total": float(h["b3"]["vta_sem_total"]), "vp_neto_max": float(h["b3"].get("vp_neto_max") or 0)},
-            "foto": {"capital_total": float(f.get("capital_total") or 0), "sell_through_pct": float(f.get("sell_through_pct") or 0)}}
+            "foto": {"capital_total": float(f.get("capital_total") or 0), "sell_through_pct": float(f.get("sell_through_pct") or 0),
+                     "vp_marca_max": (float(h["vp"]["neto_max"]) if h.get("vp", {}).get("neto_max") is not None else None)}}
 
 
 def comparar_marca(bloques: dict, cortes_prev: pd.DataFrame) -> dict:
@@ -1068,7 +1098,7 @@ _KPI_LABELS = [("foto", "capital_total", "Capital total de la marca S/"), ("foto
                ("b1", "capital", "Venta cero — capital S/"), ("b1", "n_skus", "Venta cero — modelos"),
                ("b2a", "capital", "Sobrestock — capital S/"), ("b2a", "n_skus", "Sobrestock — modelos"),
                ("b2b", "uds", "Transferencias — uds a mover"), ("b2b", "ganancia", "Transferencias — contribución esperada S/"),
-               ("b3", "n_skus", "Ganadores cortos — modelos"), ("b3", "vp_neto_max", "Venta perdida por quiebre S/ (máx)")]
+               ("b3", "n_skus", "Ganadores cortos — modelos"), ("foto", "vp_marca_max", "Venta perdida por quiebre S/ (máx, toda la marca)")]
 
 
 def evolucion_texto(cmp: dict, bloques: dict) -> str:
