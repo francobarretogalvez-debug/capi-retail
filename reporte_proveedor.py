@@ -756,12 +756,19 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             serie = serie_kpis(cortes, bloques)
             if not serie.empty and serie.shape[1] >= 2:
                 ev = serie.reset_index().rename(columns={"index": "Indicador"})
-                ws0 = vistas_excel._tabla_con_titulo(w, "0. Evolución", f"{marca} — Evolución semanal de los frentes (cortes enviados con Capi) · corte {corte}",
-                                                     ev, {c: _F["S"] for c in ev.columns if c != "Indicador"}, anchos={"Indicador": 34})
+                ws0 = vistas_excel._tabla_con_titulo(w, "0. Evolución", f"{marca} — Evolución semanal de los frentes (cortes generados con Capi; 'enviado' según registro) · corte {corte}",
+                                                     ev, {c: _F["S"] for c in ev.columns if c != "Indicador"}, anchos={"Indicador": 40})
+                # filas en % con 1 decimal (el formato por columna las dejaba como enteros)
+                from openpyxl.utils import get_column_letter as _gcl
+                for r_ in range(3, ws0.max_row + 1):
+                    if "%" in str(ws0.cell(row=r_, column=1).value or ""):
+                        for c_ in range(2, ws0.max_column + 1):
+                            ws0.cell(row=r_, column=c_).number_format = "0.0"
                 if cmp and cmp.get("hay_prev"):
                     fila0 = ws0.max_row + 2
                     if cmp.get("resolucion_b1") is not None:
-                        ws0.cell(row=fila0, column=1, value=f"De los modelos sin venta reportados la semana {cmp['semana_prev']}, el {cmp['resolucion_b1']:.0f}% ya volvió a vender o salió de la lista.")
+                        quien = "reportados" if cmp.get("prev_enviado") else "detectados (corte no enviado)"
+                        ws0.cell(row=fila0, column=1, value=f"De los modelos sin venta {quien} la semana {cmp['semana_prev']}, el {cmp['resolucion_b1']:.0f}% ya volvió a vender o salió de la lista.")
                         fila0 += 1
                     pers = cmp.get("persistentes", {}).get("b1", [])
                     if pers:
