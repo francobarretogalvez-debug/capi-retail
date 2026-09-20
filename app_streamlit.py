@@ -124,7 +124,10 @@ import reporte_semanal as rep_sem
 import agente_reporte as ag_rep
 import reporte_proveedor
 import agente_proveedor
-for _mod in (reporte_proveedor, agente_proveedor):
+# reportes_marcas, agente_terceras, agente_reporte, notion_store, acciones_log y obsoletos también cambian seguido
+# (deploy 2026-09-20: la nube corrió reportes_marcas viejo sin transferencias_por_sku → AttributeError).
+import obsoletos
+for _mod in (reportes_marcas, agente_terceras, agente_reporte, notion_store, acciones_log, obsoletos, reporte_proveedor, agente_proveedor):
     importlib.reload(_mod)
 import calendario_ripley as cal_rip
 
