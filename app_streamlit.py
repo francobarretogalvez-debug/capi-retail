@@ -3586,11 +3586,13 @@ elif nav_page == "🤝 Agente Terceras":
                          f'<div style="font-size:0.72rem; color:var(--capi-text2);">{titulo}</div>'
                          f'<div style="font-size:1.35rem; font-weight:700; color:var(--capi-text);">{valor}</div>'
                          f'<div style="font-size:0.72rem; color:var(--capi-text2);">{sub}</div></div>', unsafe_allow_html=True)
-        _t1, _t2, _t3, _t4 = st.columns(4)
+        _t1, _t2, _t3, _t4, _t5 = st.columns(5)
         _tile(_t1, "1) Venta cero (cadena, última semana)", f"S/ {_h['b1']['capital']:,}", f"{_h['b1']['n_skus']} modelos · ⭐ {_h['b1']['n_top']} · {_h['b1']['pct_capital_marca']}% del capital", STATUS_CRITICO)
         _tile(_t2, "2a) Sobrestock de cadena", f"S/ {_h['b2a']['capital']:,}", f"{_h['b2a']['n_skus']} modelos · dscto compartido {_h['b2a']['n_markdown']} · devolución {_h['b2a']['n_canje']} · frenar {_h['b2a']['n_frenar']}", STATUS_SOBRESTOCK)
         _tile(_t3, "2b) Transferencias entre tiendas", f"{_h['b2b']['uds']:,} uds", f"{_h['b2b']['n_skus']} modelos · contribución esperada S/ {_h['b2b']['ganancia']:,}", STATUS_SOBRESTOCK)
         _tile(_t4, "3) Ganadores que se quedan cortos", f"{_h['b3']['n_skus']} modelos", f"{_h['b3']['n_sin_cd']} sin stock en CD · necesidad {_h['b3']['necesidad_uds']:,} uds", STATUS_MUERTO)
+        _ho = _h.get("obs", {})
+        _tile(_t5, "4) Pre-obsoleto y obsoleto", f"S/ {_ho.get('capital', 0):,}", f"{_ho.get('n_skus', 0)} modelos · {_ho.get('n_obsoleto', 0)} obsoletos · {_ho.get('pct_capital_marca', 0)}% del capital · liquidar {_ho.get('n_liquidar', 0)} · devolución {_ho.get('n_recoger', 0)}", STATUS_LIQUIDAR)
         _ft = _h["foto"]
         st.caption(f"Foto de {_rep_marca}: S/ {_ft['capital_total']:,} a costo · {_ft['skus']} modelos · {_ft['tiendas']} tiendas · "
                    f"sell-through {_ft['sell_through_pct']}% · margen efectivo {_ft['margen_efectivo_pct'] if _ft['margen_efectivo_pct'] is not None else '—'}%"
