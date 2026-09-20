@@ -311,7 +311,8 @@ def test_comparar_marca(tmp_path):
     serie = rp.serie_kpis(rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path)), b36)
     assert list(serie.columns) == ["2026-34", "2026-35", "2026-36"] and serie.loc["Venta cero — modelos"].tolist() == [3, 3, 2]
     assert serie.loc["Transferencias — contribución esperada S/"].tolist() == [149, 149, 149]
-    assert serie.loc["Pre-obsoleto + obsoleto — capital S/"].tolist() == [1600, 1600, 1600] and serie.shape[0] == 10
+    assert serie.loc["Pre-obsoleto + obsoleto — capital S/"].tolist() == [1600, 1600, 1600] and serie.shape[0] == 11
+    h36 = b36["hechos"]; assert serie.loc["Sobrestock — % del capital total"].iloc[-1] == round(h36["b2a"]["capital"] / h36["foto"]["capital_total"] * 100, 1) == h36["b2a"]["pct_capital_marca"]
     assert not any("perdida" in i for i in serie.index)
 
 

@@ -514,6 +514,7 @@ def hechos_marca(marca: str, foto: dict, b1, b2a, b2b, b3, umbral_b3: float, cor
                 "cobertura_prom": round(float(b2a["cobertura_cadena"].mean()), 1) if not b2a.empty else None,
                 "por_linea": _por_linea(b2a),
                 "top": _top(b2a, ["sku", "nombre", "categoria", "estado_cadena", "stock_cadena", "cobertura_cadena", "capital_costo", "accion"], top_n, "capital_costo")}
+    h["b2a"]["pct_capital_marca"] = round(h["b2a"]["capital"] / foto["capital_total"] * 100, 1) if foto.get("capital_total") else 0.0
     h["b2a"]["por_accion"] = {r.accion: {"modelos": int(r.modelos), "capital": round(float(r.capital))} for r in resumen_por_accion(b2a).itertuples()} if not b2a.empty else {}
     h["b2b"] = {"n_skus": int(len(b2b)), "uds": _s(b2b, "transf_uds"), "ganancia": _s(b2b, "transf_ganancia"),
                 "top": _top(b2b, ["sku", "nombre", "transf_uds", "transf_tiendas", "transf_ganancia"], top_n, "transf_uds")}
@@ -1100,7 +1101,8 @@ def _kpis_de_filas(df: pd.DataFrame) -> dict:
     g_col = b2b["ganancia"] if "ganancia" in b2b.columns else pd.Series(dtype=float)
     vp_col = b3["vp_neto_max"] if "vp_neto_max" in b3.columns else pd.Series(dtype=float)
     return {"b1": {"n_skus": len(b1), "capital": float(b1["capital"].sum()), "stock_uds": float(b1["uds"].sum())},
-            "b2a": {"n_skus": len(b2a), "capital": float(b2a["capital"].sum())},
+            "b2a": {"n_skus": len(b2a), "capital": float(b2a["capital"].sum()),
+                    "capital_pct": (round(float(b2a["capital"].sum()) / float(foto["capital"].sum()) * 100, 1) if len(foto) and float(foto["capital"].sum()) > 0 else None)},
             "b2b": {"n_skus": len(b2b), "uds": float(b2b["uds"].sum()), "ganancia": float(g_col.fillna(0).sum())},
             "b3": {"n_skus": len(b3), "vta_sem_total": float(b3["vta_sem"].fillna(0).sum()), "vp_neto_max": float(vp_col.fillna(0).sum())},
             "foto": {"capital_total": float(foto["capital"].sum()) if len(foto) else None,
@@ -1112,7 +1114,8 @@ def _kpis_de_filas(df: pd.DataFrame) -> dict:
 def _kpis_de_hechos(h: dict) -> dict:
     f = h.get("foto", {})
     return {"b1": {"n_skus": h["b1"]["n_skus"], "capital": float(h["b1"]["capital"]), "stock_uds": float(h["b1"]["stock_uds"])},
-            "b2a": {"n_skus": h["b2a"]["n_skus"], "capital": float(h["b2a"]["capital"])},
+            "b2a": {"n_skus": h["b2a"]["n_skus"], "capital": float(h["b2a"]["capital"]),
+                    "capital_pct": (round(float(h["b2a"]["capital"]) / float(f["capital_total"]) * 100, 1) if f.get("capital_total") else None)},
             "b2b": {"n_skus": h["b2b"]["n_skus"], "uds": float(h["b2b"]["uds"]), "ganancia": float(h["b2b"].get("ganancia") or 0)},
             "b3": {"n_skus": h["b3"]["n_skus"], "vta_sem_total": float(h["b3"]["vta_sem_total"]), "vp_neto_max": float(h["b3"].get("vp_neto_max") or 0)},
             "foto": {"capital_total": float(f.get("capital_total") or 0), "sell_through_pct": float(f.get("sell_through_pct") or 0),
@@ -1181,7 +1184,7 @@ def comparar_marca(bloques: dict, cortes_prev: pd.DataFrame) -> dict:
 
 _KPI_LABELS = [("foto", "capital_total", "Capital total de la marca S/"), ("foto", "sell_through_pct", "Sell-through % (semanal)"),
                ("b1", "capital", "Venta cero — capital S/"), ("b1", "n_skus", "Venta cero — modelos"),
-               ("b2a", "capital", "Sobrestock — capital S/"), ("b2a", "n_skus", "Sobrestock — modelos"),
+               ("b2a", "capital", "Sobrestock — capital S/"), ("b2a", "capital_pct", "Sobrestock — % del capital total"), ("b2a", "n_skus", "Sobrestock — modelos"),
                ("b2b", "uds", "Transferencias — uds a mover"), ("b2b", "ganancia", "Transferencias — contribución esperada S/"),
                ("foto", "capital_obsoleto", "Pre-obsoleto + obsoleto — capital S/"),
                ("b3", "n_skus", "Ganadores cortos — modelos")]
