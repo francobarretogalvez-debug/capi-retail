@@ -661,12 +661,15 @@ def _accion_venta_cero(r) -> str:
 
 
 def venta_cero(df_cob: pd.DataFrame, min_capital: float = 0, tipo_evento_map: dict = None) -> pd.DataFrame:
-    """SKU×tienda con stock y sin venta la última semana, con acción de piso y Pareto 80%
-    del capital por tienda. Regla del TOP 80% (auditoría C1 2026-08-26): el acumulado
+    """SKU×tienda con stock y sin venta en la tienda según `prom_vta_uds` (promedio de las
+    últimas 4 semanas por tienda cuando la plantilla trae semanas reales; NO es "la última
+    semana", corregido 2026-09-19), con acción de piso y Pareto 80% del capital por tienda. Regla del TOP 80% (auditoría C1 2026-08-26): el acumulado
     ANTES del SKU no llegaba a 80%, así el primer SKU de cada tienda siempre es TOP."""
     if df_cob is None or df_cob.empty or "prom_vta_uds" not in df_cob.columns:
         return pd.DataFrame(columns=COLS_VENTA_CERO)
-    d = df_cob[(df_cob["prom_vta_uds"].fillna(0) == 0) & (df_cob["stock_total"].fillna(0) > 0)].copy()
+    # <= 0 y no == 0: una tienda con devolución neta (prom negativo) tampoco vendió (fix 2026-09-19,
+    # detectado por el cuadre del reporte al proveedor: 6 marcas con filas en -0.25 fuera de la lista).
+    d = df_cob[(df_cob["prom_vta_uds"].fillna(0) <= 0) & (df_cob["stock_total"].fillna(0) > 0)].copy()
     if "stock_valor_costo" not in d.columns:
         d["stock_valor_costo"] = 0.0
     d = d[d["stock_valor_costo"].fillna(0) >= float(min_capital or 0)]

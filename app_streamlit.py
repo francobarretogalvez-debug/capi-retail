@@ -58,6 +58,20 @@ if _HAS_SNAPSHOTS and not st.session_state.get("_snapshots_initialized"):
     except Exception:
         st.session_state["_snapshots_initialized"] = True
 
+# Cortes guardados en Notion (🗂️ Cortes Capi): en la nube el disco se borra en cada reinicio,
+# así que al arrancar se bajan las semanas que falten (decisión Franco 2026-09-12).
+if _HAS_SNAPSHOTS and not st.session_state.get("_cortes_restaurados"):
+    st.session_state["_cortes_restaurados"] = True
+    try:
+        import notion_store as _ns_boot
+        if _ns_boot.disponible():
+            from snapshots_engine import nube as _nube_boot
+            _rest = _nube_boot.restaurar_faltantes()
+            if _rest:
+                st.session_state["_cortes_restaurados_msg"] = f"☁️ {len(_rest)} corte(s) restaurado(s) desde Notion: {', '.join(_rest)}"
+    except Exception as _e_rest:
+        st.session_state["_cortes_restaurados_msg"] = f"⚠️ No se pudieron restaurar cortes desde Notion: {_e_rest}"
+
 # Cargar .env antes de importar agente_terceras
 try:
     from dotenv import load_dotenv
@@ -82,11 +96,19 @@ try:
         os.environ["ANTHROPIC_API_KEY"] = str(st.secrets["ANTHROPIC_API_KEY"])
 except Exception:
     pass
+# Persistencia en Notion (decisión Franco 2026-09-12): el token va en st.secrets en la nube.
+try:
+    if "NOTION_TOKEN" in st.secrets and not os.getenv("NOTION_TOKEN"):
+        os.environ["NOTION_TOKEN"] = str(st.secrets["NOTION_TOKEN"])
+except Exception:
+    pass
 
 import agente_terceras
 import vistas_excel
 import reportes_marcas
 import acciones_log
+import notion_store
+import kpi_venta_cero
 import analisis_estados
 import comparativo_semanal
 import render_foto
@@ -100,6 +122,10 @@ for _mod in (comparativo_semanal, render_foto, otb_terceras, venta_perdida_seman
 import rendimiento_tienda as rend_t
 import reporte_semanal as rep_sem
 import agente_reporte as ag_rep
+import reporte_proveedor
+import agente_proveedor
+for _mod in (reporte_proveedor, agente_proveedor):
+    importlib.reload(_mod)
 import calendario_ripley as cal_rip
 
 # ══════════════════════════════════════════════════════════════
@@ -115,7 +141,7 @@ st.set_page_config(
 
 # Versión visible (S1 robustez, 2026-09-05): se muestra en el sidebar junto al corte
 # de la base cargada, para que cualquier número citado sea trazable a una versión.
-CAPI_VERSION = "2.2.0"
+CAPI_VERSION = "2.3.0"
 
 # ── Paleta de colores Capi (Clean Corporate: navy + light) ──
 TEAL_600 = "#6D3B8E"     # Morado Ripley — primary accent (Franco 2026-08-26)
@@ -644,8 +670,12 @@ if "results" not in st.session_state:
 # ── Modo demo (?demo=1 en la URL): nav simplificada + auto-carga de base ──
 try:
     _DEMO_MODE = st.query_params.get("demo") == "1"
+    # ?autoload=1: misma auto-carga de la base más reciente de data2/bases antiguas/ pero con la
+    # navegación COMPLETA (uso local: pruebas y demos internas; en la nube esa carpeta no existe).
+    _AUTOLOAD = st.query_params.get("autoload") == "1"
 except Exception:
     _DEMO_MODE = False
+    _AUTOLOAD = False
 
 # ══════════════════════════════════════════════════════════════
 #  SIDEBAR
@@ -681,6 +711,9 @@ with st.sidebar:
         except Exception:
             _corte_txt = os.path.basename(_bp)
     st.caption(f"Capi v{CAPI_VERSION} · {_corte_txt}")
+    st.caption("☁️ Notion: conectado" if notion_store.disponible() else "☁️ Notion: sin token (el log y los cortes de la nube no persisten)")
+    if st.session_state.get("_cortes_restaurados_msg"):
+        st.caption(st.session_state["_cortes_restaurados_msg"])
 
     if _DEMO_MODE:
         st.caption("🎬 Modo demo activo")
@@ -966,6 +999,67 @@ def _is_base_profundidad(path):
 #  EJECUCIÓN DEL ANÁLISIS
 # ══════════════════════════════════════════════════════════════
 
+def _subir_corte_notion(semana_iso, base_nombre=""):
+    """Sube el corte recién guardado a 🗂️ Cortes Capi. Si no hay token o falla, avisa y sigue."""
+    if not semana_iso or not notion_store.disponible():
+        return
+    try:
+        from snapshots_engine import nube as _nube
+        _r = _nube.subir_corte(semana_iso, base_nombre=base_nombre)
+        if _r.get("ok"):
+            st.toast(f"☁️ Corte {semana_iso} guardado en Notion ({_r.get('mb', 0)} MB)")
+        else:
+            st.warning(f"⚠️ El corte {semana_iso} no se subió a Notion: {_r.get('error')}")
+    except Exception as _e_nube:
+        st.warning(f"⚠️ El corte {semana_iso} no se subió a Notion: {_e_nube}")
+
+
+def _semana_base():
+    """Semana ISO de la base cargada (del nombre del archivo); si no, el último snapshot; si no, hoy."""
+    _bp = st.session_state.get("_base_profundidad_path")
+    if _bp and _HAS_SNAPSHOTS:
+        try:
+            from snapshots_engine import tienda as _t_sem
+            _w = _t_sem.semana_de_nombre(os.path.basename(_bp))
+            if _w:
+                return _w
+        except Exception:
+            pass
+    if _HAS_SNAPSHOTS:
+        try:
+            _ws = snapshots_engine.list_available_weeks()
+            if _ws:
+                return _ws[-1]
+        except Exception:
+            pass
+    return acciones_log.semana_actual()
+
+
+def _nombre_base():
+    _bp = st.session_state.get("_base_profundidad_path")
+    return os.path.basename(_bp) if _bp else ""
+
+
+def _registrar_lote_ui(key, etiqueta, tipo, vista, lote, detalle, descripcion, marca="", ayuda=""):
+    """Botón 'registrar lo enviado' + resultado. El pedido queda en el log (y en Notion) para medir después."""
+    _n = int((pd.to_numeric(detalle.get("uds", pd.Series(dtype=float)), errors="coerce").fillna(0) > 0).sum()) if "uds" in detalle.columns else len(detalle)
+    if st.button(f"{etiqueta} ({_n:,} combos)", key=key, help=ayuda, disabled=_n == 0):
+        with st.spinner("Registrando en el log de acciones…"):
+            _r = acciones_log.registrar_lote(tipo, vista, lote, _semana_base(), detalle, descripcion,
+                                             marca=marca, corte_base=_nombre_base())
+        if _r.get("notion_url"):
+            st.success(f"✅ Lote **{_r['lote']}** registrado: {_r['filas']:,} combos · {_r['unidades']:,} uds → "
+                       f"[ver en Notion]({_r['notion_url']})")
+        elif _r.get("error"):
+            st.warning(f"Lote **{_r['lote']}** quedó registrado en el disco local ({_r['filas']:,} combos) pero no llegó a Notion: "
+                       f"{_r['error']}. Se reintenta con «Sincronizar» en Caso de Éxito.")
+        elif not notion_store.disponible():
+            st.warning(f"Lote **{_r['lote']}** registrado solo en el disco local ({_r['filas']:,} combos): no hay NOTION_TOKEN. "
+                       "☁️ En la nube este registro se pierde al reiniciar.")
+        else:
+            st.success(f"✅ Lote **{_r['lote']}** registrado ({_r['filas']:,} combos).")
+
+
 if run_btn:
     if uploaded is None:
         st.warning("⚠️ Primero sube tu archivo Excel para continuar.")
@@ -1007,7 +1101,8 @@ if run_btn:
                     # Guardar snapshot ANTES de transformar (columnas originales Ripley)
                     if _HAS_SNAPSHOTS:
                         try:
-                            snapshots_engine.process_micro_profundidad(_base_copy_path, force=True)
+                            _meta_snap = snapshots_engine.process_micro_profundidad(_base_copy_path, force=True)
+                            _subir_corte_notion(_meta_snap.get("semana_iso"), _base_copy_name)
                         except Exception as _e_snap:
                             # No bloquea el análisis, pero la semana perdida se avisa (S1, 2026-09-05)
                             st.warning(f"⚠️ El snapshot semanal no se guardó: {_e_snap}. "
@@ -1027,7 +1122,8 @@ if run_btn:
                 # Snapshot para formato plantilla (non-profundidad uploads)
                 if _HAS_SNAPSHOTS and not st.session_state.get("_base_profundidad_path"):
                     try:
-                        snapshots_engine.process_micro_profundidad(tmp_path, force=True)
+                        _meta_snap = snapshots_engine.process_micro_profundidad(tmp_path, force=True)
+                        _subir_corte_notion(_meta_snap.get("semana_iso"), uploaded.name or "")
                     except Exception as _e_snap:
                         st.warning(f"⚠️ El snapshot semanal no se guardó: {_e_snap}. "
                                    "El análisis sigue, pero esta semana no entra al comparativo.")
@@ -1072,7 +1168,7 @@ if st.session_state.get("_modo_seguro_activo"):
 #  crítico para que la demo muestre insights en segundos.
 # ══════════════════════════════════════════════════════════════
 
-if _DEMO_MODE and st.session_state["results"] is None and not st.session_state.get("_demo_autoload_done"):
+if (_DEMO_MODE or _AUTOLOAD) and st.session_state["results"] is None and not st.session_state.get("_demo_autoload_done"):
     st.session_state["_demo_autoload_done"] = True
     import re as _re_demo
 
@@ -1096,10 +1192,11 @@ if _DEMO_MODE and st.session_state["results"] is None and not st.session_state.g
         _demo_base = max(_demo_bases, key=_demo_fecha_archivo)
         _demo_path = os.path.join(_demo_dir, _demo_base)
         try:
-            with st.spinner(f"Modo demo: cargando {_demo_base}…"):
+            with st.spinner(f"{'Modo demo' if _DEMO_MODE else 'Auto-carga'}: cargando {_demo_base}…"):
                 if _is_base_profundidad(_demo_path):
                     _demo_plantilla = os.path.join(tempfile.gettempdir(), "capi_demo_plantilla.xlsx")
-                    etl_profundidad.transform(_demo_path, output_path=_demo_plantilla)
+                    etl_profundidad.transform(_demo_path, output_path=_demo_plantilla,
+                                              fecha_corte=etl_profundidad.fecha_corte_desde_nombre(_demo_base))
                     _demo_input = _demo_plantilla
                     # Rendimiento por Tienda relee el Micro crudo (la plantilla ya
                     # perdió las columnas por tienda), así que hay que dejar la ruta.
@@ -3224,6 +3321,14 @@ elif nav_page == "📦 Reposición":
                            file_name=f"Capi_Giro_{_uni_rp}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_repo_uni")
         st.caption("Hoja **Giro**: una fila por SKU, una columna por tienda con lo que el CD puede servir hoy (la suma por SKU nunca supera el stock CD), TOTAL y PENDIENTE (lo que falta y no hay en CD). Hoja **Sustento**: el porqué de cada línea.")
+        # ── Registrar el giro enviado (decisión Franco 2026-09-12): sin esto no hay "pedido" contra el
+        #    cual medir cumplimiento (S6). Va al log local y a Notion (📋 Acciones Capi) con el detalle adjunto.
+        if not _mx_dl.empty:
+            _det_giro = acciones_log.matriz_a_detalle(_mx_dl)
+            _registrar_lote_ui("reg_giro", "📤 Registrar este giro como ENVIADO a inventories",
+                               "Reposición / Empuje", "Reposición", f"giro-{_semana_base()}-{_uni_rp.lower()}",
+                               _det_giro, f"Excel de giro {_uni_rp.lower()} enviado a inventories",
+                               ayuda="Guarda la matriz SKU × tienda × uds tal como se descargó. Márcalo el mismo día que mandas el Excel.")
 
 
 elif nav_page == "🔄 Transferencias":
@@ -3331,12 +3436,12 @@ elif nav_page == "💰 Gestión de Precios":
 
 elif nav_page == "🤝 Agente Terceras":
     st.markdown(f'<div class="section-header"><h3>🤝 Agente Terceras</h3><span class="live-badge">AGENTE</span></div>', unsafe_allow_html=True)
-    st.caption("Detecta oportunidades con marcas terceras y redacta el correo al proveedor. "
-               "El agente genera un BORRADOR — tú lo revisas y lo envías. Nunca manda nada solo.")
+    st.caption("Reporte semanal al proveedor: un correo + un Excel por marca con tres frentes (venta cero · sobrestock y "
+               "desbalance · ganadores que se quedan cortos) y el comparativo contra la semana anterior. "
+               "Capi arma el BORRADOR y el Excel; el envío lo haces tú desde Outlook. Nunca manda nada solo.")
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        st.warning("🔑 Falta configurar la API key de Anthropic (secrets del deploy o archivo "
-                   ".env). Las tablas de oportunidades funcionan igual; solo la redacción "
-                   "del correo con IA está deshabilitada.")
+        st.info("🔑 Sin API key de Anthropic el correo sale con la versión por reglas (mismos números, prosa fija). "
+                "Las tablas y el Excel no dependen de la IA.")
 
     # Paquete de trabajo: todo el análisis de terceras en un Excel
     st.download_button(
@@ -3418,94 +3523,284 @@ elif nav_page == "🤝 Agente Terceras":
                 st.download_button("📥 Excel — reparto OTB con factores y argumentos", _ob.getvalue(), file_name="Capi_Reparto_OTB_Terceras.xlsx",
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="otb_dl")
 
-    _at_prov = agente_terceras.cargar_proveedores()
+    # ══════════════════════════════════════════════════════════════════════
+    #  REPORTE SEMANAL AL PROVEEDOR (decisión Franco 2026-09-18; plan v2 19-sep)
+    #  Un correo + un Excel por marca, 3 frentes: venta cero · sobrestock/desbalance ·
+    #  ganadores cortos. Motor: reporte_proveedor (pandas puro). Prosa: agente_proveedor
+    #  (Claude acotado o reglas). Capi NO envía: Daniela copia a Outlook y adjunta.
+    #  Reemplaza a los correos legado "Capital parado" y "Quiebre" (retirados 19-sep).
+    # ══════════════════════════════════════════════════════════════════════
+    if st.session_state.pop("at_rep_reset", False):
+        for _k in ("at_borrador_rep", "at_rep_asunto", "at_rep_cuerpo"):
+            st.session_state.pop(_k, None)
 
-    _at_tipo = st.radio(
-        "Tipo de oportunidad",
-        ["💰 Capital parado (rebate / markdown support)", "📦 Quiebre (reorder urgente)"],
-        horizontal=True, key="at_tipo",
-    )
-
-    if _at_tipo.startswith("💰"):
-        _at_op = agente_terceras.detectar_capital_parado(df_cob)
-        if _at_op.empty:
-            st.info("No hay marcas terceras con capital parado sobre el umbral.")
-        else:
-            st.markdown(f"**{len(_at_op)} marcas terceras con capital inmovilizado y baja rotación:**")
-            _at_show = _at_op[['marca', 'capital', 'n_skus', 'cob_prom', 'sell_through', 'margen_efectivo']].rename(columns={
-                'marca': 'Marca', 'capital': 'Capital S/', 'n_skus': 'SKUs',
-                'cob_prom': 'Cob (sem)', 'sell_through': 'Sell-through %', 'margen_efectivo': 'Margen %',
-            })
-            st.dataframe(_at_show.style.format({
-                'Capital S/': 'S/ {:,.0f}', 'Cob (sem)': '{:.0f}', 'Sell-through %': '{:.0f}%', 'Margen %': '{:.0f}%',
-            }, na_rep="—"), use_container_width=True, hide_index=True)
-
-            _at_marcas_op = _at_op['marca'].tolist()
-            _at_sel = st.selectbox("Marca para generar el correo", _at_marcas_op, key="at_sel_cap")
-            _at_row = _at_op[_at_op['marca'] == _at_sel].iloc[0]
-            _at_prov_marca = _at_prov.get(_at_sel.upper())
-            if _at_prov_marca and _at_prov_marca.get('contacto'):
-                st.caption(f"Destinatario sugerido: {_at_prov_marca.get('contacto','')} ({_at_prov_marca.get('empresa','')})")
-            if st.button("✍️ Generar texto del correo", key="at_gen_cap", type="primary"):
-                with st.spinner("Redactando con IA..."):
-                    try:
-                        _at_skus = agente_terceras.top_skus_marca(df_cob, _at_sel)
-                        _at_det = agente_terceras.top5_por_marca_linea(df_cob)
-                        if not _at_det.empty:
-                            _at_det = _at_det[_at_det['marca'].str.upper() == _at_sel.upper()]
-                        _at_correo = agente_terceras.generar_correo_capital_parado(
-                            _at_row, _at_prov_marca, _at_skus, detalle_lineas=_at_det)
-                        st.session_state["at_borrador"] = _at_correo
-                    except Exception as _at_e:
-                        st.error(f"No se pudo generar el texto: {_at_e}")
-
+    _rep_marcas = sorted(reportes_marcas.marcas_reporte(df_cob),
+                         key=lambda m: (str(m).upper().strip() not in agente_terceras.MARCAS_AGENTE, str(m)))
+    if not _rep_marcas:
+        st.info("La base cargada no trae marcas terceras con presencia.")
     else:
-        _at_op = agente_terceras.detectar_quiebre_tercera(df_cob)
-        if _at_op.empty:
-            st.info("No hay marcas terceras en quiebre con venta relevante.")
+        _rc1, _rc2 = st.columns([2, 1])
+        _rep_marca = _rc1.selectbox("Marca (proveedor)", _rep_marcas, key="at_rep_marca")
+        _rep_sem = _semana_base()
+        _rep_corte = None
+        try:
+            _rep_corte = str(etl_profundidad.fecha_corte_desde_nombre(_nombre_base()) or "").replace("/", ".") or None
+        except Exception:
+            _rep_corte = None
+        _rep_corte = _rep_corte or pd.Timestamp.now().strftime("%d.%m.%Y")
+        _rc2.caption(f"Semana **{_rep_sem}** · corte de la base **{_rep_corte}**")
+
+        @st.cache_data(ttl=600, show_spinner=False)
+        def _vp_detalle_semana(_sem):
+            try:
+                import venta_perdida_semanal as _vps
+                return _vps.venta_perdida_semana().get("detalle")
+            except Exception:
+                return None
+        _rep_vp = _vp_detalle_semana(_rep_sem)
+        _rep_bp = _capi_base_path()
+        _rep_tev = _tipo_evento_map(_rep_bp) if _rep_bp else {}
+
+        _rep_fp = f"{_rep_marca}|{len(df_cob)}|{df_cob['stock_valor_costo'].sum():.0f}|{_rep_sem}"
+        if st.session_state.get("at_rep_bloques_fp") != _rep_fp:
+            with st.spinner("Calculando los bloques de la marca…"):
+                _bl = reporte_proveedor.bloques_marca(
+                    _rep_marca, df_cob,
+                    df_trans if not df_trans.empty else None, _rep_vp,
+                    df_prec if not df_prec.empty else None, df_rep if not df_rep.empty else None,
+                    df_alertas if not df_alertas.empty else None,
+                    corte=_rep_corte, tipo_evento_map=_rep_tev, semana_iso=_rep_sem)
+                try:
+                    _cortes = reporte_proveedor.cargar_cortes(_rep_marca, hasta=_rep_sem)
+                except Exception:
+                    _cortes = pd.DataFrame()
+                _cmp = reporte_proveedor.comparar_marca(_bl, _cortes)
+            st.session_state["at_rep_bloques"] = (_bl, _cortes, _cmp)
+            st.session_state["at_rep_bloques_fp"] = _rep_fp
+        _bl, _cortes, _cmp = st.session_state["at_rep_bloques"]
+        _h = _bl["hechos"]
+
+        # ── Tiles ──
+        def _tile(col, titulo, valor, sub, color):
+            col.markdown(f'<div style="background:var(--capi-bg-surface); border-radius:12px; padding:12px 16px; border-left:4px solid {color};">'
+                         f'<div style="font-size:0.72rem; color:var(--capi-text2);">{titulo}</div>'
+                         f'<div style="font-size:1.35rem; font-weight:700; color:var(--capi-text);">{valor}</div>'
+                         f'<div style="font-size:0.72rem; color:var(--capi-text2);">{sub}</div></div>', unsafe_allow_html=True)
+        _t1, _t2, _t3, _t4, _t5 = st.columns(5)
+        _tile(_t1, "1) Venta cero (cadena, última semana)", f"S/ {_h['b1']['capital']:,}", f"{_h['b1']['n_skus']} modelos · ⭐ {_h['b1']['n_top']} · {_h['b1']['pct_capital_marca']}% del capital", STATUS_CRITICO)
+        _tile(_t2, "2a) Sobrestock de cadena", f"S/ {_h['b2a']['capital']:,}", f"{_h['b2a']['n_skus']} modelos · {_h['b2a'].get('pct_capital_marca', 0)}% del capital · dscto compartido {_h['b2a']['n_markdown']} · devolución {_h['b2a']['n_canje']} · frenar {_h['b2a']['n_frenar']}", STATUS_SOBRESTOCK)
+        _tile(_t3, "2b) Transferencias entre tiendas", f"{_h['b2b']['uds']:,} uds", f"{_h['b2b']['n_skus']} modelos · contribución esperada S/ {_h['b2b']['ganancia']:,}", STATUS_SOBRESTOCK)
+        _tile(_t4, "3) Ganadores que se quedan cortos", f"{_h['b3']['n_skus']} modelos", f"{_h['b3']['n_sin_cd']} sin stock en CD · necesidad {_h['b3']['necesidad_uds']:,} uds", STATUS_MUERTO)
+        _ho = _h.get("obs", {})
+        _tile(_t5, "4) Pre-obsoleto y obsoleto", f"S/ {_ho.get('capital', 0):,}", f"{_ho.get('n_skus', 0)} modelos · {_ho.get('n_obsoleto', 0)} obsoletos · {_ho.get('pct_capital_marca', 0)}% del capital · rota bien {_ho.get('n_rota', 0)} · liquidar {_ho.get('n_liquidar', 0)} · devolución {_ho.get('n_recoger', 0)}", STATUS_LIQUIDAR)
+        _ft = _h["foto"]
+        st.caption(f"Foto de {_rep_marca}: S/ {_ft['capital_total']:,} a costo · {_ft['skus']} modelos · {_ft['tiendas']} tiendas · "
+                   f"sell-through {_ft['sell_through_pct']}% · margen efectivo {_ft['margen_efectivo_pct'] if _ft['margen_efectivo_pct'] is not None else '—'}%"
+                   + ("" if _rep_vp is not None else " · sin snapshots suficientes: el bloque 3 sale sin venta perdida")
+                   + ("" if _rep_tev else " · sin ruta de la base: la acción de piso por tienda sale como 'revisar exhibición'"))
+        if _cmp.get("hay_prev"):
+            _k1 = _cmp["kpis"]["b1"]["capital"]; _k2 = _cmp["kpis"]["b2a"]["capital"]
+            st.caption(f"📈 Vs semana {_cmp['semana_prev']}{'' if _cmp['consecutivas'] else ' (no consecutiva)'}: venta cero "
+                       f"{_k1['delta_pct']:+.0f}% · sobrestock {_k2['delta_pct']:+.0f}%" if _k1["delta_pct"] is not None and _k2["delta_pct"] is not None else
+                       f"📈 Hay corte previo ({_cmp['semana_prev']}) para comparar.")
+            if _cmp["persistentes"].get("b1"):
+                st.caption(f"⏱️ {len(_cmp['persistentes']['b1'])} modelos llevan ≥{reporte_proveedor.PERSISTENCIA_ALERTA} semanas seguidas sin venta — van resaltados en el correo.")
         else:
-            st.markdown(f"**{len(_at_op)} marcas terceras con quiebres que vendían bien:**")
-            _at_show = _at_op.rename(columns={
-                'marca': 'Marca', 'n_skus_quiebre': 'SKUs en quiebre',
-                'venta_riesgo_sem': 'Venta en riesgo S//sem', 'vta_sem_uds': 'Vta/sem (uds)',
-            })
-            st.dataframe(_at_show.style.format({
-                'Venta en riesgo S//sem': 'S/ {:,.0f}', 'Vta/sem (uds)': '{:.0f}',
-            }), use_container_width=True, hide_index=True)
+            st.caption("📈 Primer reporte de esta marca con Capi: el comparativo semanal aparece desde el segundo envío.")
 
-            _at_sel = st.selectbox("Marca para generar el correo", _at_op['marca'].tolist(), key="at_sel_q")
-            _at_row = _at_op[_at_op['marca'] == _at_sel].iloc[0]
-            _at_prov_marca = _at_prov.get(_at_sel.upper())
-            if _at_prov_marca and _at_prov_marca.get('contacto'):
-                st.caption(f"Destinatario sugerido: {_at_prov_marca.get('contacto','')} ({_at_prov_marca.get('empresa','')})")
-            if st.button("✍️ Generar texto del correo", key="at_gen_q", type="primary"):
-                with st.spinner("Redactando con IA..."):
+        # ── Detalle (top 50 por bloque) ──
+        _fmt_rep = {"capital_costo": "S/ {:,.0f}", "cobertura_cadena": "{:.1f}", "vta_sem_prom4": "{:.1f}", "pct_descuento": "{:.0%}",
+                    "dscto_sugerido": "{:.0%}", "precio_sugerido": "S/ {:,.2f}", "precio_vigente": "S/ {:,.2f}", "precio_minimo": "S/ {:,.2f}",
+                    "transf_ganancia": "S/ {:,.0f}", "vp_neto_min": "S/ {:,.0f}", "vp_neto_max": "S/ {:,.0f}"}
+        def _mostrar(df, cols):
+            if df.empty:
+                st.caption("Sin modelos en este bloque esta semana."); return
+            _c = [c for c in cols if c in df.columns]
+            st.dataframe(df[_c].head(50).style.format({k: v for k, v in _fmt_rep.items() if k in _c}, na_rep="—"), use_container_width=True, hide_index=True)
+        with st.expander(f"1) Venta cero — {_h['b1']['n_skus']} modelos", expanded=False):
+            _mostrar(_bl["b1"], ["sku", "nombre", "categoria", "estado_cadena", "n_tiendas_stock", "stock_cadena", "capital_costo", "top_80", "semanas_sin_venta", "edad_semanas", "pct_descuento", "dscto_sugerido", "precio_sugerido", "accion"])
+        with st.expander(f"2a) Sobrestock de cadena — {_h['b2a']['n_skus']} modelos", expanded=False):
+            _mostrar(_bl["b2a"], ["sku", "nombre", "categoria", "grupo", "estado_cadena", "tendencia", "stock_cadena", "vta_sem_prom4", "cobertura_cadena", "capital_costo", "top_80", "pct_descuento", "dscto_sugerido", "precio_sugerido", "accion", "alternativas"])
+        with st.expander(f"2b) Transferencias entre tiendas — {_h['b2b']['n_skus']} modelos", expanded=False):
+            _mostrar(_bl["b2b"], ["sku", "nombre", "categoria", "estado_cadena", "transf_uds", "transf_tiendas", "transf_ganancia", "stock_cadena", "cobertura_cadena", "accion"])
+            _det = _bl.get("b2b_detalle")
+            if _det is not None and not _det.empty:
+                st.caption("Detalle origen → destino")
+                _mostrar(_det, ["sku", "nombre", "tienda_origen", "tienda_destino", "uds_transferir", "ganancia_esperada", "cob_origen_pre", "cob_origen_post", "cob_destino_pre", "cob_destino_post"])
+        with st.expander(f"3) Ganadores que se quedan cortos — {_h['b3']['n_skus']} modelos (umbral {_h['b3']['umbral_vta']} u/sem)", expanded=False):
+            _mostrar(_bl["b3"], ["sku", "nombre", "categoria", "tendencia", "entra_por", "vta_sem_prom4", "stock_cadena", "cobertura_cadena", "n_tiendas_quiebre", "n_tiendas", "stock_cd", "necesidad_uds", "pendiente_sin_cd_uds", "sem_en_quiebre_max", "vp_neto_min", "vp_neto_max", "accion"])
+        with st.expander(f"4) Pre-obsoleto y obsoleto (transversal) — {_h.get('obs', {}).get('n_skus', 0)} modelos · S/ {_h.get('obs', {}).get('capital', 0):,}", expanded=False):
+            _mostrar(_bl.get("obs", pd.DataFrame()), ["sku", "nombre", "categoria", "nivel", "estado_cadena", "en_bloque", "edad_semanas", "n_tiendas_stock", "stock_cadena", "capital_costo", "top_80", "pct_descuento", "dscto_sugerido", "precio_sugerido", "accion"])
+        with st.expander("📈 Historial de la marca (cortes enviados con Capi)", expanded=False):
+            _serie = reporte_proveedor.serie_kpis(_cortes, _bl)
+            if _serie.empty or _serie.shape[1] < 2:
+                st.caption("Todavía no hay cortes anteriores de esta marca. La serie se construye con cada reporte enviado.")
+            else:
+                st.dataframe(_serie.style.format("{:,.0f}", na_rep="—"), use_container_width=True)
+
+        # ── Generar ──
+        st.session_state.setdefault("at_rep_firma", "Daniela Hernández · Moda Masculina · Ripley")
+        st.text_input("Firma del correo", key="at_rep_firma")
+        if st.button("✍️ Generar correo + Excel", key="at_rep_gen", type="primary"):
+            with st.spinner("Armando el reporte…"):
+                try:
+                    _prosa = agente_proveedor.redactar(_h)
+                    _via = "prosa redactada con IA — revísala"
+                except Exception as _e_ia:
+                    _prosa = agente_proveedor.redactar_reglas(_h)
+                    _via = f"versión por reglas (sin IA: {_e_ia})"
+                _ev_t = reporte_proveedor.evolucion_texto(_cmp, _bl)
+                _ev_h = reporte_proveedor.evolucion_html(_cmp, _bl)
+                _correo = agente_proveedor.ensamblar(_h, _prosa, reporte_proveedor.tablas_texto(_bl), reporte_proveedor.tablas_html(_bl),
+                                                     firma=st.session_state.get("at_rep_firma", ""), evolucion_texto=_ev_t, evolucion_html=_ev_h)
+                _xlsx = reporte_proveedor.excel_proveedor(_bl, cortes=_cortes, cmp=_cmp)
+                try:
+                    reporte_proveedor.persistir_corte(_bl, _rep_sem, enviado=False)
+                except Exception as _e_pc:
+                    st.warning(f"No se pudo guardar el corte de la marca en snapshots/: {_e_pc}")
+                st.session_state["at_borrador_rep"] = {
+                    "marca": _rep_marca, "semana_iso": _rep_sem, "corte": _rep_corte, "via": _via, "xlsx": _xlsx,
+                    "cuerpo_html": _correo["cuerpo_html"], "sospechosos": _correo["sospechosos"], "fp": _rep_fp,
+                    "capital_total": _h["b1"]["capital"] + _h["b2a"]["capital"], "detalle_lote": reporte_proveedor.detalle_lote(_bl),
+                }
+                st.session_state["at_rep_asunto"] = _correo["asunto"]
+                st.session_state["at_rep_cuerpo"] = _correo["cuerpo_texto"]
+
+        # ── Borrador: revisar / copiar / descargar / registrar ──
+        _bor = st.session_state.get("at_borrador_rep")
+        if _bor and _bor.get("fp") == _rep_fp:
+            st.markdown("---")
+            st.markdown(f"##### ✉️ Reporte semanal para {_bor['marca']} — semana {_bor['semana_iso']}")
+            st.caption(f"Borrador: {_bor['via']}. Copia el asunto y el cuerpo a tu Outlook, adjunta el Excel y envíalo. Capi no envía nada. Para ajustar la prosa, edítala en Outlook.")
+            if _bor["sospechosos"]:
+                st.error("El borrador tiene cifras que NO están en el análisis: " + ", ".join(_bor["sospechosos"]) + ". Corrígelas antes de enviar.")
+            st.text_input("Asunto", key="at_rep_asunto")
+            # Solo la vista con tablas (Franco 20-sep): el texto plano queda en session_state por si hace falta, sin widget.
+            st.markdown("**Cuerpo del correo** — selecciona todo dentro del cuadro, copia y pega en Outlook: las tablas se conservan.")
+            with st.container(border=True):
+                st.markdown(_bor["cuerpo_html"], unsafe_allow_html=True)
+            st.download_button("📥 Excel para el proveedor", data=_bor["xlsx"],
+                               file_name=f"Reporte_Proveedor_{str(_bor['marca']).replace(' ', '_')}_{_bor['corte']}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_rep_prov_xlsx")
+            _rb1, _rb2 = st.columns(2)
+            _n_lote = len(_bor["detalle_lote"])
+            if _rb1.button(f"📨 Ya lo envié → registrar (correo + lote venta cero, {_n_lote:,} combos)", key="at_rep_enviado", type="primary"):
+                with st.spinner("Registrando…"):
+                    acciones_log.agregar("", "Negociación Terceras", str(_bor["marca"]).upper(),
+                                         f"Reporte semanal al proveedor enviado: {st.session_state.get('at_rep_asunto', '')[:100]}",
+                                         magnitud=f"S/ {_bor['capital_total']:,.0f}", vista="Agente Terceras", corte_base=_nombre_base())
+                    _r_lote = None
+                    if _n_lote:
+                        _r_lote = acciones_log.registrar_lote(
+                            "Venta Cero / Exhibición", "Agente Terceras",
+                            f"prov-{str(_bor['marca']).lower().replace(' ', '-')}-{_bor['semana_iso']}", _bor["semana_iso"],
+                            _bor["detalle_lote"], f"Venta cero enviada al proveedor {_bor['marca']} (reporte semanal)",
+                            marca=str(_bor["marca"]).upper(), corte_base=_nombre_base())
                     try:
-                        _at_correo = agente_terceras.generar_correo_reorder(_at_row, _at_prov_marca)
-                        st.session_state["at_borrador"] = _at_correo
-                    except Exception as _at_e:
-                        st.error(f"No se pudo generar el texto: {_at_e}")
+                        reporte_proveedor.persistir_corte(_bl, _bor["semana_iso"], enviado=True)
+                    except Exception as _e_pc:
+                        st.warning(f"El corte quedó sin marcar como enviado: {_e_pc}")
+                    _resp_prev = reporte_proveedor.cargar_respuesta(_bor["marca"], _bor["semana_iso"])
+                    _r_np = notion_store.upsert_proveedor(
+                        _bor["marca"], _bor["semana_iso"],
+                        reporte_proveedor.props_notion_proveedor(_bl, _cmp, enviado=True, respuesta=_resp_prev),
+                        archivos=[(f"Reporte_Proveedor_{str(_bor['marca']).replace(' ', '_')}_{_bor['corte']}.xlsx", _bor["xlsx"])])
+                if _r_lote and _r_lote.get("notion_url"):
+                    st.success(f"✅ Registrado: acción + lote **{_r_lote['lote']}** ({_r_lote['filas']:,} combos) → [ver en Notion]({_r_lote['notion_url']})")
+                elif _r_lote and _r_lote.get("error"):
+                    st.warning(f"Acción registrada. El lote **{_r_lote['lote']}** quedó en disco local pero no llegó a Notion: {_r_lote['error']}.")
+                elif not notion_store.disponible():
+                    st.warning("Registrado solo en el disco local: no hay NOTION_TOKEN. ☁️ En la nube este registro se pierde al reiniciar.")
+                else:
+                    st.success("✅ Acción registrada en el log.")
+                if _r_np.get("ok"):
+                    st.success(f"📈 Fila de {_bor['marca']} · {_bor['semana_iso']} {'creada' if _r_np['creada'] else 'actualizada'} en Proveedores Capi → [ver]({_r_np['url']})")
+                elif _r_np.get("error") != "sin NOTION_TOKEN":
+                    st.warning(f"No se pudo escribir la fila en 📈 Proveedores Capi: {_r_np.get('error')}. ¿La integración está conectada a esa base?")
+                st.session_state["at_rep_bloques_fp"] = None      # recalcular: ahora hay corte enviado
+                st.session_state["at_rep_reset"] = True
+                st.rerun()
+            if _rb2.button("🗑️ Descartar borrador", key="at_rep_descartar"):
+                st.session_state["at_rep_reset"] = True
+                st.rerun()
 
-    # ── Borrador generado: revisar / editar / copiar ──
-    _at_bor = st.session_state.get("at_borrador")
-    if _at_bor:
+        # ── Respuesta del proveedor (decisión Franco 18-sep: score solo con lo confirmado por correo) ──
         st.markdown("---")
-        st.markdown(f"##### ✉️ Texto para {_at_bor.get('marca','')} — revisar y copiar")
-        st.text_input("Asunto", value=_at_bor.get("asunto", ""), key="at_asunto")
-        st.text_area("Cuerpo", value=_at_bor.get("cuerpo", ""), height=320, key="at_cuerpo")
-        st.caption("Revisa y ajusta el texto, luego cópialo a tu correo de Ripley para enviarlo al proveedor. "
-                   "El agente solo redacta — el envío lo haces tú.")
-        _atb1, _atb2 = st.columns(2)
-        if _atb1.button("📨 Ya lo envié → registrar acción", key="at_enviado", type="primary"):
-            acciones_log.agregar(
-                "", "Negociación Terceras", str(_at_bor.get("marca", "")).upper(),
-                f"Correo al proveedor enviado: {_at_bor.get('asunto', '')[:120]}",
-                origen="Sugerida por Capi", estado="Ejecutada")
-            del st.session_state["at_borrador"]
-            st.success("Acción registrada en el log ✅ — cuenta para el Caso de Éxito.")
-        if _atb2.button("🗑️ Descartar", key="at_descartar"):
-            del st.session_state["at_borrador"]
-            st.rerun()
+        with st.expander("📬 Respuesta del proveedor — registrar lo que confirmó por correo", expanded=False):
+            _sem_opts = sorted(set([_rep_sem] + ([str(x) for x in _cortes["semana_iso"].unique()] if not _cortes.empty else [])), reverse=True)
+            _rp_c1, _rp_c2, _rp_c3 = st.columns([1, 1, 1])
+            _rp_sem = _rp_c1.selectbox("Semana del reporte", _sem_opts, key="at_rep_resp_sem")
+            _rp_key = f"at_rep_resp::{_rep_marca}::{_rp_sem}"
+            if st.session_state.get("at_rep_resp_key") != _rp_key:
+                st.session_state["at_rep_resp"] = reporte_proveedor.cargar_respuesta(_rep_marca, _rp_sem)
+                st.session_state["at_rep_resp_key"] = _rp_key
+            _resp = st.session_state["at_rep_resp"]
+            _resp["respondio"] = _rp_c2.selectbox("¿Respondió?", reporte_proveedor.RESPONDIO,
+                                                  index=reporte_proveedor.RESPONDIO.index(_resp.get("respondio", reporte_proveedor.RESPONDIO[0])), key="at_rep_resp_si")
+            _resp["fecha_respuesta"] = _rp_c3.text_input("Fecha de respuesta (AAAA-MM-DD)", value=_resp.get("fecha_respuesta", ""), key="at_rep_resp_fecha")
+            _resp["notas"] = st.text_area("Notas de la respuesta", value=_resp.get("notas", ""), height=80, key="at_rep_resp_notas")
+
+            # modelos enviados de esa semana (del corte persistido; si es la semana actual, de los bloques vivos)
+            if _rp_sem == _rep_sem:
+                _cat = {b: _bl[b] for b in ("b1", "b2a", "b2b", "b3")}
+                _opts = {b: [f"{reporte_proveedor.sku_key(r.sku)} · {r.nombre}" for r in _cat[b].itertuples()] for b in _cat}
+            else:
+                _cs = _cortes[_cortes["semana_iso"] == _rp_sem] if not _cortes.empty else pd.DataFrame()
+                _opts = {b: [f"{r.sku} · {r.nombre}" for r in _cs[_cs["bloque"] == b].itertuples()] for b in ("b1", "b2a", "b2b", "b3")}
+            st.markdown("**Agregar compromiso**")
+            _cc1, _cc2, _cc3 = st.columns([1, 1.4, 1])
+            _c_bloque = _cc1.selectbox("Bloque", list(reporte_proveedor.BLOQUES_LABEL), format_func=lambda b: reporte_proveedor.BLOQUES_LABEL[b], key="at_rep_c_bloque")
+            _c_accion = _cc2.selectbox("Acción comprometida", reporte_proveedor.ACCIONES_PROVEEDOR, key="at_rep_c_accion")
+            _c_fecha = _cc3.text_input("Fecha compromiso (AAAA-MM-DD)", key="at_rep_c_fecha")
+            _c_todos = st.checkbox("Aplica a todos los modelos del bloque", key="at_rep_c_todos")
+            _c_skus = st.multiselect("Modelos", _opts.get(_c_bloque, []), key="at_rep_c_skus", disabled=_c_todos)
+            _c_nota = st.text_input("Nota (opcional)", key="at_rep_c_nota")
+            if st.button("➕ Agregar compromiso", key="at_rep_c_add"):
+                _sel = _opts.get(_c_bloque, []) if _c_todos else _c_skus
+                if not _sel:
+                    st.warning("Elige al menos un modelo o marca 'todos'.")
+                else:
+                    _resp.setdefault("compromisos", []).append({"bloque": _c_bloque, "accion": _c_accion, "skus": [x.split(" · ")[0] for x in _sel],
+                                                                "fecha": _c_fecha, "nota": _c_nota, "cumplido": False})
+                    st.rerun()
+            _comps = _resp.get("compromisos", [])
+            if _comps:
+                st.markdown("**Compromisos registrados** (marca «cumplido» cuando ocurra)")
+                for _i, _c in enumerate(_comps):
+                    _k1, _k2, _k3 = st.columns([5, 1, 1])
+                    _k1.markdown(f"- {reporte_proveedor.BLOQUES_LABEL.get(_c['bloque'], _c['bloque'])} · **{_c['accion']}** · {len(_c['skus'])} modelo(s)"
+                                 + (f" · para el {_c['fecha']}" if _c.get("fecha") else "") + (f" · _{_c['nota']}_" if _c.get("nota") else ""))
+                    _c["cumplido"] = _k2.checkbox("Cumplido", value=bool(_c.get("cumplido")), key=f"at_rep_c_ok_{_i}")
+                    if _k3.button("Quitar", key=f"at_rep_c_del_{_i}"):
+                        _comps.pop(_i); st.rerun()
+                _sc = reporte_proveedor.score_respuesta(_h if _rp_sem == _rep_sem else _h, _resp)
+                st.caption(f"Respuesta: {_sc['modelos_con_compromiso']} de {_sc['modelos_enviados']} modelos enviados con compromiso"
+                           + (f" ({_sc['respuesta_pct']}%)" if _sc['respuesta_pct'] is not None else "")
+                           + f" · cumplidos {_sc['n_cumplidos']}/{_sc['n_compromisos']}")
+            if st.button("💾 Guardar respuesta (log + Notion)", key="at_rep_resp_save", type="primary"):
+                with st.spinner("Guardando…"):
+                    reporte_proveedor.guardar_respuesta(_rep_marca, _rp_sem, _resp)
+                    for _c in _comps:
+                        if _c.get("_logueado"):
+                            continue
+                        acciones_log.agregar("", "Negociación Terceras", str(_rep_marca).upper(),
+                                             f"Compromiso proveedor ({reporte_proveedor.BLOQUES_LABEL.get(_c['bloque'], _c['bloque'])}): {_c['accion']} — {len(_c['skus'])} modelos"
+                                             + (f" para el {_c['fecha']}" if _c.get("fecha") else ""),
+                                             sku=", ".join(_c["skus"][:20]), estado="Ejecutada" if _c.get("cumplido") else "En curso",
+                                             vista="Agente Terceras", corte_base=_nombre_base())
+                        _c["_logueado"] = True
+                    reporte_proveedor.guardar_respuesta(_rep_marca, _rp_sem, _resp)
+                    _bl_np = _bl if _rp_sem == _rep_sem else None
+                    if _bl_np is not None:
+                        _r_np2 = notion_store.upsert_proveedor(_rep_marca, _rp_sem, reporte_proveedor.props_notion_proveedor(_bl_np, _cmp, enviado=False, respuesta=_resp))
+                    else:
+                        _r_np2 = notion_store.upsert_proveedor(_rep_marca, _rp_sem, reporte_proveedor.props_respuesta_solo(_rep_marca, _rp_sem, _resp))
+                if _r_np2.get("ok"):
+                    st.success(f"✅ Respuesta guardada → [fila en Proveedores Capi]({_r_np2['url']})")
+                elif _r_np2.get("error") == "sin NOTION_TOKEN":
+                    st.warning("Respuesta guardada en disco local (sin NOTION_TOKEN). ☁️ En la nube se pierde al reiniciar.")
+                else:
+                    st.warning(f"Respuesta guardada en disco; Notion falló: {_r_np2.get('error')}")
 
 
 # ─── TAB 2: Gestión por Antigüedad ─────────────────────────────────
@@ -5245,6 +5540,13 @@ if nav_page == "📲 Productos Venta Cero":
             _vp80_buf.getvalue(), file_name="Capi_Venta_Cero_Tiendas_Pareto.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dl_vc_pareto", use_container_width=True)
+        # ── K1 (Franco 2026-09-12): registrar la lista enviada a jefes de tienda para medir activación ──
+        if not _vp80.empty:
+            _det_vc = _vp80[_vp80["top_80"].astype(str) != ""][["sku", "tienda", "marca", "nombre", "categoria", "stock_total"]].rename(columns={"stock_total": "uds"})
+            _registrar_lote_ui("reg_vc", "📤 Registrar esta lista (TOP 80%) como ENVIADA a tiendas",
+                               "Venta Cero / Exhibición", "Venta Cero", f"vc-{_semana_base()}", _det_vc,
+                               "Lista Pareto 80% de venta cero enviada a jefes de tienda",
+                               ayuda="Guarda los SKU × tienda del TOP 80%. La semana siguiente se mide qué % vendió (K1) contra la cola no enviada.")
 
         # Excel: una hoja por tienda (para repartir a cada una)
         _vc_buf = io.BytesIO()
@@ -5871,13 +6173,64 @@ elif nav_page == "🏆 Caso de Éxito":
 
         with _tab_log:
             _log = acciones_log.cargar()
-            if _log.empty:
-                st.info("Sin acciones registradas todavía. La primera se registra en la pestaña de al lado.")
+            _lc1, _lc2 = st.columns([3, 1])
+            if notion_store.disponible():
+                _pend = int((_log["notion_url"].astype(str) == "").sum()) if not _log.empty else 0
+                _lc1.caption(f"☁️ Fuente: Notion 📋 Acciones Capi ({len(_log):,} acciones) · {_pend} pendiente(s) de sincronizar")
+                if _lc2.button("🔄 Sincronizar", key="sync_log", disabled=_pend == 0):
+                    _rs = acciones_log.sincronizar_pendientes()
+                    st.success(f"{_rs['subidas']} subida(s) a Notion · {_rs['pendientes']} pendiente(s) {('· ' + _rs['error']) if _rs.get('error') else ''}")
+                    st.rerun()
             else:
-                st.dataframe(_log.sort_values("fecha_registro", ascending=False),
-                             use_container_width=True, hide_index=True, height=300)
+                _lc1.caption("☁️ Sin NOTION_TOKEN: el log vive solo en este disco. En la nube se borra al reiniciar.")
+            if _log.empty:
+                st.info("Sin acciones registradas todavía. Se registran desde 📦 Reposición (giro enviado), "
+                        "📲 Venta Cero (lista enviada), 🎯 Match, 🤝 Agente Terceras o la pestaña de al lado.")
+            else:
+                _log_show = _log[[c for c in ["fecha_registro", "semana_iso", "tipo", "vista", "lote", "marca", "sku", "descripcion",
+                                              "magnitud", "origen", "estado", "notion_url"] if c in _log.columns]]
+                st.dataframe(_log_show, use_container_width=True, hide_index=True, height=300,
+                             column_config={"notion_url": st.column_config.LinkColumn("Notion", display_text="abrir")})
                 st.download_button("📥 Descargar log (CSV)",
                                    data=_log.to_csv(index=False).encode("utf-8"),
                                    file_name="acciones_log.csv", mime="text/csv")
-                st.caption("☁️ En la nube el registro es temporal: descarga el CSV al terminar y "
-                           "pásalo al flujo semanal (se versiona en el repo junto al snapshot).")
+
+        # ── K4 Adopción + K1 Activación de venta cero (KPIs aprobados por Franco 2026-09-12) ──
+        st.markdown("---")
+        st.markdown("##### 📈 KPIs de uso y resultado (K4 adopción · K1 venta cero)")
+        try:
+            _ws_k = snapshots_engine.list_available_weeks()
+        except Exception:
+            _ws_k = []
+        def _racha(ws):
+            n = 0
+            for i in range(len(ws) - 1, 0, -1):
+                y1, w1 = map(int, ws[i].split("-")); y0, w0 = map(int, ws[i - 1].split("-"))
+                if (y1 * 100 + w1) - (y0 * 100 + w0) == 1:
+                    n += 1
+                else:
+                    break
+            return n + 1 if ws else 0
+        _k1, _k2, _k3 = st.columns(3)
+        _k1.metric("Semanas seguidas con corte", f"{_racha(_ws_k)}", help=f"Último corte: {_ws_k[-1] if _ws_k else '—'}. Se rompe si una semana no se carga la base.")
+        _n_acc_sem = int((_log["semana_iso"] == _semana_base()).sum()) if not _log.empty else 0
+        _k2.metric("Acciones registradas esta semana", f"{_n_acc_sem}", help=f"Semana de la base cargada: {_semana_base()}")
+        _lotes = acciones_log.lotes(df=_log) if not _log.empty else pd.DataFrame()
+        _k3.metric("Lotes enviados (giro / venta cero)", f"{len(_lotes)}")
+        if not _lotes.empty:
+            with st.expander("K1 · Activación de venta cero: % de lo enviado que vendió la semana siguiente vs la cola no enviada", expanded=True):
+                _vc_lotes = _lotes[_lotes["tipo"].astype(str).str.contains("Venta Cero", na=False)]
+                if _vc_lotes.empty:
+                    st.info("Aún no hay una lista de venta cero registrada (📲 Productos Venta Cero → «Registrar esta lista»). "
+                            "Tasa base medida sin ritual (sem 30→35): 29–35 % en el Pareto, 11–12 % en la cola.")
+                for _, _lr in _vc_lotes.head(6).iterrows():
+                    _ra = kpi_venta_cero.activacion_lote(str(_lr["lote"]))
+                    if _ra.get("error"):
+                        st.caption(f"**{_lr['lote']}** · {_ra['error']}")
+                        continue
+                    _a1, _a2, _a3, _a4 = st.columns(4)
+                    _a1.metric(f"{_lr['lote']} · enviados", f"{_ra['n_enviados']:,}")
+                    _a2.metric("Activación enviados", f"{_ra['activacion_enviados']*100:.0f}%" if _ra['n_enviados'] else "—")
+                    _a3.metric("Activación cola (no enviada)", f"{_ra['activacion_no_enviados']*100:.0f}%" if _ra['n_no_enviados'] else "—")
+                    _a4.metric("Lift", f"{_ra['lift_pp']:+.0f} pp" if _ra['n_enviados'] and _ra['n_no_enviados'] else "—",
+                               help=f"Medido en el corte {_ra['semana_medida']} sobre el envío de {_ra['semana']}. Base sin ritual: 29–35 % Pareto vs 11–12 % cola.")

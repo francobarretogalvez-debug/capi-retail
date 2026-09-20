@@ -6,9 +6,12 @@ todo "por tienda" en series semanales (Pareto, obsoletos, cumplimiento de empuje
 En vez de refactorizar las 17 funciones de `api.py`, se guarda un SEGUNDO parquet por
 semana (`tienda.parquet`) con solo lo necesario:
 
-    semana_iso, sku, tienda, stock_uds, vta_uds_sem, on_order, ume, stock_costo
+    semana_iso, sku, tienda, stock_uds, vta_uds_sem, vta_soles_sem, on_order, ume, stock_costo
 
 Medido con el Micro del 30-ago: ~23K filas (stock u on-order ≠ 0), ~2 MB/semana.
+`vta_soles_sem` (2026-09-12): venta de la semana en soles por tienda, columna "{t} Vta S/."
+del Micro. La pidió la medición del caso de éxito (empuje 07-sep); antes se descartaba al
+ingerir y había que volver al Excel. Si la base no la trae, queda en 0.
 Se genera junto al snapshot normal (loader) y se puede backfillear desde
 `data2/bases antiguas/`. Las 17 funciones existentes no se tocan.
 """
@@ -23,7 +26,7 @@ import pandas as pd
 from .config import SNAPSHOTS_DIR
 from .storage import list_available_weeks
 
-COLS = ["semana_iso", "sku", "tienda", "stock_uds", "vta_uds_sem", "on_order", "ume", "stock_costo"]
+COLS = ["semana_iso", "sku", "tienda", "stock_uds", "vta_uds_sem", "vta_soles_sem", "on_order", "ume", "stock_costo"]
 
 
 def _detect_stores(columns) -> list:
@@ -45,6 +48,8 @@ def build_from_base(df_raw: pd.DataFrame, semana_iso: str) -> pd.DataFrame:
         oo = pd.to_numeric(df_raw[f"{t} On Order"], errors="coerce").fillna(0)
         vta_col = f"{t} Unidades" if f"{t} Unidades" in df_raw.columns else (f"{t} Vta" if f"{t} Vta" in df_raw.columns else None)
         vta = pd.to_numeric(df_raw[vta_col], errors="coerce").fillna(0) if vta_col else pd.Series(0, index=df_raw.index)
+        soles_col = f"{t} Vta S/." if f"{t} Vta S/." in df_raw.columns else None
+        soles = pd.to_numeric(df_raw[soles_col], errors="coerce").fillna(0) if soles_col else pd.Series(0.0, index=df_raw.index)
         ume = pd.to_numeric(df_raw[f"{t} UME"], errors="coerce").fillna(0)
         m = (stk != 0) | (oo != 0)
         if not m.any():
@@ -55,6 +60,7 @@ def build_from_base(df_raw: pd.DataFrame, semana_iso: str) -> pd.DataFrame:
             "tienda": t,
             "stock_uds": stk[m].astype("int64").values,
             "vta_uds_sem": vta[m].astype("int64").values,
+            "vta_soles_sem": soles[m].astype(float).round(2).values,
             "on_order": oo[m].astype("int64").values,
             "ume": ume[m].astype("int64").values,
             "stock_costo": (stk[m] * costo[m].fillna(0)).round(2).values,

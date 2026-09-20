@@ -169,16 +169,34 @@ def redactar(h: dict, preguntas: str = "", api_key: str | None = None) -> dict:
     return _partir(r.content[0].text)
 
 
-def _partir(texto: str) -> dict:
-    asunto, cuerpo = "", texto.strip()
-    if "ASUNTO:" in texto:
-        resto = texto.split("ASUNTO:", 1)[1]
-        if "---" in resto:
-            asunto, cuerpo = resto.split("---", 1)
-        else:
-            p = resto.split("\n", 1)
-            asunto, cuerpo = p[0], (p[1] if len(p) > 1 else "")
-    return {"asunto": asunto.strip(), "cuerpo": cuerpo.strip()}
+def partir_asunto(texto: str) -> dict:
+    """Separa `ASUNTO: …` del cuerpo en la salida del modelo.
+
+    Regla (fix 2026-09-19): el asunto es SOLO la línea que empieza con `ASUNTO:`;
+    el cuerpo es todo lo que sigue, descartando una línea separadora `---` si es la
+    primera no vacía. La versión anterior partía en el PRIMER `---` del texto: cuando
+    el modelo omitía el separador y usaba `---` como regla horizontal más abajo, el
+    saludo terminaba dentro del asunto y el cuerpo arrancaba a mitad del correo
+    (bug visto por Franco en el Agente Terceras, 2026-09-18). Sin `ASUNTO:` devuelve
+    asunto vacío y el texto completo como cuerpo. Compartida por agente_reporte,
+    agente_terceras y agente_proveedor."""
+    import re
+    lineas = texto.strip().splitlines()
+    for i, ln in enumerate(lineas):
+        m = re.match(r"^\s*\**\s*ASUNTO\s*:\s*\**\s*(.*?)\s*\**\s*$", ln, flags=re.I)
+        if m:
+            asunto = m.group(1).strip()
+            resto = lineas[i + 1:]
+            while resto and not resto[0].strip():
+                resto.pop(0)
+            if resto and resto[0].strip() == "---":
+                resto.pop(0)
+            return {"asunto": asunto, "cuerpo": "\n".join(resto).strip()}
+    return {"asunto": "", "cuerpo": texto.strip()}
+
+
+# Alias histórico: el resto del módulo y los tests viejos llaman `_partir`.
+_partir = partir_asunto
 
 
 def verificar(cuerpo: str, h: dict) -> list[str]:

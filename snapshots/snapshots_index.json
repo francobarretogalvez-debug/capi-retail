@@ -124,5 +124,23 @@
     "timestamp": "2026-09-05T18:23:11.838724",
     "path": "/Users/francobarreto/capi-retail/snapshots/2026-35/snapshot.parquet",
     "hash": "101d2144d258"
+  },
+  {
+    "semana_iso": "2026-36",
+    "fecha_cierre": "2026-09-06",
+    "n_filas": 5549,
+    "n_skus": 5549,
+    "timestamp": "2026-09-12T22:07:17.310725",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-36/snapshot.parquet",
+    "hash": "983021ba6a89"
+  },
+  {
+    "semana_iso": "2026-37",
+    "fecha_cierre": "2026-09-13",
+    "n_filas": 5485,
+    "n_skus": 5485,
+    "timestamp": "2026-09-19T22:08:40.418694",
+    "path": "/Users/francobarreto/capi-retail/snapshots/2026-37/snapshot.parquet",
+    "hash": "552c58dec147"
   }
 ]

@@ -61,6 +61,8 @@ DEFAULT_PARAMS = {
     "costo_transf_unit":   3.5,   # S/ por unidad transferida (hoja Ripley 2026-08-24)
     "horizonte_transf_sem": 8,    # semanas para proyectar venta en destino
     "uds_min_trans":     3,    # mínimo de unidades para generar transferencia
+    "edad_min_trans":    4,    # semanas mínimas del SKU para ser ORIGEN de transferencia (Franco 2026-09-19:
+                               # la mercadería tarda ~2 sem en llegar y exhibirse; antes de 4 no es exceso real)
     "cob_target":       12,    # semanas objetivo post-reposición (centro del rango ÓPTIMO)
     "reparto_cd":       "fair_share",  # reparto del CD entre tiendas: fair_share (misma cobertura post) | prioridad (legacy)
     # — Alertas para tiendas (reporte accionable por personal de piso) —
@@ -919,6 +921,7 @@ def build_transferencias(df_cobertura, params):
     ua         = params["umbral_alto"]
     flete_unit = params.get("costo_transf_unit", 3.5)
     horizonte  = params.get("horizonte_transf_sem", 8)
+    edad_min   = params.get("edad_min_trans", 4)
 
     # Proxies para velocidad esperada en destino (fallback cuando el destino
     # está en quiebre y su velocidad SKU está subestimada por falta de stock):
@@ -941,6 +944,15 @@ def build_transferencias(df_cobertura, params):
                 Estado.DORMIDO, Estado.OBSOLETO,
             ])
         ]
+        # Regla de edad (Franco 2026-09-19): un SKU con menos de `edad_min` semanas no es origen;
+        # la mercadería tarda ~2 semanas en llegar a tienda y exhibirse, su cobertura alta es artificial.
+        if 'edad_semanas' in fuentes.columns and edad_min:
+            fuentes = fuentes[fuentes['edad_semanas'].fillna(0) >= edad_min]
+        # Prioridad de origen (Franco 2026-09-19): primero la tienda con PEOR cobertura (sin venta =
+        # infinita), para vaciar antes al que más carga. Antes iban en el orden de la base.
+        if not fuentes.empty:
+            fuentes = fuentes.assign(_cob_ord=pd.to_numeric(fuentes['cobertura_sem'], errors='coerce').fillna(np.inf)) \
+                             .sort_values(['_cob_ord', 'stock_total'], ascending=[False, False]).drop(columns='_cob_ord')
         # Destinos: tiendas que necesitan stock (QUIEBRE, BAJA)
         destinos = df_sku[df_sku['estado'].isin([Estado.QUIEBRE, Estado.PRE_QUIEBRE])]
 

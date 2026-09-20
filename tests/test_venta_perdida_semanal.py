@@ -37,8 +37,10 @@ def test_ultima_semana_coherente():
 
 
 def test_serie():
+    from snapshots_engine import tienda as _t
     s = vp.serie_semanas(3)
-    assert len(s) == 3 and s["semana"].iloc[-1] == "2026-35" and (s["neto_max"] >= s["neto_min"]).all()
+    # la última de la serie es la última semana con tienda.parquet (2026-36 desde el 12-sep; antes 2026-35)
+    assert len(s) == 3 and s["semana"].iloc[-1] == _t.list_tienda_weeks()[-1] and (s["neto_max"] >= s["neto_min"]).all()
 
 
 def test_temporada_en_liquidacion_inferida():

@@ -79,7 +79,12 @@ def _con_sugerencias(g: pd.DataFrame, precio_min_map: dict) -> pd.DataFrame:
     precio mínimo a un agregado por SKU."""
     g = g.copy()
     sug = g["edad_semanas"].apply(lambda e: agente_terceras.descuento_sugerido(e))
-    g["dscto_sugerido"] = sug.map(lambda t: t[0])
+    # dscto_piramide = lo que dice la pirámide por edad (crudo). dscto_sugerido se recalcula más
+    # abajo como el descuento EFECTIVO que se le comunica: el del precio sugerido cuando hay
+    # bajada, o el actual cuando ya está en/sobre la pirámide o en piso. Nunca menor al actual
+    # (Franco 2026-09-19: "estás poniendo descuentos sugeridos menores a los actuales").
+    g["dscto_piramide"] = sug.map(lambda t: t[0])
+    g["dscto_sugerido"] = g["dscto_piramide"]
     g["tipo_dscto"] = sug.map(lambda t: t[1])
     # Piso de margen UNIVERSAL (fix B7 auditoría 2026-08-23): df_prec solo trae
     # precio_minimo para estados críticos; para el resto se calcula igual que
@@ -101,7 +106,7 @@ def _con_sugerencias(g: pd.DataFrame, precio_min_map: dict) -> pd.DataFrame:
     # actual ya supera la pirámide, o el piso de margen no deja bajar más,
     # la acción es Mantener.
     if "precio_blanco" in g.columns and "precio_vigente" in g.columns:
-        p_obj = (g["precio_blanco"] * (1 - g["dscto_sugerido"])).round(2)
+        p_obj = (g["precio_blanco"] * (1 - g["dscto_piramide"])).round(2)
         limitado_piso = pd.Series(False, index=g.index)
         if "precio_minimo" in g.columns:
             piso = g["precio_minimo"]
@@ -112,6 +117,9 @@ def _con_sugerencias(g: pd.DataFrame, precio_min_map: dict) -> pd.DataFrame:
         _sin_piso = g["precio_minimo"].isna() if "precio_minimo" in g.columns else pd.Series(False, index=g.index)
         bajar = (p_obj < (g["precio_vigente"] - 0.01)) & ~_sin_piso
         g["precio_sugerido"] = np.where(bajar, p_obj, np.nan)
+        _actual = g["pct_descuento"].fillna(0) if "pct_descuento" in g.columns else pd.Series(0.0, index=g.index)
+        _efectivo = np.where(g["precio_blanco"] > 0, 1 - p_obj / g["precio_blanco"], g["dscto_piramide"])
+        g["dscto_sugerido"] = np.where(bajar, np.round(_efectivo, 3), np.maximum(_actual, 0))
         g["accion"] = np.where(
             _sin_piso,
             "⚠️ Sin costo en base — revisar antes de sugerir",
@@ -135,7 +143,7 @@ _COLS_PRECIO = [
     ("rango_antiguedad", "Antigüedad"), ("stock_cadena", "Stock (uds)"),
     ("vta_sem_prom4", "Vta sem (prom 4)"), ("cobertura_cadena", "Cobertura (sem)"),
     ("capital_costo", "Capital S/ (costo)"), ("costo", "Costo unit."),
-    ("pct_descuento", "Dscto actual"), ("dscto_sugerido", "Dscto sugerido"),
+    ("pct_descuento", "Dscto actual"), ("dscto_piramide", "Dscto pirámide"), ("dscto_sugerido", "Dscto sugerido"),
     ("tipo_dscto", "Tipo"), ("accion", "Acción"), ("precio_blanco", "P. Blanco"),
     ("precio_vigente", "P. Vigente"), ("precio_sugerido", "P. Sugerido"),
     ("margen_resultante", "Margen result."), ("precio_minimo", "P. Mínimo (piso)"),
@@ -144,7 +152,7 @@ _COLS_PRECIO = [
 _FMTS_PRECIO = {
     "Edad (sem)": "0", "Stock (uds)": _FMT_S, "Vta sem (prom 4)": _FMT_C,
     "Cobertura (sem)": _FMT_C, "Capital S/ (costo)": _FMT_S, "Costo unit.": _FMT_P,
-    "Dscto actual": _FMT_PCT, "Dscto sugerido": _FMT_PCT, "P. Blanco": _FMT_P,
+    "Dscto actual": _FMT_PCT, "Dscto pirámide": _FMT_PCT, "Dscto sugerido": _FMT_PCT, "P. Blanco": _FMT_P,
     "P. Vigente": _FMT_P, "P. Sugerido": _FMT_P, "Margen result.": _FMT_PCT,
     "P. Mínimo (piso)": _FMT_P,
 }
@@ -186,6 +194,99 @@ def _hoja_precio(writer, hoja, titulo, g):
     if "Antigüedad" in out.columns:
         out["Antigüedad"] = out["Antigüedad"].map(_RANGO_LABEL).fillna(out["Antigüedad"])
     _escribir_tabla(writer, hoja, titulo, out, _FMTS_PRECIO, chips_col="Estado")
+
+
+
+def transferencias_por_sku(df_trans, skus, nombre_map: dict | None = None,
+                           flete_lo_paga_ripley: bool = False) -> pd.DataFrame:
+    """Transferencias del motor agregadas por MODELO con el umbral oficial del reporte
+    al proveedor (decisión 2026-08-05 + criterio económico 2026-08-24): solo modelos
+    con ≥TRANSF_MIN_UDS uds y ganancia esperada > 0 (o valor de venta ≥TRANSF_MIN_VALOR
+    cuando la base no trae ganancia). Única fuente de "Uds a mover" para la hoja
+    4. Transferir y para el sub-bloque 2b del reporte semanal al proveedor: si cambia
+    el umbral, cambia en un solo lugar.
+
+    `flete_lo_paga_ripley=False` (default, marcas TERCERAS — precisión Franco 2026-09-19):
+    el traslado lo hace y lo costea el proveedor, así que el flete de S/3.50/ud del motor
+    NO se resta: ganancia = contribución de las unidades vendibles en destino
+    (= ganancia_esperada + costo_flete). Con True se usa la ganancia neta del motor.
+
+    Devuelve: sku, nombre, transf_uds, transf_valor, transf_tiendas, transf_ganancia
+    (NaN cuando la base no trae ganancia), ordenado por ganancia (o valor) desc."""
+    cols = ["sku", "nombre", "transf_uds", "transf_valor", "transf_tiendas", "transf_ganancia"]
+    if df_trans is None or df_trans.empty or "sku" not in df_trans.columns:
+        return pd.DataFrame(columns=cols)
+    t = df_trans[df_trans["sku"].isin(set(skus))].copy()
+    if t.empty:
+        return pd.DataFrame(columns=cols)
+    if "nombre" not in t.columns:
+        t["nombre"] = t["sku"].map(nombre_map or {})
+    t["valor"] = t["uds_transferir"] * t["precio_vigente"]
+    tiene_ganancia = ("ganancia_esperada" in t.columns
+                      and t["ganancia_esperada"].notna().any())
+    if tiene_ganancia and not flete_lo_paga_ripley and "costo_flete" in t.columns:
+        t["_ganancia"] = t["ganancia_esperada"] + t["costo_flete"].fillna(0)
+    else:
+        t["_ganancia"] = t["ganancia_esperada"] if tiene_ganancia else np.nan
+    agg = dict(transf_uds=("uds_transferir", "sum"), transf_valor=("valor", "sum"),
+               transf_tiendas=("tienda_destino", "nunique"))
+    if tiene_ganancia:
+        agg["transf_ganancia"] = ("_ganancia", "sum")
+    g = t.groupby(["sku", "nombre"], as_index=False).agg(**agg)
+    if tiene_ganancia:
+        g = g[(g["transf_uds"] >= TRANSF_MIN_UDS) & (g["transf_ganancia"] > 0)]
+        g = g.sort_values("transf_ganancia", ascending=False)
+    else:
+        g["transf_ganancia"] = np.nan
+        g = g[(g["transf_uds"] >= TRANSF_MIN_UDS) & (g["transf_valor"] >= TRANSF_MIN_VALOR)]
+        g = g.sort_values("transf_valor", ascending=False)
+    return g[cols].reset_index(drop=True)
+
+
+def _hoja_leyenda(writer) -> None:
+    """Pestaña Leyenda (estados, pirámide, piso, reglas). Compartida por el reporte de
+    9 pestañas y por el Excel del reporte semanal al proveedor."""
+    ws = writer.book.create_sheet("Leyenda")
+    ws["A1"] = "Cómo leer este reporte — estados de stock"
+    ws["A1"].font = F_TITULO
+    ws["A2"] = ("El estado se calcula por modelo×tienda combinando cobertura "
+                "(semanas de stock según su venta) y edad (semanas desde ingreso).")
+    ws["A2"].font = F_HEADER
+    fila = 4
+    for estado, desc in _LEYENDA_ESTADOS:
+        c = ws.cell(row=fila, column=1, value=estado)
+        if estado in FILLS_ESTADO:
+            c.fill = FILLS_ESTADO[estado]
+            c.font = F_CHIP
+            c.alignment = CENTRADO
+        ws.cell(row=fila, column=2, value=desc)
+        fila += 1
+    fila += 1
+    ws.cell(row=fila, column=1, value="Pirámide de descuentos por antigüedad:").font = F_TITULO
+    fila += 1
+    for col, h in enumerate(["Edad", "Dscto sugerido", "Tipo"], start=1):
+        hc = ws.cell(row=fila, column=col, value=h)
+        hc.font = F_HEADER
+        hc.fill = FILL_HEAD
+    for edad, d, t in _PIRAMIDE:
+        fila += 1
+        ws.cell(row=fila, column=1, value=edad)
+        ws.cell(row=fila, column=2, value=d)
+        ws.cell(row=fila, column=3, value=t)
+    fila += 2
+    ws.cell(row=fila, column=1,
+            value="P. Mínimo (piso) = precio más bajo permitido para no vender bajo costo + margen mínimo.").font = F_HEADER
+    fila += 1
+    ws.cell(row=fila, column=1,
+            value="P. Sugerido solo aparece cuando implica BAJAR el precio; si el dscto actual ya supera la pirámide o el piso no deja bajar más, la Acción es Mantener.").font = F_HEADER
+    fila += 1
+    ws.cell(row=fila, column=1,
+            value="Transferir: modelos con ≥12 uds a mover y contribución esperada positiva (contribución sin IGV × uds que el destino vendería en 8 semanas). "
+                  "En marcas terceras el traslado lo ejecuta y lo asume la marca, por eso no se resta flete de Ripley.").font = F_HEADER
+    fila += 1
+    ws.cell(row=fila, column=1, value=_SUPUESTOS).font = F_HEADER
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 90
 
 
 def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
@@ -295,40 +396,26 @@ def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
                     rg, {"Vta sem (uds)": _FMT_C, "Stock cadena": _FMT_S, "Stock CD": _FMT_S,
                          "Necesidad (uds)": _FMT_S, "A girar hoy (uds)": _FMT_S, "Pendiente sin CD (uds)": _FMT_S})
 
-        # ── 4. Transferir (agregado por modelo, umbral) ──
+        # ── 4. Transferir (agregado por modelo, umbral) — misma función que el
+        #    sub-bloque 2b del reporte semanal al proveedor (un solo umbral) ──
         if df_trans is not None and not df_trans.empty:
-            tr_m = df_trans[df_trans["sku"].isin(dfm["sku"])].copy()
-            if not tr_m.empty:
-                tr_m["valor"] = tr_m["uds_transferir"] * tr_m["precio_vigente"]
-                _tiene_ganancia = ("ganancia_esperada" in tr_m.columns
-                                   and tr_m["ganancia_esperada"].notna().any())
-                _agg = dict(uds=("uds_transferir", "sum"), valor=("valor", "sum"),
-                            tiendas=("tienda_destino", "nunique"))
-                if _tiene_ganancia:
-                    _agg["ganancia"] = ("ganancia_esperada", "sum")
-                tg = tr_m.groupby(["sku", "nombre"], as_index=False).agg(**_agg)
-                if _tiene_ganancia:
-                    # Criterio económico (fórmula Ripley 2026-08-24): solo modelos
-                    # cuya ganancia esperada supera el flete. Reemplaza al proxy
-                    # de valor-venta; el mínimo de unidades se mantiene.
-                    tg = tg[(tg["uds"] >= TRANSF_MIN_UDS) & (tg["ganancia"] > 0)]
-                else:
-                    tg = tg[(tg["uds"] >= TRANSF_MIN_UDS) & (tg["valor"] >= TRANSF_MIN_VALOR)]
-                if not tg.empty:
-                    _temp_map = dfm.drop_duplicates("sku").set_index("sku").get("temporada")
-                    if _temp_map is not None:
-                        tg.insert(2, "temporada", tg["sku"].map(_temp_map))
-                    tg = tg.sort_values("ganancia" if _tiene_ganancia else "valor",
-                                        ascending=False)
-                    tg.columns = (["SKU", "Modelo"] +
-                                  (["Temporada"] if _temp_map is not None else []) +
-                                  ["Uds a mover", "Valor S/ (venta)", "Tiendas destino"] +
-                                  (["Ganancia neta S/"] if _tiene_ganancia else []))
-                    _escribir_tabla(
-                        w, "4. Transferir",
-                        f"{marca} — Rebalanceo entre tiendas (solo movimientos ≥{TRANSF_MIN_UDS} uds y ≥S/{TRANSF_MIN_VALOR:,.0f}) · corte {corte}",
-                        tg, {"Uds a mover": _FMT_S, "Valor S/ (venta)": _FMT_S,
-                             "Ganancia neta S/": _FMT_S})
+            tg = transferencias_por_sku(df_trans, dfm["sku"])
+            if not tg.empty:
+                _tiene_ganancia = bool(tg["transf_ganancia"].notna().any())
+                if not _tiene_ganancia:
+                    tg = tg.drop(columns=["transf_ganancia"])
+                _temp_map = dfm.drop_duplicates("sku").set_index("sku").get("temporada")
+                if _temp_map is not None:
+                    tg.insert(2, "temporada", tg["sku"].map(_temp_map))
+                tg.columns = (["SKU", "Modelo"] +
+                              (["Temporada"] if _temp_map is not None else []) +
+                              ["Uds a mover", "Valor S/ (venta)", "Tiendas destino"] +
+                              (["Contribución esperada S/ (sin flete)"] if _tiene_ganancia else []))
+                _escribir_tabla(
+                    w, "4. Transferir",
+                    f"{marca} — Rebalanceo entre tiendas que ejecuta la marca (≥{TRANSF_MIN_UDS} uds por modelo, con demanda en destino; el traslado lo asume la marca, sin flete Ripley) · corte {corte}",
+                    tg, {"Uds a mover": _FMT_S, "Valor S/ (venta)": _FMT_S,
+                         "Contribución esperada S/ (sin flete)": _FMT_S})
 
         # ── 5. Venta Cero (S7 2026-09-05, pedido Franco): SKU×tienda con stock y sin
         #    venta la última semana, Pareto 80% del capital por tienda. Es lo que el
@@ -391,47 +478,8 @@ def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
                           "Vta prom 4 sem": _FMT_C, "Variación": _FMT_PCT},
                     chips_col="Estado")
 
-        # ── Leyenda ──
-        ws = w.book.create_sheet("Leyenda")
-        ws["A1"] = "Cómo leer este reporte — estados de stock"
-        ws["A1"].font = F_TITULO
-        ws["A2"] = ("El estado se calcula por modelo×tienda combinando cobertura "
-                    "(semanas de stock según su venta) y edad (semanas desde ingreso).")
-        ws["A2"].font = F_HEADER
-        fila = 4
-        for estado, desc in _LEYENDA_ESTADOS:
-            c = ws.cell(row=fila, column=1, value=estado)
-            if estado in FILLS_ESTADO:
-                c.fill = FILLS_ESTADO[estado]
-                c.font = F_CHIP
-                c.alignment = CENTRADO
-            ws.cell(row=fila, column=2, value=desc)
-            fila += 1
-        fila += 1
-        ws.cell(row=fila, column=1, value="Pirámide de descuentos por antigüedad:").font = F_TITULO
-        fila += 1
-        for col, h in enumerate(["Edad", "Dscto sugerido", "Tipo"], start=1):
-            hc = ws.cell(row=fila, column=col, value=h)
-            hc.font = F_HEADER
-            hc.fill = FILL_HEAD
-        for edad, d, t in _PIRAMIDE:
-            fila += 1
-            ws.cell(row=fila, column=1, value=edad)
-            ws.cell(row=fila, column=2, value=d)
-            ws.cell(row=fila, column=3, value=t)
-        fila += 2
-        ws.cell(row=fila, column=1,
-                value="P. Mínimo (piso) = precio más bajo permitido para no vender bajo costo + margen mínimo.").font = F_HEADER
-        fila += 1
-        ws.cell(row=fila, column=1,
-                value="P. Sugerido solo aparece cuando implica BAJAR el precio; si el dscto actual ya supera la pirámide o el piso no deja bajar más, la Acción es Mantener.").font = F_HEADER
-        fila += 1
-        ws.cell(row=fila, column=1,
-                value="Transferir: solo movimientos con ganancia neta positiva (contribución sin IGV × uds vendibles − flete por unidad) y ≥12 uds.").font = F_HEADER
-        fila += 1
-        ws.cell(row=fila, column=1, value=_SUPUESTOS).font = F_HEADER
-        ws.column_dimensions["A"].width = 20
-        ws.column_dimensions["B"].width = 90
+        # ── Leyenda (compartida) ──
+        _hoja_leyenda(w)
 
     buf.seek(0)
     return buf.read()
