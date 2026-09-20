@@ -72,8 +72,8 @@ def redactar_reglas(h: dict) -> dict:
                 f"{b2a.get('n_frenar', 0)}."
                 if b2a.get("n_skus") else "Sobrestock: esta semana no hay modelos con sobrestock a nivel cadena.")
     lead_b2b = (f"Transferencias entre tiendas: {b2b.get('n_skus', 0)} modelos tienen stock donde no rota y faltan donde sí. Son {_sn(b2b.get('uds'))} unidades "
-                f"a mover con ganancia neta de S/ {_sn(b2b.get('ganancia'))} después del flete; te pedimos programar las transferencias; el detalle origen → destino va en el Excel."
-                if b2b.get("n_skus") else "Transferencias: esta semana no hay movimientos entre tiendas que superen el flete.")
+                f"a mover, con S/ {_sn(b2b.get('ganancia'))} de contribución esperada en destino; te pedimos programar las transferencias (el traslado corre por la marca); el detalle origen → destino va en el Excel."
+                if b2b.get("n_skus") else "Transferencias: esta semana no hay movimientos entre tiendas con demanda suficiente en destino.")
     lead_b3 = (f"Ganadores que se quedan cortos: {b3.get('n_skus', 0)} modelos con buena rotación y poca cobertura; {b3.get('n_sin_cd', 0)} sin stock en CD. "
                + (f"La necesidad calculada es de {_sn(b3.get('necesidad_uds'))} unidades. " if b3.get("necesidad_uds") else "")
                + "Te pedimos confirmar reposición desde CD y, donde no hay CD, disponibilidad y plazo de reorden."
@@ -138,12 +138,12 @@ def _subtitulo(h: dict, k: str) -> str:
     if k == "b2a":
         return f"S/ {_sn(b.get('capital'))} en {b.get('n_skus', 0)} modelos que venden pero cargan de más"
     if k == "b2b":
-        return f"{b.get('n_skus', 0)} modelos · {_sn(b.get('uds'))} uds a mover · ganancia neta S/ {_sn(b.get('ganancia'))}"
+        return f"{b.get('n_skus', 0)} modelos · {_sn(b.get('uds'))} uds a mover · contribución esperada S/ {_sn(b.get('ganancia'))}"
     return f"{b.get('n_skus', 0)} modelos con buena rotación y poca cobertura · {b.get('n_sin_cd', 0)} sin stock en CD"
 
 
 _CRITERIOS_B2 = ("Criterios: markdown compartido 50/50 según acuerdo vigente, sobre precio regular y nunca bajo el piso de margen; "
-                 "transferencias solo con ganancia neta positiva después del flete y desde 12 unidades por modelo; "
+                 "transferencias desde 12 unidades por modelo y con demanda en la tienda destino (el traslado lo ejecuta y lo asume la marca, sin flete de Ripley); "
                  "canje o devolución para lo que no rota ni con precio.")
 
 

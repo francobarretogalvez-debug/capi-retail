@@ -197,13 +197,19 @@ def _hoja_precio(writer, hoja, titulo, g):
 
 
 
-def transferencias_por_sku(df_trans, skus, nombre_map: dict | None = None) -> pd.DataFrame:
+def transferencias_por_sku(df_trans, skus, nombre_map: dict | None = None,
+                           flete_lo_paga_ripley: bool = False) -> pd.DataFrame:
     """Transferencias del motor agregadas por MODELO con el umbral oficial del reporte
     al proveedor (decisión 2026-08-05 + criterio económico 2026-08-24): solo modelos
     con ≥TRANSF_MIN_UDS uds y ganancia esperada > 0 (o valor de venta ≥TRANSF_MIN_VALOR
     cuando la base no trae ganancia). Única fuente de "Uds a mover" para la hoja
     4. Transferir y para el sub-bloque 2b del reporte semanal al proveedor: si cambia
     el umbral, cambia en un solo lugar.
+
+    `flete_lo_paga_ripley=False` (default, marcas TERCERAS — precisión Franco 2026-09-19):
+    el traslado lo hace y lo costea el proveedor, así que el flete de S/3.50/ud del motor
+    NO se resta: ganancia = contribución de las unidades vendibles en destino
+    (= ganancia_esperada + costo_flete). Con True se usa la ganancia neta del motor.
 
     Devuelve: sku, nombre, transf_uds, transf_valor, transf_tiendas, transf_ganancia
     (NaN cuando la base no trae ganancia), ordenado por ganancia (o valor) desc."""
@@ -218,10 +224,14 @@ def transferencias_por_sku(df_trans, skus, nombre_map: dict | None = None) -> pd
     t["valor"] = t["uds_transferir"] * t["precio_vigente"]
     tiene_ganancia = ("ganancia_esperada" in t.columns
                       and t["ganancia_esperada"].notna().any())
+    if tiene_ganancia and not flete_lo_paga_ripley and "costo_flete" in t.columns:
+        t["_ganancia"] = t["ganancia_esperada"] + t["costo_flete"].fillna(0)
+    else:
+        t["_ganancia"] = t["ganancia_esperada"] if tiene_ganancia else np.nan
     agg = dict(transf_uds=("uds_transferir", "sum"), transf_valor=("valor", "sum"),
                transf_tiendas=("tienda_destino", "nunique"))
     if tiene_ganancia:
-        agg["transf_ganancia"] = ("ganancia_esperada", "sum")
+        agg["transf_ganancia"] = ("_ganancia", "sum")
     g = t.groupby(["sku", "nombre"], as_index=False).agg(**agg)
     if tiene_ganancia:
         g = g[(g["transf_uds"] >= TRANSF_MIN_UDS) & (g["transf_ganancia"] > 0)]
@@ -271,7 +281,8 @@ def _hoja_leyenda(writer) -> None:
             value="P. Sugerido solo aparece cuando implica BAJAR el precio; si el dscto actual ya supera la pirámide o el piso no deja bajar más, la Acción es Mantener.").font = F_HEADER
     fila += 1
     ws.cell(row=fila, column=1,
-            value="Transferir: solo movimientos con ganancia neta positiva (contribución sin IGV × uds vendibles − flete por unidad) y ≥12 uds.").font = F_HEADER
+            value="Transferir: modelos con ≥12 uds a mover y contribución esperada positiva (contribución sin IGV × uds que el destino vendería en 8 semanas). "
+                  "En marcas terceras el traslado lo ejecuta y lo asume la marca, por eso no se resta flete de Ripley.").font = F_HEADER
     fila += 1
     ws.cell(row=fila, column=1, value=_SUPUESTOS).font = F_HEADER
     ws.column_dimensions["A"].width = 20
@@ -399,12 +410,12 @@ def generar_reporte_marca(marca, df_cob, df_rep=None, df_trans=None,
                 tg.columns = (["SKU", "Modelo"] +
                               (["Temporada"] if _temp_map is not None else []) +
                               ["Uds a mover", "Valor S/ (venta)", "Tiendas destino"] +
-                              (["Ganancia neta S/"] if _tiene_ganancia else []))
+                              (["Contribución esperada S/ (sin flete)"] if _tiene_ganancia else []))
                 _escribir_tabla(
                     w, "4. Transferir",
-                    f"{marca} — Rebalanceo entre tiendas (solo movimientos ≥{TRANSF_MIN_UDS} uds y ≥S/{TRANSF_MIN_VALOR:,.0f}) · corte {corte}",
+                    f"{marca} — Rebalanceo entre tiendas que ejecuta la marca (≥{TRANSF_MIN_UDS} uds por modelo, con demanda en destino; el traslado lo asume la marca, sin flete Ripley) · corte {corte}",
                     tg, {"Uds a mover": _FMT_S, "Valor S/ (venta)": _FMT_S,
-                         "Ganancia neta S/": _FMT_S})
+                         "Contribución esperada S/ (sin flete)": _FMT_S})
 
         # ── 5. Venta Cero (S7 2026-09-05, pedido Franco): SKU×tienda con stock y sin
         #    venta la última semana, Pareto 80% del capital por tienda. Es lo que el

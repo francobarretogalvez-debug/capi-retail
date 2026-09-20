@@ -315,7 +315,12 @@ def bloque_sobrestock(g: pd.DataFrame, excluir: set, df_trans: pd.DataFrame | No
         # transferencias en terceras, precisión Franco 18-sep; pedido del detalle 19-sep).
         _cols_det = [c for c in ("sku", "nombre", "categoria", "tienda_origen", "tienda_destino", "uds_transferir", "ganancia_esperada", "veredicto",
                                  "cob_origen_pre", "cob_origen_post", "cob_destino_pre", "cob_destino_post", "precio_vigente", "motivo") if c in df_trans.columns]
+        _cols_det = _cols_det + [c for c in ("costo_flete", "uds_vendibles_horizonte") if c in df_trans.columns]
         b2b_det = df_trans[df_trans["sku"].isin(tr["sku"])][_cols_det].copy()
+        # Terceras: el traslado lo asume la marca → contribución esperada sin flete y veredicto por demanda
+        if "ganancia_esperada" in b2b_det.columns:
+            b2b_det["contrib_esperada"] = b2b_det["ganancia_esperada"] + (b2b_det["costo_flete"].fillna(0) if "costo_flete" in b2b_det.columns else 0)
+            b2b_det["veredicto"] = np.where(b2b_det["contrib_esperada"] > 0, "✅ Con demanda en destino", "⚠️ Sin demanda proyectada en destino")
         if "categoria" not in b2b_det.columns and "categoria" in g.columns:
             b2b_det["categoria"] = b2b_det["sku"].map(g.set_index("sku")["categoria"])
         # Stock y venta promedio (4 sem) de la tienda origen y destino, para leer las coberturas
@@ -327,14 +332,32 @@ def bloque_sobrestock(g: pd.DataFrame, excluir: set, df_trans: pd.DataFrame | No
                 idx = pd.MultiIndex.from_arrays([b2b_det["sku"], b2b_det[f"tienda_{lado}"]])
                 b2b_det[f"stock_{lado}"] = _st["stock_total"].reindex(idx).values
                 b2b_det[f"vta_sem_{lado}"] = _st["prom_vta_uds"].reindex(idx).round(2).values
+        if dfm_ref is not None and not dfm_ref.empty and "costo" in dfm_ref.columns:
+            _costo = dfm_ref.drop_duplicates("sku").set_index("sku")["costo"]
+            b2b_det["costo_total"] = (b2b_det["uds_transferir"] * b2b_det["sku"].map(_costo)).round(2)
+        if "precio_vigente" in b2b_det.columns:
+            b2b_det["valor_venta"] = (b2b_det["uds_transferir"] * b2b_det["precio_vigente"]).round(2)
         b2b_det = b2b_det.sort_values(["sku", "uds_transferir"], ascending=[True, False]).reset_index(drop=True)
         cols = ["sku", "categoria", "estado_cadena", "stock_cadena", "cobertura_cadena", "capital_costo", "n_tiendas_quiebre", "n_tiendas"]
         b2b = tr.merge(g[[c for c in cols if c in g.columns]], on="sku", how="left")
         b2b["accion"] = b2b.apply(lambda r: f"🔄 Mover {int(r['transf_uds'])} uds a {int(r['transf_tiendas'])} tienda(s)"
-                                  + (f" · ganancia neta S/ {r['transf_ganancia']:,.0f}" if pd.notna(r.get('transf_ganancia')) else ""), axis=1)
+                                  + (f" · contribución esperada S/ {r['transf_ganancia']:,.0f}" if pd.notna(r.get('transf_ganancia')) else ""), axis=1)
         b2b = b2b.reset_index(drop=True)
     b2b.attrs["detalle"] = b2b_det
+    b2b.attrs["rutas"] = rutas_tienda_a_tienda(b2b_det)
     return b2, b2b
+
+
+def rutas_tienda_a_tienda(det: pd.DataFrame) -> pd.DataFrame:
+    """Cuadro origen → destino para que el proveedor mapee cuánto mueve de tienda a tienda
+    (pedido Franco 19-sep): modelos, unidades, costo total (uds × costo) y valor venta."""
+    if det is None or det.empty:
+        return pd.DataFrame(columns=["tienda_origen", "tienda_destino", "modelos", "uds", "costo_total", "valor_venta"])
+    agg = {"modelos": ("sku", "nunique"), "uds": ("uds_transferir", "sum")}
+    if "costo_total" in det.columns: agg["costo_total"] = ("costo_total", "sum")
+    if "valor_venta" in det.columns: agg["valor_venta"] = ("valor_venta", "sum")
+    r = det.groupby(["tienda_origen", "tienda_destino"], as_index=False).agg(**agg)
+    return r.sort_values("uds", ascending=False).reset_index(drop=True)
 
 
 # ── Bloque 3: ganadores que se quedan cortos ──────────────────────────────────
@@ -496,13 +519,14 @@ def bloques_marca(marca: str, df_cob: pd.DataFrame, df_trans: pd.DataFrame | Non
     ex = set(b1["sku"]) if not b1.empty else set()
     b2a, b2b = bloque_sobrestock(g, ex, df_trans, precio_min_map, df_alertas, dfm_ref=dfm)
     b2b_det = b2b.attrs.get("detalle", pd.DataFrame()) if hasattr(b2b, "attrs") else pd.DataFrame()
+    b2b_rutas = b2b.attrs.get("rutas", pd.DataFrame()) if hasattr(b2b, "attrs") else pd.DataFrame()
     ex2 = ex | (set(b2a["sku"]) if not b2a.empty else set())
     b3, umbral = bloque_ganadores(g, ex2, df_rep, df_vp, df_alertas, marca=marca)
     foto = foto_marca(dfm, g) if not dfm.empty else {"capital_total": 0, "skus": 0, "tiendas": 0, "stock_uds": 0,
                                                      "sell_through_pct": 0.0, "margen_efectivo_pct": None, "por_estado_cadena": {}}
     h = hechos_marca(marca, foto, b1, b2a, b2b, b3, umbral, corte, semana_iso)
     return {"marca": marca, "corte": corte, "semana_iso": semana_iso, "g": g, "dfm": dfm,
-            "b1": b1, "b2a": b2a, "b2b": b2b, "b2b_detalle": b2b_det, "b3": b3, "vc_tienda": vc_tienda, "umbral_b3": umbral, "hechos": h}
+            "b1": b1, "b2a": b2a, "b2b": b2b, "b2b_detalle": b2b_det, "b2b_rutas": b2b_rutas, "b3": b3, "vc_tienda": vc_tienda, "umbral_b3": umbral, "hechos": h}
 
 
 def detalle_lote(bloques: dict) -> pd.DataFrame:
@@ -545,7 +569,7 @@ def _filas_b2a(b2a: pd.DataFrame) -> list[dict]:
 
 def _filas_b2b(b2b: pd.DataFrame) -> list[dict]:
     return [{"SKU": r["sku"], "Producto": r["nombre"], "Uds a mover": int(r["transf_uds"]), "Tiendas destino": int(r["transf_tiendas"]),
-             "Ganancia neta S/": float(r["transf_ganancia"]) if pd.notna(r.get("transf_ganancia")) else None} for _, r in b2b.iterrows()]
+             "Contribución esperada S/": float(r["transf_ganancia"]) if pd.notna(r.get("transf_ganancia")) else None} for _, r in b2b.iterrows()]
 
 
 def _filas_b3(b3: pd.DataFrame) -> list[dict]:
@@ -580,12 +604,12 @@ def _tabla_txt(rows: list[dict], cols: list[str], fmt: dict) -> str:
     return "\n".join(lines)
 
 
-_FMT_TXT = {"Capital S/": lambda v: _s(v), "Ganancia neta S/": lambda v: _s(v), "Cob sem": lambda v: _s(v, 1), "Vta/sem": lambda v: _s(v, 1),
+_FMT_TXT = {"Capital S/": lambda v: _s(v), "Ganancia neta S/": lambda v: _s(v), "Contribución esperada S/": lambda v: _s(v), "Cob sem": lambda v: _s(v, 1), "Vta/sem": lambda v: _s(v, 1),
             "Dscto hoy": lambda v: f"{v:.0%}" if v is not None else "—", "Stock uds": lambda v: _s(v), "Uds a mover": lambda v: _s(v),
             "Necesidad uds": lambda v: _s(v), "Stock CD": lambda v: _s(v)}
 _COLS_TXT = {"b1": ["SKU", "Producto", "Tiendas", "Stock uds", "Capital S/", "Edad sem", "⭐", "Acción"],
              "b2a": ["SKU", "Producto", "Estado", "Stock uds", "Cob sem", "Capital S/", "Dscto hoy", "Tend", "⭐", "Acción"],
-             "b2b": ["SKU", "Producto", "Uds a mover", "Tiendas destino", "Ganancia neta S/"],
+             "b2b": ["SKU", "Producto", "Uds a mover", "Tiendas destino", "Contribución esperada S/"],
              "b3": ["SKU", "Producto", "Vta/sem", "Cob sem", "Tiendas en quiebre", "Stock CD", "Necesidad uds", "Tend", "Acción"]}
 
 
@@ -611,7 +635,7 @@ def tablas_texto(bloques: dict, tope_linea: int = TOP_CUERPO_LINEA, tope_plano: 
     f2b = _filas_b2b(bloques["b2b"])
     out["b2b"] = (_tabla_txt(f2b[:tope_plano], _COLS_TXT["b2b"], _FMT_TXT)
                   + (f"\n  (+{len(f2b) - tope_plano} modelos más en el Excel)" if len(f2b) > tope_plano else "")
-                  + f"\nTOTAL TRANSFERENCIAS: {h['b2b']['n_skus']} modelos · {_s(h['b2b']['uds'])} uds a mover · ganancia neta S/ {_s(h['b2b']['ganancia'])}\n  (El detalle de qué unidades salen de qué tienda y a cuál llegan va en la pestaña '2b. Detalle transferencias' del Excel.)") if f2b else "  (sin transferencias rentables esta semana)"
+                  + f"\nTOTAL TRANSFERENCIAS: {h['b2b']['n_skus']} modelos · {_s(h['b2b']['uds'])} uds a mover · contribución esperada S/ {_s(h['b2b']['ganancia'])}\n  (El detalle de qué unidades salen de qué tienda y a cuál llegan va en la pestaña '2b. Detalle transferencias' del Excel.)") if f2b else "  (sin transferencias rentables esta semana)"
     f3 = _filas_b3(bloques["b3"])
     out["b3"] = (_tabla_txt(f3[:tope_plano], _COLS_TXT["b3"], _FMT_TXT)
                  + (f"\n  (+{len(f3) - tope_plano} modelos más en el Excel)" if len(f3) > tope_plano else "")
@@ -627,7 +651,7 @@ _TH = _TD + "background:#dce6f1;font-weight:bold;text-align:left;"
 def _tabla_html(rows: list[dict], cols: list[str]) -> str:
     if not rows:
         return "<p style='font-family:Calibri,Arial;font-size:10.5pt;color:#666'>(sin modelos)</p>"
-    num = {"Capital S/", "Ganancia neta S/", "Cob sem", "Vta/sem", "Stock uds", "Uds a mover", "Necesidad uds", "Stock CD", "Tiendas", "Tiendas destino", "Edad sem", "Dscto hoy"}
+    num = {"Capital S/", "Ganancia neta S/", "Contribución esperada S/", "Cob sem", "Vta/sem", "Stock uds", "Uds a mover", "Necesidad uds", "Stock CD", "Tiendas", "Tiendas destino", "Edad sem", "Dscto hoy"}
     th = "".join(f"<th style='{_TH}'>{c}</th>" for c in cols)
     trs = []
     for r in rows:
@@ -660,7 +684,7 @@ def tablas_html(bloques: dict, tope_linea: int = TOP_CUERPO_LINEA, tope_plano: i
         partes.append(f"{P}<b>TOTAL {'VENTA CERO' if key == 'b1' else 'SOBRESTOCK'}:</b> {tot['n_skus']} modelos · {_s(tot['stock_uds'])} uds · S/ {_s(tot['capital'])}</p>")
         out[key] = "".join(partes) if filas else f"{P}(sin modelos en este bloque)</p>"
     f2b = _filas_b2b(bloques["b2b"])
-    out["b2b"] = (_tabla_html(f2b[:tope_plano], _COLS_TXT["b2b"]) + f"{P}<b>TOTAL TRANSFERENCIAS:</b> {h['b2b']['n_skus']} modelos · {_s(h['b2b']['uds'])} uds a mover · ganancia neta S/ {_s(h['b2b']['ganancia'])}</p>{P}<span style='color:#555'>El detalle de qué unidades salen de qué tienda y a cuál llegan va en la pestaña '2b. Detalle transferencias' del Excel.</span></p>") if f2b else f"{P}(sin transferencias rentables esta semana)</p>"
+    out["b2b"] = (_tabla_html(f2b[:tope_plano], _COLS_TXT["b2b"]) + f"{P}<b>TOTAL TRANSFERENCIAS:</b> {h['b2b']['n_skus']} modelos · {_s(h['b2b']['uds'])} uds a mover · contribución esperada S/ {_s(h['b2b']['ganancia'])}</p>{P}<span style='color:#555'>El detalle de qué unidades salen de qué tienda y a cuál llegan va en la pestaña '2b. Detalle transferencias' del Excel.</span></p>") if f2b else f"{P}(sin transferencias rentables esta semana)</p>"
     f3 = _filas_b3(bloques["b3"])
     out["b3"] = (_tabla_html(f3[:tope_plano], _COLS_TXT["b3"]) + f"{P}<b>TOTAL GANADORES CORTOS:</b> {h['b3']['n_skus']} modelos · {_s(h['b3']['vta_sem_total'], 1)} uds/sem · {h['b3']['n_sin_cd']} sin stock en CD</p>") if f3 else f"{P}(sin ganadores cortos esta semana)</p>"
     return out
@@ -700,7 +724,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             {"Bloque": f"1. Venta cero — {GRUPO_B1_4SEM.lower()}", "Modelos": h["b1"]["n_4sem"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_4sem"], "Qué pedimos": f"liquidar / canje lo de más de 26 sem ({h['b1']['n_liquidar']} en todo el bloque) · exhibición y precio en el resto"},
             {"Bloque": f"1. Venta cero — {GRUPO_B1_PARO.lower()} (alerta temprana)", "Modelos": h["b1"]["n_paro"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_paro"], "Qué pedimos": "revisar exhibición y precio esta semana; si repite, pasa al grupo anterior"},
             {"Bloque": "2a. Sobrestock de cadena (venden, pero cargan de más)", "Modelos": h["b2a"]["n_skus"], "Stock (uds)": h["b2a"]["stock_uds"], "Capital S/ (costo)": h["b2a"]["capital"], "Qué pedimos": f"markdown 50/50: {h['b2a']['n_markdown']} · canje/devolución: {h['b2a']['n_canje']} · frenar ingreso: {h['b2a']['n_frenar']}"},
-            {"Bloque": "2b. Transferencias entre tiendas (rentables)", "Modelos": h["b2b"]["n_skus"], "Stock (uds)": h["b2b"]["uds"], "Capital S/ (costo)": None, "Qué pedimos": f"mover {h['b2b']['uds']:,} uds · ganancia neta S/ {h['b2b']['ganancia']:,} · detalle origen → destino en la pestaña 2b. Detalle"},
+            {"Bloque": "2b. Transferencias entre tiendas (las ejecuta la marca)", "Modelos": h["b2b"]["n_skus"], "Stock (uds)": h["b2b"]["uds"], "Capital S/ (costo)": None, "Qué pedimos": f"mover {h['b2b']['uds']:,} uds · contribución esperada S/ {h['b2b']['ganancia']:,} · detalle origen → destino en la pestaña 2b. Detalle"},
             {"Bloque": "3. Ganadores que se quedan cortos", "Modelos": h["b3"]["n_skus"], "Stock (uds)": None, "Capital S/ (costo)": None, "Qué pedimos": f"{h['b3']['n_sin_cd']} sin stock en CD (reorden) · necesidad {h['b3']['necesidad_uds']:,} uds"},
         ])
         ws = vistas_excel._tabla_con_titulo(w, "Resumen", f"{marca} — Reporte semanal Ripley · corte {corte}", res,
@@ -718,7 +742,8 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             ("1. Venta Cero (SKU)", "Modelos con stock que NO vendieron ni una unidad en toda la cadena la última semana, en dos grupos: sin venta en las últimas 4 semanas y los que vendían y pararon. ⭐ = concentran el 80% del capital de su grupo. Con la venta del modelo de las 4 últimas semanas y el descuento sugerido (nunca menor al actual)."),
             ("1b. Venta Cero x Tienda", "Los mismos modelos de la pestaña 1, tienda por tienda: dónde está el stock, qué prioridad tiene en esa tienda (⭐ = 80% del capital sin venta de la tienda), la venta de esa tienda en las 4 últimas semanas (de los snapshots; si no hay, la del modelo en cadena), y la acción de piso (etiquetar, cartel o revisar exhibición)."),
             ("2a. Sobrestock", "Modelos que venden pero cargan de más a nivel cadena (cobertura ≥ 26 semanas) o entran en liquidación: acción sugerida por modelo (markdown compartido, canje/devolución, frenar ingreso)."),
-            ("2b. Transferencias tiendas", "Modelos con stock donde no rota y faltante donde sí: unidades a mover entre tiendas con ganancia neta positiva después del flete (≥12 uds por modelo), resumen por modelo."),
+            ("2b. Transferencias tiendas", "Modelos con stock donde no rota y faltante donde sí: unidades a mover entre tiendas (≥12 uds por modelo, con demanda en destino), resumen por modelo. El traslado lo ejecuta y lo asume la marca, por eso no se resta flete."),
+            ("2b. Rutas tienda a tienda", "Cuánto se mueve de cada tienda origen a cada tienda destino: modelos, unidades, costo total y valor venta, con fila TOTAL."),
             ("2b. Detalle transferencias", "El detalle de esas transferencias: cuántas unidades de cada modelo salen de qué tienda y llegan a cuál, con stock, venta semanal y cobertura antes/después en ambas tiendas. La cantidad busca dejar ambas en 12 semanas de cobertura."),
             ("3. Ganadores", "Modelos con buena rotación y poca cobertura (≤ 8 semanas) o acelerando: necesidad calculada, stock en CD y acción (reponer desde CD / reorden)."),
             ("Leyenda", "Cómo se calculan los estados, la pirámide de descuentos por antigüedad, el piso de margen y las reglas de transferencia."),
@@ -795,21 +820,33 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
                       d2, {**reportes_marcas._FMTS_PRECIO, "% acum.": _F["PCT"]}, chips_col="Estado")
         # 2b
         c3 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("estado_cadena", "Estado"), ("transf_uds", "Uds a mover"), ("transf_tiendas", "Tiendas destino"),
-              ("transf_valor", "Valor S/ (venta)"), ("transf_ganancia", "Ganancia neta S/"), ("stock_cadena", "Stock (uds)"), ("cobertura_cadena", "Cobertura (sem)"), ("accion", "Acción sugerida")]
+              ("transf_valor", "Valor S/ (venta)"), ("transf_ganancia", "Contribución esperada S/ (sin flete)"), ("stock_cadena", "Stock (uds)"), ("cobertura_cadena", "Cobertura (sem)"), ("accion", "Acción sugerida")]
         d3 = b2b[[a for a, _ in c3 if a in b2b.columns]].rename(columns=dict(c3)) if not b2b.empty else pd.DataFrame()
-        _hoja_o_vacia(w, "2b. Transferencias tiendas", f"{marca} — Transferencias entre tiendas con ganancia neta, resumen por modelo (≥{reportes_marcas.TRANSF_MIN_UDS} uds por modelo) · corte {corte}",
-                      d3, {"Uds a mover": _F["S"], "Valor S/ (venta)": _F["S"], "Ganancia neta S/": _F["S"], "Stock (uds)": _F["S"], "Cobertura (sem)": _F["C"]}, chips_col="Estado")
+        _hoja_o_vacia(w, "2b. Transferencias tiendas", f"{marca} — Transferencias entre tiendas que ejecuta la marca, resumen por modelo (≥{reportes_marcas.TRANSF_MIN_UDS} uds y demanda en destino; sin flete Ripley) · corte {corte}",
+                      d3, {"Uds a mover": _F["S"], "Valor S/ (venta)": _F["S"], "Contribución esperada S/ (sin flete)": _F["S"], "Stock (uds)": _F["S"], "Cobertura (sem)": _F["C"]}, chips_col="Estado")
+        # 2b rutas: cuadro tienda origen → tienda destino
+        rutas = bloques.get("b2b_rutas", pd.DataFrame())
+        d3r = rutas.rename(columns={"tienda_origen": "Tienda origen", "tienda_destino": "Tienda destino", "modelos": "Modelos", "uds": "Uds a mover",
+                                    "costo_total": "Costo total S/", "valor_venta": "Valor venta S/"}) if rutas is not None and not rutas.empty else pd.DataFrame()
+        if not d3r.empty:
+            tot = {"Tienda origen": "TOTAL", "Tienda destino": "", "Modelos": int(bloques["b2b"]["sku"].nunique()), "Uds a mover": int(d3r["Uds a mover"].sum())}
+            for c in ("Costo total S/", "Valor venta S/"):
+                if c in d3r.columns: tot[c] = float(d3r[c].sum())
+            d3r = pd.concat([d3r, pd.DataFrame([tot])], ignore_index=True)
+        _hoja_o_vacia(w, "2b. Rutas tienda a tienda", f"{marca} — Cuánto se mueve de cada tienda a cada tienda: modelos, unidades, costo total (uds × costo) y valor venta · corte {corte}",
+                      d3r, {"Modelos": _F["S"], "Uds a mover": _F["S"], "Costo total S/": _F["S"], "Valor venta S/": _F["S"]})
         # 2b detalle: qué unidades salen de qué tienda y a cuál llegan
         det = bloques.get("b2b_detalle", pd.DataFrame())
         orden_det = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"),
                      ("tienda_origen", "Tienda origen"), ("stock_origen", "Stock origen"), ("vta_sem_origen", "Vta/sem origen"), ("cob_origen_pre", "Cob origen antes (sem)"), ("cob_origen_post", "Cob origen después (sem)"),
                      ("tienda_destino", "Tienda destino"), ("stock_destino", "Stock destino"), ("vta_sem_destino", "Vta/sem destino"), ("cob_destino_pre", "Cob destino antes (sem)"), ("cob_destino_post", "Cob destino después (sem)"),
-                     ("uds_transferir", "Uds a mover"), ("ganancia_esperada", "Ganancia neta S/"), ("veredicto", "Veredicto"), ("precio_vigente", "Precio"), ("motivo", "Motivo")]
+                     ("uds_transferir", "Uds a mover"), ("costo_total", "Costo total S/"), ("valor_venta", "Valor venta S/"), ("uds_vendibles_horizonte", "Uds vendibles 8 sem"),
+                     ("contrib_esperada", "Contribución esperada S/ (sin flete)"), ("veredicto", "Veredicto"), ("precio_vigente", "Precio"), ("motivo", "Motivo")]
         d3d = det[[a for a, _ in orden_det if a in det.columns]].rename(columns=dict(orden_det)) if det is not None and not det.empty else pd.DataFrame()
         _hoja_o_vacia(w, "2b. Detalle transferencias",
                       f"{marca} — Detalle de las transferencias, tienda origen → tienda destino. Cantidad = min(exceso origen, déficit destino) con cobertura objetivo de 12 semanas "
                       f"(exceso = stock − 12 × venta/sem; déficit = 12 × venta/sem − stock). Suma por modelo = 'Uds a mover' de la pestaña anterior · corte {corte}",
-                      d3d, {"Uds a mover": _F["S"], "Ganancia neta S/": _F["S"], "Stock origen": _F["S"], "Stock destino": _F["S"], "Vta/sem origen": "0.00", "Vta/sem destino": "0.00",
+                      d3d, {"Uds a mover": _F["S"], "Costo total S/": _F["S"], "Valor venta S/": _F["S"], "Uds vendibles 8 sem": _F["C"], "Contribución esperada S/ (sin flete)": _F["S"], "Stock origen": _F["S"], "Stock destino": _F["S"], "Vta/sem origen": "0.00", "Vta/sem destino": "0.00",
                             "Cob origen antes (sem)": _F["C"], "Cob origen después (sem)": _F["C"], "Cob destino antes (sem)": _F["C"], "Cob destino después (sem)": _F["C"], "Precio": _F["P"]})
         # 3
         c4 = [("sku", "SKU"), ("nombre", "Producto"), ("categoria", "Línea"), ("temporada", "Temporada"), ("tendencia", "Tendencia"), ("entra_por", "Entra por"),

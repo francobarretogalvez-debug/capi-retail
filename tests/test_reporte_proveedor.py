@@ -20,13 +20,16 @@ def _trans():
         "uds_transferir": [8, 6, 15, 5, 7, 7],
         "precio_vigente": [100.0, 100.0, 50.0, 80.0, 60.0, 60.0],
         "ganancia_esperada": [120.0, 30.0, -5.0, 40.0, 10.0, 15.0],
+        "costo_flete": [28.0, 21.0, 52.5, 17.5, 24.5, 24.5],     # 3.50/ud
     })
 
 
-def _inline_hoja4(df_trans, skus):
-    """Fórmula que vivía dentro de generar_reporte_marca antes de C1."""
+def _inline_hoja4(df_trans, skus, sin_flete=True):
+    """Fórmula que vivía dentro de generar_reporte_marca antes de C1 (+ flete devuelto para terceras, 19-sep)."""
     tr_m = df_trans[df_trans["sku"].isin(skus)].copy()
     tr_m["valor"] = tr_m["uds_transferir"] * tr_m["precio_vigente"]
+    if sin_flete:
+        tr_m["ganancia_esperada"] = tr_m["ganancia_esperada"] + tr_m["costo_flete"]
     tg = tr_m.groupby(["sku", "nombre"], as_index=False).agg(
         uds=("uds_transferir", "sum"), valor=("valor", "sum"),
         tiendas=("tienda_destino", "nunique"), ganancia=("ganancia_esperada", "sum"))
@@ -38,7 +41,14 @@ def test_b2_transferencias_igual_reporte_marca():
     df = _trans()
     got = rm.transferencias_por_sku(df, [10, 20, 30, 40])
     ref = _inline_hoja4(df, [10, 20, 30, 40])
-    assert list(got["sku"]) == list(ref["sku"]) == [10, 40]
+    # sin flete (terceras): el 20 (ganancia −5 con flete 52.5 → +47.5) ahora sí pasa
+    assert list(got["sku"]) == list(ref["sku"]) == [10, 40, 20]      # 199 · 74 · 47.5
+    # con flete Ripley (modo propias) se recupera la fórmula original
+    got_f = rm.transferencias_por_sku(df, [10, 20, 30, 40], flete_lo_paga_ripley=True)
+    ref_f = _inline_hoja4(df, [10, 20, 30, 40], sin_flete=False)
+    assert list(got_f["sku"]) == list(ref_f["sku"]) == [10, 40]
+    assert np.allclose(got_f["transf_ganancia"], ref_f["ganancia"])
+    got, ref = got[got["sku"] != 20].reset_index(drop=True), ref[ref["sku"] != 20].reset_index(drop=True)
     assert list(got["transf_uds"]) == list(ref["uds"]) == [14, 14]
     assert list(got["transf_tiendas"]) == list(ref["tiendas"]) == [2, 2]
     assert np.allclose(got["transf_ganancia"], ref["ganancia"])
@@ -46,7 +56,7 @@ def test_b2_transferencias_igual_reporte_marca():
 
 
 def test_transferencias_sin_ganancia_usa_valor():
-    df = _trans().drop(columns=["ganancia_esperada"])
+    df = _trans().drop(columns=["ganancia_esperada", "costo_flete"])
     got = rm.transferencias_por_sku(df, [10, 20, 30, 40])
     # sin ganancia: umbral por valor de venta (≥12 uds y ≥S/1.000) → 10 (S/1.400) sí, 20 (S/750) no, 40 (S/840) no
     assert list(got["sku"]) == [10]
@@ -107,7 +117,7 @@ def _cob():
 def _trans_sint():
     return pd.DataFrame({"sku": [201, 201, 303], "nombre": ["SOB-MKD", "SOB-MKD", "OPT"], "tienda_origen": ["T1", "T1", "T1"],
                          "tienda_destino": ["T3", "T2", "T2"], "uds_transferir": [8, 6, 3], "precio_vigente": [90.0, 90.0, 100.0],
-                         "ganancia_esperada": [60.0, 40.0, 5.0]})
+                         "ganancia_esperada": [60.0, 40.0, 5.0], "costo_flete": [28.0, 21.0, 10.5]})
 
 
 def _rep_sint():
@@ -203,6 +213,7 @@ def test_hechos_cuadran_con_bloques(bl):
     assert h["b1"]["capital"] == round(bl["b1"]["capital_costo"].sum())
     assert h["b2a"]["capital"] == round(bl["b2a"]["capital_costo"].sum())
     assert h["b2b"]["uds"] == int(bl["b2b"]["transf_uds"].sum())
+    assert h["b2b"]["ganancia"] == 60 + 40 + 28 + 21                       # contribución esperada sin flete
     assert h["b3"]["n_skus"] == len(bl["b3"]) and h["b3"]["n_sin_cd"] == 1
     assert h["b1"]["por_linea"] == {"CAMISAS": 3600, "POLOS": 100}
     assert sum(h["b2a"]["por_linea"].values()) == h["b2a"]["capital"]
