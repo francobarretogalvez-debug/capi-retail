@@ -47,7 +47,12 @@ REGLAS INVIOLABLES
    - lead_b2b: qué pedimos sobre las transferencias entre tiendas (las ejecuta la marca).
    - lead_b3: qué pedimos sobre los ganadores cortos (reponer desde CD / reorden).
    - cierre: pedido de respuesta con fecha o reunión + despedida cordial.
-   Si un bloque viene con n_skus = 0, su lead dice en una frase que esta semana no hay casos."""
+   Si un bloque viene con n_skus = 0, su lead dice en una frase que esta semana no hay casos.
+5. Al final del correo va una sección fija "Cómo priorizamos este reporte" (venta cero = sin venta en toda la
+   cadena; sobrestock = vende pero carga más de 26 semanas; descuento crece con la antigüedad; en jóvenes
+   primero exhibición con 2 semanas de plazo; desde 6 meses liquidar o devolver; 3ª semana sin movimiento →
+   devolución). No la repitas ni la contradigas. Nunca menciones sistemas, herramientas ni inteligencia
+   artificial: el criterio es del equipo de compras."""
 
 
 # ── Redacción por reglas (sin IA) ────────────────────────────────────────────
@@ -149,6 +154,14 @@ def _subtitulo(h: dict, k: str) -> str:
     return f"{b.get('n_skus', 0)} modelos con buena rotación y poca cobertura · {b.get('n_sin_cd', 0)} sin stock en CD"
 
 
+COMO_PRIORIZAMOS = (
+    "Cómo priorizamos este reporte. Revisamos la marca cada semana con los mismos criterios: un modelo sin venta en toda la "
+    "cadena entra a la lista de venta cero; uno que vende pero carga más de 26 semanas de stock, a sobrestock. El descuento "
+    "que proponemos crece con la antigüedad del modelo. En los modelos jóvenes revisamos primero la exhibición en tienda y "
+    "damos dos semanas para ver la venta; si no mejora, pasamos a descuento compartido. A partir de los 6 meses la alternativa "
+    "es liquidar o devolver, y a la tercera semana sin movimiento el pedido es devolución. El detalle de cada modelo, con su "
+    "antigüedad y semanas en la lista, va en el Excel.")
+
 _CRITERIOS_B2 = ("Criterios: descuento compartido 50/50 según acuerdo vigente, sobre precio regular y según la antigüedad del modelo (pirámide: 20% a 80%); "
                  "transferencias desde 12 unidades por modelo y con demanda en la tienda destino (el traslado lo ejecuta y lo asume la marca, sin flete de Ripley); "
                  "devolución para lo que no rota ni con precio.")
@@ -170,6 +183,7 @@ def ensamblar(h: dict, prosa: dict, tablas_texto: dict, tablas_html: dict, firma
             bloque += "\n" + _CRITERIOS_B2
         partes.append(bloque)
     partes.append(prosa.get("cierre", ""))
+    partes.append(COMO_PRIORIZAMOS)          # sección fija (Franco 20-sep): el criterio, no el mecanismo
     if firma:
         partes.append(firma)
     cuerpo_texto = "\n\n".join(p for p in partes if p)
@@ -186,6 +200,8 @@ def ensamblar(h: dict, prosa: dict, tablas_texto: dict, tablas_html: dict, firma
         if k == "b2b":
             hp.append(f"<p style='font-family:Calibri,Arial;font-size:10pt;color:#555;margin:2px 0'>{_CRITERIOS_B2}</p>")
     hp.append(P + prosa.get("cierre", "") + "</p>")
+    _t, _b = COMO_PRIORIZAMOS.split(". ", 1)
+    hp.append(f"<p style='font-family:Calibri,Arial;font-size:10pt;color:#444;margin:14px 0 8px 0;border-top:1px solid #d9d9d9;padding-top:8px'><b>{_t}.</b> {_b}</p>")
     if firma:
         hp.append(P + firma.replace("\n", "<br>") + "</p>")
     cuerpo_html = "<div style='max-width:1100px'>" + "".join(hp) + "</div>"

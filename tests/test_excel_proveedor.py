@@ -30,6 +30,8 @@ def test_hojas_y_formato(wb_bl):
         ws = wb[h]
         assert ws.freeze_panes == "A3" and "M —" in str(ws["A1"].value) and "30.08.2026" in str(ws["A1"].value)
     assert [c.value for c in wb["1. Venta Cero (SKU)"][2]][:3] == ["SKU", "Producto", "Línea"]
+    ley = [wb["Leyenda"].cell(r, 1).value for r in range(1, wb["Leyenda"].max_row + 1)]
+    assert "Cómo priorizamos este reporte" in ley
 
 
 def test_excel_cuadra_con_bloques(wb_bl):

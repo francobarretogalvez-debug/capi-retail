@@ -60,6 +60,10 @@ def test_ensamblar_estructura(bl):
     i1, i2, i3, i4 = (t.index(s) for s in ("1) VENTA CERO", "2a) SOBRESTOCK", "2b) TRANSFERENCIAS", "3) GANADORES"))
     assert i1 < i2 < i3 < i4
     assert "TOTAL VENTA CERO" in t and "TOTAL SOBRESTOCK" in t and t.rstrip().endswith("Daniela · Ripley")
+    # sección fija de criterio (Franco 20-sep): después del cierre, antes de la firma; sin mencionar sistemas ni IA
+    assert t.index("Cómo priorizamos este reporte") > t.index(ap.redactar_reglas(h)["cierre"][:30]) and t.index("Cómo priorizamos") < t.index("Daniela · Ripley")
+    assert "Cómo priorizamos este reporte" in out["cuerpo_html"]
+    assert not any(w in ap.COMO_PRIORIZAMOS.lower() for w in ("sistema", "herramienta", "inteligencia", "capi", "algoritmo"))
     assert out["cuerpo_html"].count("<table") >= 4
     assert out["sospechosos"] == []
     # sin asunto en la prosa → asunto por defecto

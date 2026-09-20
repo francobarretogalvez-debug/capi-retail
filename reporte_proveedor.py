@@ -951,7 +951,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             ("2b. Detalle transferencias", "El detalle de esas transferencias: cuántas unidades de cada modelo salen de qué tienda y llegan a cuál, con stock, venta semanal y cobertura antes/después en ambas tiendas. La cantidad busca dejar ambas en 12 semanas de cobertura."),
             ("3. Ganadores", "Modelos con buena rotación y poca cobertura (≤ 8 semanas) o acelerando: necesidad calculada, stock en CD y acción (reponer desde CD / reorden)."),
             ("4. Pre-obsoleto y obsoleto", "Vista transversal: todos los modelos con más de 6 meses en tienda por antigüedad (pre-obsoleto 6-9 meses, obsoleto 9 o más), vendan o no. Los que aún rotan bien se marcan 'sin acción'; el resto con descuento sugerido y si toca liquidar o recoger."),
-            ("Leyenda", "Cómo se calculan los estados, la pirámide de descuentos por antigüedad, el piso de margen y las reglas de transferencia."),
+            ("Leyenda", "Cómo se calculan los estados, la pirámide de descuentos por antigüedad, las reglas de transferencia y 'Cómo priorizamos este reporte' (el criterio semanal completo)."),
         ]
         for i, (hoja_n, desc) in enumerate(guia, start=1):
             ws.cell(row=fila + i, column=1, value=hoja_n).font = vistas_excel.F_HEADER
@@ -1085,7 +1085,9 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
                       f"{marca} — Mercadería con más de 6 meses en tienda, venda o no (pre-obsoleto 6-9 meses · obsoleto 9 meses a más, por antigüedad del maestro): {ho.get('n_skus', 0)} modelos · S/ {_s(ho.get('capital'))} ({ho.get('pct_capital_marca', 0)}% del capital) · "
                       f"rota bien {ho.get('n_rota', 0)} · liquidar {ho.get('n_liquidar', 0)} · recoger/devolución {ho.get('n_recoger', 0)} · corte {corte}",
                       d5, {**reportes_marcas._FMTS_PRECIO, "% acum.": _F["PCT"], "Tiendas con stock": _F["S"]}, chips_col="Estado")
-        reportes_marcas._hoja_leyenda(w)
+        import agente_proveedor as _ap
+        _tit, _txt = _ap.COMO_PRIORIZAMOS.split(". ", 1)
+        reportes_marcas._hoja_leyenda(w, extra=[(_tit, _txt)])
     buf.seek(0)
     return buf.read()
 

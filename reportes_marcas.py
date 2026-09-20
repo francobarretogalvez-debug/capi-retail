@@ -243,9 +243,10 @@ def transferencias_por_sku(df_trans, skus, nombre_map: dict | None = None,
     return g[cols].reset_index(drop=True)
 
 
-def _hoja_leyenda(writer) -> None:
+def _hoja_leyenda(writer, extra: list | None = None) -> None:
     """Pestaña Leyenda (estados, pirámide, piso, reglas). Compartida por el reporte de
-    9 pestañas y por el Excel del reporte semanal al proveedor."""
+    9 pestañas y por el Excel del reporte semanal al proveedor. `extra` = [(título, texto), ...]
+    que se agregan al final (p. ej. "Cómo priorizamos este reporte" para el proveedor)."""
     ws = writer.book.create_sheet("Leyenda")
     ws["A1"] = "Cómo leer este reporte — estados de stock"
     ws["A1"].font = F_TITULO
@@ -285,6 +286,10 @@ def _hoja_leyenda(writer) -> None:
                   "En marcas terceras el traslado lo ejecuta y lo asume la marca, por eso no se resta flete de Ripley.").font = F_HEADER
     fila += 1
     ws.cell(row=fila, column=1, value=_SUPUESTOS).font = F_HEADER
+    for titulo, texto in (extra or []):
+        fila += 2
+        ws.cell(row=fila, column=1, value=titulo).font = F_TITULO
+        ws.cell(row=fila + 1, column=1, value=texto)
     ws.column_dimensions["A"].width = 20
     ws.column_dimensions["B"].width = 90
 
