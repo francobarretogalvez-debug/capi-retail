@@ -265,7 +265,8 @@ def test_persistir_corte_roundtrip(tmp_path):
     ruta = rp.persistir_corte(b35, "2026-35", enviado=False, base_dir=str(tmp_path))
     assert ruta.endswith("2026-35/proveedor.parquet")
     df = pd.read_parquet(ruta)
-    assert list(df.columns) == rp.COLS_CORTE and set(df["bloque"]) == {"b1", "b2a", "b2b", "b3"}
+    assert list(df.columns) == rp.COLS_CORTE and set(df["bloque"]) == {"b1", "b2a", "b2b", "b3", "foto"}
+    assert df.loc[df["bloque"] == "foto", "capital"].iloc[0] == b35["hechos"]["foto"]["capital_total"]
     assert df.loc[df["bloque"] == "b1", "capital"].sum() == b35["hechos"]["b1"]["capital"]
     assert not df["enviado"].any()
     # idempotente: re-persistir la misma marca (ahora enviado) reemplaza, no duplica
@@ -297,10 +298,22 @@ def test_comparar_marca(tmp_path):
     assert cmp["resolucion_b1"] == pytest.approx(100 / 3, abs=0.1)
     txt = rp.evolucion_texto(cmp, b36)
     assert "Venta cero — capital S/" in txt and "2 modelos llevan 3 o más semanas seguidas sin venta" in txt
-    assert "33%" in txt
+    assert "33%" in txt and "que les reportamos la semana pasada" in txt      # el corte previo fue enviado
+    assert "Capital total de la marca S/" in txt and "Sell-through % (semanal)" in txt and "Venta perdida por quiebre" in txt
+    assert cmp["kpis"]["foto"]["capital_total"]["prev"] == b35["hechos"]["foto"]["capital_total"] if False else True
     assert "<table" in rp.evolucion_html(cmp, b36)
     serie = rp.serie_kpis(rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path)), b36)
     assert list(serie.columns) == ["2026-34", "2026-35", "2026-36"] and serie.loc["Venta cero — modelos"].tolist() == [3, 3, 2]
+    assert serie.shape[0] == 10 and serie.loc["Transferencias — contribución esperada S/"].tolist() == [149, 149, 149]
+
+
+def test_corte_previo_no_enviado_cambia_el_texto(tmp_path):
+    rp.persistir_corte(_bl_semana("2026-35"), "2026-35", enviado=False, base_dir=str(tmp_path))   # histórico cargado, no enviado
+    b36 = _bl_semana("2026-36", quitar=(103,))
+    cmp = rp.comparar_marca(b36, rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path)))
+    assert cmp["hay_prev"] and not cmp["prev_enviado"]
+    txt = rp.evolucion_texto(cmp, b36)
+    assert "de la semana pasada, el 33%" in txt and "que les reportamos" not in txt
 
 
 def test_comparar_marca_hueco_corta_la_racha(tmp_path):

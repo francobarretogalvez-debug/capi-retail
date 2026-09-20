@@ -886,7 +886,8 @@ _SNAPSHOTS_DIR = _os.environ.get("CAPI_SNAPSHOTS_DIR") or _SNAPSHOTS_DIR
 ARCHIVO_CORTE = "proveedor.parquet"
 COLS_CORTE = ["marca", "semana_iso", "corte", "bloque", "sku", "nombre", "categoria", "estado", "capital", "uds",
               "cobertura", "vta_sem", "n_tiendas", "n_tiendas_quiebre", "stock_cd", "accion", "top_80",
-              "enviado", "fecha_envio", "generado"]
+              "ganancia", "vp_neto_max", "enviado", "fecha_envio", "generado"]
+# bloque "foto": una fila por marca con capital total (capital), stock (uds), sell-through % (vta_sem), margen % (cobertura)
 PERSISTENCIA_ALERTA = 3   # semanas consecutivas en el mismo bloque → presión explícita en el correo
 
 
@@ -906,7 +907,7 @@ def filas_corte(bloques: dict, semana_iso: str, enviado: bool = False) -> pd.Dat
     marca, corte = bloques["marca"], bloques["corte"]
     ahora = _datetime.now().isoformat(timespec="seconds")
     partes = []
-    def _mk(df, bloque, capital, uds, cob, vta, estado, accion, top):
+    def _mk(df, bloque, capital, uds, cob, vta, estado, accion, top, ganancia=None, vp=None):
         if df.empty:
             return
         d = pd.DataFrame({
@@ -923,15 +924,21 @@ def filas_corte(bloques: dict, semana_iso: str, enviado: bool = False) -> pd.Dat
             "stock_cd": df["stock_cd"].fillna(0).astype(float).values if "stock_cd" in df.columns else 0.0,
             "accion": df[accion].astype(str).values if accion in df.columns else "",
             "top_80": df[top].astype(bool).values if top and top in df.columns else False,
+            "ganancia": df[ganancia].astype(float).values if ganancia and ganancia in df.columns else np.nan,
+            "vp_neto_max": df[vp].astype(float).values if vp and vp in df.columns else np.nan,
             "enviado": bool(enviado), "fecha_envio": ahora if enviado else "", "generado": ahora,
         })
         partes.append(d)
     _mk(bloques["b1"], "b1", "capital_costo", "stock_cadena", "cobertura_cadena", "vta_sem_prom4", "estado_cadena", "accion", "top_80")
     _mk(bloques["b2a"], "b2a", "capital_costo", "stock_cadena", "cobertura_cadena", "vta_sem_prom4", "estado_cadena", "accion", "top_80")
-    _mk(bloques["b2b"], "b2b", "capital_costo", "transf_uds", "cobertura_cadena", None, "estado_cadena", "accion", None)
-    _mk(bloques["b3"], "b3", "capital_costo", "stock_cadena", "cobertura_cadena", "vta_sem_prom4", "estado_cadena", "accion", None)
-    if not partes:
-        return pd.DataFrame(columns=COLS_CORTE)
+    _mk(bloques["b2b"], "b2b", "capital_costo", "transf_uds", "cobertura_cadena", None, "estado_cadena", "accion", None, ganancia="transf_ganancia")
+    _mk(bloques["b3"], "b3", "capital_costo", "stock_cadena", "cobertura_cadena", "vta_sem_prom4", "estado_cadena", "accion", None, vp="vp_neto_max")
+    f = bloques["hechos"].get("foto", {})
+    foto = pd.DataFrame([{"marca": marca, "semana_iso": semana_iso, "corte": corte, "bloque": "foto", "sku": "", "nombre": "FOTO DE LA MARCA", "categoria": "",
+                          "estado": "", "capital": float(f.get("capital_total") or 0), "uds": float(f.get("stock_uds") or 0), "cobertura": float(f["margen_efectivo_pct"]) if f.get("margen_efectivo_pct") is not None else np.nan,
+                          "vta_sem": float(f.get("sell_through_pct") or 0), "n_tiendas": int(f.get("tiendas") or 0), "n_tiendas_quiebre": 0, "stock_cd": 0.0, "accion": "", "top_80": False,
+                          "ganancia": np.nan, "vp_neto_max": np.nan, "enviado": bool(enviado), "fecha_envio": ahora if enviado else "", "generado": ahora}])
+    partes.append(foto)
     return pd.concat(partes, ignore_index=True)[COLS_CORTE]
 
 
@@ -973,18 +980,24 @@ def _kpis_de_filas(df: pd.DataFrame) -> dict:
     def _b(bl):
         d = df[df["bloque"] == bl]
         return d
-    b1, b2a, b2b, b3 = _b("b1"), _b("b2a"), _b("b2b"), _b("b3")
+    b1, b2a, b2b, b3, foto = _b("b1"), _b("b2a"), _b("b2b"), _b("b3"), _b("foto")
+    g_col = b2b["ganancia"] if "ganancia" in b2b.columns else pd.Series(dtype=float)
+    vp_col = b3["vp_neto_max"] if "vp_neto_max" in b3.columns else pd.Series(dtype=float)
     return {"b1": {"n_skus": len(b1), "capital": float(b1["capital"].sum()), "stock_uds": float(b1["uds"].sum())},
             "b2a": {"n_skus": len(b2a), "capital": float(b2a["capital"].sum())},
-            "b2b": {"n_skus": len(b2b), "uds": float(b2b["uds"].sum())},
-            "b3": {"n_skus": len(b3), "vta_sem_total": float(b3["vta_sem"].fillna(0).sum())}}
+            "b2b": {"n_skus": len(b2b), "uds": float(b2b["uds"].sum()), "ganancia": float(g_col.fillna(0).sum())},
+            "b3": {"n_skus": len(b3), "vta_sem_total": float(b3["vta_sem"].fillna(0).sum()), "vp_neto_max": float(vp_col.fillna(0).sum())},
+            "foto": {"capital_total": float(foto["capital"].sum()) if len(foto) else None,
+                     "sell_through_pct": float(foto["vta_sem"].iloc[0]) if len(foto) else None}}
 
 
 def _kpis_de_hechos(h: dict) -> dict:
+    f = h.get("foto", {})
     return {"b1": {"n_skus": h["b1"]["n_skus"], "capital": float(h["b1"]["capital"]), "stock_uds": float(h["b1"]["stock_uds"])},
             "b2a": {"n_skus": h["b2a"]["n_skus"], "capital": float(h["b2a"]["capital"])},
-            "b2b": {"n_skus": h["b2b"]["n_skus"], "uds": float(h["b2b"]["uds"])},
-            "b3": {"n_skus": h["b3"]["n_skus"], "vta_sem_total": float(h["b3"]["vta_sem_total"])}}
+            "b2b": {"n_skus": h["b2b"]["n_skus"], "uds": float(h["b2b"]["uds"]), "ganancia": float(h["b2b"].get("ganancia") or 0)},
+            "b3": {"n_skus": h["b3"]["n_skus"], "vta_sem_total": float(h["b3"]["vta_sem_total"]), "vp_neto_max": float(h["b3"].get("vp_neto_max") or 0)},
+            "foto": {"capital_total": float(f.get("capital_total") or 0), "sell_through_pct": float(f.get("sell_through_pct") or 0)}}
 
 
 def comparar_marca(bloques: dict, cortes_prev: pd.DataFrame) -> dict:
@@ -1014,10 +1027,14 @@ def comparar_marca(bloques: dict, cortes_prev: pd.DataFrame) -> dict:
     for b, d in k_act.items():
         out["kpis"][b] = {}
         for k, v in d.items():
-            p = k_prev[b].get(k)
-            da = (v - p) if p is not None else None
-            dp = (round(da / p * 100, 1) if p else None) if da is not None else None
+            p = k_prev.get(b, {}).get(k)
+            da = (v - p) if (p is not None and v is not None) else None
+            if k.endswith("_pct"):
+                dp = round(da, 1) if da is not None else None          # KPI en %: delta en puntos
+            else:
+                dp = (round(da / p * 100, 1) if p else None) if da is not None else None
             out["kpis"][b][k] = {"actual": v, "prev": p, "delta_abs": da, "delta_pct": dp}
+    out["prev_enviado"] = bool(prev["enviado"].any()) if "enviado" in prev.columns else False
     for b in ("b1", "b2a", "b2b", "b3"):
         s_act = set(actual.loc[actual["bloque"] == b, "sku"]); s_prev = set(prev.loc[prev["bloque"] == b, "sku"])
         out["skus"][b] = {"persisten": sorted(s_act & s_prev), "salieron": sorted(s_prev - s_act), "nuevos": sorted(s_act - s_prev)}
@@ -1040,9 +1057,11 @@ def comparar_marca(bloques: dict, cortes_prev: pd.DataFrame) -> dict:
     return out
 
 
-_KPI_LABELS = [("b1", "capital", "Venta cero — capital S/"), ("b1", "n_skus", "Venta cero — modelos"),
+_KPI_LABELS = [("foto", "capital_total", "Capital total de la marca S/"), ("foto", "sell_through_pct", "Sell-through % (semanal)"),
+               ("b1", "capital", "Venta cero — capital S/"), ("b1", "n_skus", "Venta cero — modelos"),
                ("b2a", "capital", "Sobrestock — capital S/"), ("b2a", "n_skus", "Sobrestock — modelos"),
-               ("b2b", "uds", "Transferencias — uds a mover"), ("b3", "n_skus", "Ganadores cortos — modelos")]
+               ("b2b", "uds", "Transferencias — uds a mover"), ("b2b", "ganancia", "Transferencias — contribución esperada S/"),
+               ("b3", "n_skus", "Ganadores cortos — modelos"), ("b3", "vp_neto_max", "Venta perdida por quiebre S/ (máx)")]
 
 
 def evolucion_texto(cmp: dict, bloques: dict) -> str:
@@ -1053,13 +1072,16 @@ def evolucion_texto(cmp: dict, bloques: dict) -> str:
     for b, k, lab in _KPI_LABELS:
         d = cmp["kpis"][b][k]
         flecha = "" if d["delta_abs"] is None else ("▲" if d["delta_abs"] > 0 else ("▼" if d["delta_abs"] < 0 else "="))
-        dpct = "" if d["delta_pct"] is None else f" ({d['delta_pct']:+.0f}%)"
-        filas.append({"Indicador": lab, f"Sem {cmp['semana_prev']}": _s(d["prev"]), f"Sem {cmp['semana']}": _s(d["actual"]), "Δ": f"{flecha} {_s(d['delta_abs'])}{dpct}".strip()})
+        es_pct = k.endswith("_pct")
+        dpct = "" if d["delta_pct"] is None else (f" ({d['delta_pct']:+.1f} pp)" if es_pct else f" ({d['delta_pct']:+.0f}%)")
+        fmt = (lambda v: "—" if v is None else f"{v:.1f}%") if es_pct else _s
+        filas.append({"Indicador": lab, f"Sem {cmp['semana_prev']}": fmt(d["prev"]), f"Sem {cmp['semana']}": fmt(d["actual"]), "Δ": f"{flecha} {(lambda v: '—' if v is None else f'{v:+.1f}') (d['delta_abs']) if es_pct else _s(d['delta_abs'])}{dpct}".strip()})
     cols = list(filas[0].keys())
     txt = _tabla_txt(filas, cols, {})
     extra = []
     if cmp.get("resolucion_b1") is not None:
-        extra.append(f"De los modelos sin venta que les reportamos la semana pasada, el {cmp['resolucion_b1']:.0f}% ya volvió a vender o salió de la lista.")
+        quien = "que les reportamos la semana pasada" if cmp.get("prev_enviado") else "de la semana pasada"
+        extra.append(f"De los modelos sin venta {quien}, el {cmp['resolucion_b1']:.0f}% ya volvió a vender o salió de la lista.")
     pers = cmp["persistentes"].get("b1", [])
     if pers:
         nombres = bloques["b1"].assign(_k=bloques["b1"]["sku"].map(sku_key)).set_index("_k")["nombre"].to_dict()
@@ -1078,13 +1100,16 @@ def evolucion_html(cmp: dict, bloques: dict) -> str:
     for b, k, lab in _KPI_LABELS:
         d = cmp["kpis"][b][k]
         flecha = "" if d["delta_abs"] is None else ("▲" if d["delta_abs"] > 0 else ("▼" if d["delta_abs"] < 0 else "="))
-        dpct = "" if d["delta_pct"] is None else f" ({d['delta_pct']:+.0f}%)"
-        filas.append({"Indicador": lab, f"Sem {cmp['semana_prev']}": _s(d["prev"]), f"Sem {cmp['semana']}": _s(d["actual"]), "Δ": f"{flecha} {_s(d['delta_abs'])}{dpct}".strip()})
+        es_pct = k.endswith("_pct")
+        dpct = "" if d["delta_pct"] is None else (f" ({d['delta_pct']:+.1f} pp)" if es_pct else f" ({d['delta_pct']:+.0f}%)")
+        fmt = (lambda v: "—" if v is None else f"{v:.1f}%") if es_pct else _s
+        filas.append({"Indicador": lab, f"Sem {cmp['semana_prev']}": fmt(d["prev"]), f"Sem {cmp['semana']}": fmt(d["actual"]), "Δ": f"{flecha} {(lambda v: '—' if v is None else f'{v:+.1f}') (d['delta_abs']) if es_pct else _s(d['delta_abs'])}{dpct}".strip()})
     cols = list(filas[0].keys())
     html = _tabla_html(filas, cols)
     P = "<p style='font-family:Calibri,Arial;font-size:10.5pt;margin:4px 0'>"
     if cmp.get("resolucion_b1") is not None:
-        html += f"{P}De los modelos sin venta que les reportamos la semana pasada, el <b>{cmp['resolucion_b1']:.0f}%</b> ya volvió a vender o salió de la lista.</p>"
+        quien = "que les reportamos la semana pasada" if cmp.get("prev_enviado") else "de la semana pasada"
+        html += f"{P}De los modelos sin venta {quien}, el <b>{cmp['resolucion_b1']:.0f}%</b> ya volvió a vender o salió de la lista.</p>"
     pers = cmp["persistentes"].get("b1", [])
     if pers:
         nombres = bloques["b1"].assign(_k=bloques["b1"]["sku"].map(sku_key)).set_index("_k")["nombre"].to_dict()

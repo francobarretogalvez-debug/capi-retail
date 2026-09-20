@@ -44,6 +44,10 @@ def test_generar_reporte_proveedor(resultados, tmp_path, monkeypatch):
     marca = at.session_state["at_rep_marca"]
     assert bl["marca"] == marca and bl["hechos"]["foto"]["capital_total"] > 0
 
+    import reporte_proveedor as rp
+    sem0 = at.session_state["at_rep_bloques"][0]["semana_iso"]
+    repo_pq = os.path.join(REPO, "snapshots", sem0, rp.ARCHIVO_CORTE)
+    mtime_antes = os.path.getmtime(repo_pq) if os.path.exists(repo_pq) else None   # el backfill puede haberlo creado
     at.button(key="at_rep_gen").click().run()
     assert not [str(e.value)[:300] for e in at.exception]
     bor = at.session_state["at_borrador_rep"]
@@ -52,11 +56,10 @@ def test_generar_reporte_proveedor(resultados, tmp_path, monkeypatch):
     assert at.session_state["at_rep_asunto"].startswith(marca)
     cuerpo = at.session_state["at_rep_cuerpo"]
     assert "1) VENTA CERO" in cuerpo and "3) GANADORES" in cuerpo and "TOTAL VENTA CERO" in cuerpo
-    # el corte se guardó en el directorio aislado, no en snapshots/ del repo
-    import reporte_proveedor as rp
+    # el corte se guardó en el directorio aislado; el del repo (si existe por el backfill) no se tocó
     sem = at.session_state["at_rep_bloques"][0]["semana_iso"]
     assert os.path.exists(os.path.join(str(tmp_path), sem, rp.ARCHIVO_CORTE))
-    assert not os.path.exists(os.path.join(REPO, "snapshots", sem, rp.ARCHIVO_CORTE))
+    assert (os.path.getmtime(repo_pq) if os.path.exists(repo_pq) else None) == mtime_antes
 
     at.button(key="at_rep_descartar").click().run()
     assert not [str(e.value)[:300] for e in at.exception]
