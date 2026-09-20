@@ -369,6 +369,8 @@ def test_score_y_props_respuesta_proveedor(bl, tmp_path, monkeypatch):
     assert props["VC capital"]["number"] == h["b1"]["capital"] and props["Respondió"]["select"]["name"] == "Parcial"
     assert props["Enviado"]["date"]["start"] == "2026-09-22" and props["Respuesta %"]["number"] == pytest.approx(33.3, abs=0.1)
     assert props["Δ VC %"]["number"] is None                       # sin corte previo no hay delta
+    assert props["Capital total"]["number"] == h["foto"]["capital_total"] and props["SOB % capital"]["number"] == h["b2a"]["pct_capital_marca"]
+    assert props["OBS capital"]["number"] == h["obs"]["capital"] and props["OBS modelos"]["number"] == h["obs"]["n_skus"]
     assert json.loads(props["Compromisos detalle"]["rich_text"][0]["text"]["content"])[1]["skus"] == ["301", "302"]
 
 
