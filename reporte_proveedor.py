@@ -822,7 +822,8 @@ def resumen_por_accion(df: pd.DataFrame, top_n: int = 3) -> pd.DataFrame:
     # Lo que le toca al proveedor primero (por capital); la exhibición la revisamos nosotros en tienda → al final y etiquetada
     out["_n"] = (out["accion"] == "Revisar exhibición").astype(int)
     out = out.sort_values(["_n", "capital"], ascending=[True, False]).drop(columns="_n")
-    out["accion"] = out["accion"].replace({"Revisar exhibición": "Revisar exhibición (lo hacemos nosotros en tienda)"})
+    # Franco 21-sep: "frenar ingreso" lleva la excepción explícita (si la marca demuestra destallado, sí entra reposición)
+    out["accion"] = out["accion"].replace({"Frenar ingreso": "Frenar ingreso (a menos que se pueda demostrar que hay destallado)"})
     return out.reset_index(drop=True)
 
 
