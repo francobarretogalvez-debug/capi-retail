@@ -44,6 +44,8 @@ B3_MIN_SELLERS = 4             # con menos SKUs vendiendo, el percentil no signi
 B3_COB_MAX = 8.0               # semanas (límite de PRE-QUIEBRE)
 B3_ALERTAS_ENTRADA = ("ACELERANDO", "RIESGO QUIEBRE")
 EDAD_LIQUIDAR = 26             # semanas: venta cero con esta edad ya no es "exhibición", es liquidar
+EDAD_MIN_DEVOLUCION = 17       # semanas (4 meses en tienda): antes de eso NUNCA se pide devolución (Franco 21-sep: los
+                               # ingresos recientes cargan cobertura alta porque la tienda demora en sacar la mercadería)
 GRUPO_B1_4SEM = "Sin venta en las últimas 4 semanas"
 GRUPO_B1_PARO = "Vendía y no vendió la última semana"
 TOP_CUERPO_LINEA = 5           # modelos por línea en el cuerpo del correo (B1, B2a)
@@ -276,9 +278,13 @@ def bloque_venta_cero(g: pd.DataFrame, dfm: pd.DataFrame, precio_min_map: dict |
     def _acc(r):
         p = r.get("precio_sugerido"); d = r.get("dscto_piramide", 0); act = r.get("pct_descuento", 0) or 0
         racha = int(r.get("racha_b1", 1) or 1)
+        joven = r["edad_semanas"] < EDAD_MIN_DEVOLUCION      # < 4 meses en tienda: nunca devolución (Franco 21-sep)
         if racha >= PERSISTENCIA_ALERTA:
             # 3ª semana seguida: si aún hay descuento por aplicar se ofrece la salida con precio; si ya está
-            # al descuento de la pirámide, ya tuvo su oportunidad → devolución
+            # al descuento de la pirámide, ya tuvo su oportunidad → devolución (solo con 4+ meses en tienda)
+            if joven:
+                return (f"⬇️ Descuento compartido {d:.0%} → S/ {p:,.2f} ({racha} semanas sin venta)" if pd.notna(p)
+                        else f"⏸️ Frenar ingreso / revisar exhibición ({racha} semanas sin venta; devolución recién a los 4 meses en tienda)")
             return (f"🏷️ Liquidar al {d:.0%} (→ S/ {p:,.2f}) o devolución ({racha} semanas sin venta)" if pd.notna(p)
                     else f"↩️ Devolución ({racha} semanas seguidas sin venta, ya al {act:.0%})")
         if r["edad_semanas"] >= EDAD_LIQUIDAR:
@@ -315,7 +321,8 @@ def bloque_sobrestock(g: pd.DataFrame, excluir: set, df_trans: pd.DataFrame | No
         b2["tendencia"] = _tendencia(b2, df_alertas)
         def _acc(r):
             p = r.get("precio_sugerido"); d = r.get("dscto_piramide", 0); act = r.get("pct_descuento", 0) or 0
-            viejo = (r["estado_cadena"] in ("ESTANCADO",) + ESTADOS_LIQUIDACION) or r["edad_semanas"] >= EDAD_LIQUIDAR
+            joven = r["edad_semanas"] < EDAD_MIN_DEVOLUCION      # < 4 meses en tienda: nunca devolución (Franco 21-sep)
+            viejo = (not joven) and ((r["estado_cadena"] in ("ESTANCADO",) + ESTADOS_LIQUIDACION) or r["edad_semanas"] >= EDAD_LIQUIDAR)
             racha = int(r.get("racha_b2a", 1) or 1)
             ex_n = int(r.get("exhib_sem", 0) or 0); ex_base = r.get("exhib_vta_base", np.nan); v1 = r.get("vta_sem1", np.nan)
             alts = []; sufijo = ""
@@ -330,6 +337,16 @@ def bloque_sobrestock(g: pd.DataFrame, excluir: set, df_trans: pd.DataFrame | No
                 if pd.notna(ex_base) and pd.notna(v1) and ex_base > 0 and v1 >= ex_base * (1 + EXHIB_MEJORA):
                     return pd.Series({"accion": f"✅ Exhibición funcionó: venta {v1:.0f} vs {ex_base:.0f} u/sem (+{(v1 / ex_base - 1) * 100:.0f}%) · seguir", "alternativas": ""})
                 sufijo = f" · exhibición revisada {ex_n} sem sin mejora ({ex_base:.0f} → {v1:.0f} u/sem)" if pd.notna(ex_base) and pd.notna(v1) else f" · exhibición revisada {ex_n} sem sin mejora"
+            if joven:
+                # Ingreso reciente con cobertura alta: precio si la pirámide deja, si no frenar ingreso. La devolución
+                # espera a los 4 meses en tienda aunque lleve semanas en la lista.
+                faltan = int(EDAD_MIN_DEVOLUCION - r["edad_semanas"])
+                if pd.notna(p):
+                    acc = f"⬇️ Descuento compartido 50/50: {d:.0%} → S/ {p:,.2f}" + (f" ({racha} semanas en sobrestock)" if racha >= PERSISTENCIA_ALERTA else "")
+                else:
+                    acc = f"⏸️ Frenar ingreso / no reponer ({racha} sem en sobrestock; {r['edad_semanas']:.0f} sem en tienda, dscto ya en pirámide)"
+                alts.append(f"devolución recién a los 4 meses en tienda (faltan {faltan} sem)")
+                return pd.Series({"accion": acc + sufijo, "alternativas": " · ".join(alts)})
             if racha >= PERSISTENCIA_ALERTA and pd.isna(p):
                 acc = f"↩️ Devolución con recompra ({racha} semanas en sobrestock, ya al {act:.0%})"
             elif viejo and pd.notna(p):
@@ -946,7 +963,7 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
             ("0. Evolución", "Serie semana a semana de los indicadores de cada frente (solo con reportes anteriores enviados con Capi)."),
             ("1. Venta Cero (SKU)", "Modelos con stock que NO vendieron ni una unidad en toda la cadena la última semana, en dos grupos: sin venta en las últimas 4 semanas y los que vendían y pararon. ⭐ = concentran el 80% del capital de su grupo. Con la venta del modelo de las 4 últimas semanas y el descuento sugerido (nunca menor al actual)."),
             ("1b. Venta Cero x Tienda", "Los mismos modelos de la pestaña 1, tienda por tienda: dónde está el stock, qué prioridad tiene en esa tienda (⭐ = 80% del capital sin venta de la tienda), la venta de esa tienda en las 4 últimas semanas (de los snapshots; si no hay, la del modelo en cadena), y la acción de piso (etiquetar, cartel o revisar exhibición)."),
-            ("2a. Sobrestock", "Modelos que venden pero cargan de más a nivel cadena (cobertura ≥ 26 semanas) o entran en liquidación: acción sugerida por modelo (markdown compartido, devolución, frenar ingreso)."),
+            ("2a. Sobrestock", "Modelos que venden pero cargan de más a nivel cadena (cobertura ≥ 26 semanas = stock ÷ venta promedio de las 4 últimas semanas) o entran en liquidación: acción sugerida por modelo (revisar exhibición, descuento compartido, devolución, frenar ingreso). La devolución solo se pide con 4 o más meses en tienda."),
             ("2b. Rutas tienda a tienda", "Transferencias entre tiendas que ejecuta la marca (modelos con ≥12 uds a mover y demanda en destino; sin flete Ripley): cuánto se mueve de cada tienda origen a cada tienda destino, con modelos, unidades, costo total y valor venta, y fila TOTAL."),
             ("2b. Detalle transferencias", "El detalle de esas transferencias: cuántas unidades de cada modelo salen de qué tienda y llegan a cuál, con stock, venta semanal y cobertura antes/después en ambas tiendas. La cantidad busca dejar ambas en 12 semanas de cobertura."),
             ("3. Ganadores", "Modelos con buena rotación y poca cobertura (≤ 8 semanas) o acelerando: necesidad calculada, stock en CD y acción (reponer desde CD / reorden)."),

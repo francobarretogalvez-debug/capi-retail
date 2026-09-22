@@ -461,8 +461,10 @@ def test_racha_escala_a_devolucion(tmp_path):
     f = b36["b1"].set_index("sku")
     # 101 aún tiene descuento por aplicar (0% → 40%): a la 3ª semana se ofrece liquidar O devolución, con la racha visible
     assert f.loc[101, "racha_b1"] == 3 and f.loc[101, "accion"].startswith("🏷️ Liquidar al 40%") and "(3 semanas sin venta)" in f.loc[101, "accion"]
-    # 103 (lanzamiento, 0% y pirámide 0%) no tiene descuento que ofrecer: a la 3ª semana → devolución
-    assert f.loc[103, "accion"].startswith("↩️ Devolución (3 semanas seguidas sin venta")
+    # 103 (lanzamiento, edad 5, pirámide 0%) no tiene descuento que ofrecer, pero con < 4 meses en tienda NUNCA es devolución
+    # (Franco 21-sep): frenar ingreso / exhibición, con la racha visible y el aviso de cuándo aplica la devolución
+    assert f.loc[103, "accion"].startswith("⏸️ Frenar ingreso") and "3 semanas sin venta" in f.loc[103, "accion"] and "4 meses" in f.loc[103, "accion"]
+    assert "Devolución" not in f.loc[103, "accion"]
     assert f.loc[102, "racha_b1"] == 3
     # sin cortes previos la racha es 1 y la acción es la normal
     b0 = rp.bloques_marca("M", _cob(), corte="x", semana_iso="2026-36")
@@ -509,3 +511,34 @@ def test_fecha_iso_normaliza_lo_que_escribe_daniela(bl):
     props2 = rp.props_respuesta_solo("M", "2026-35", {"respondio": "Sí", "fecha_respuesta": "ayer", "compromisos": []})
     assert "Fecha respuesta" not in props2
 
+
+
+def test_devolucion_solo_con_4_meses_en_tienda(tmp_path):
+    """Franco 21-sep (JH, Base al 13.09): 18 de 30 'devolución' de sobrestock tenían < 17 semanas (camisas Sander
+    con 3 semanas en tienda y cobertura 700+ por el arranque lento). Regla: con < EDAD_MIN_DEVOLUCION (4 meses)
+    nunca se pide devolución, ni por estado ESTANCADO ni por racha; se trabaja con exhibición, precio o frenar ingreso."""
+    cob = _cob()
+    # 202 es ESTANCADO al 60% con edad 20 → devolución (≥ 17 sem). El mismo SKU con edad 3 → NO.
+    cob.loc[cob.sku == 202, "edad_semanas"] = 3
+    b = rp.bloques_marca("M", cob, _trans_sint(), None, None, None, None, corte="x")
+    f = b["b2a"].set_index("sku")
+    assert f.loc[202, "estado_cadena"] == "ESTANCADO" and "Devolución" not in f.loc[202, "accion"]
+    assert f.loc[202, "accion"].startswith("⏸️ Frenar ingreso") and "faltan 14 sem" in f.loc[202, "alternativas"]
+    # joven al 0%: primero exhibición (aunque sea ESTANCADO), no devolución
+    cob.loc[cob.sku == 202, "pct_descuento"] = 0.0
+    f = rp.bloques_marca("M", cob, _trans_sint(), None, None, None, None, corte="x")["b2a"].set_index("sku")
+    assert f.loc[202, "accion"].startswith("👁️ Revisar exhibición")
+    # con racha 3 y sin precio, sigue sin ser devolución mientras sea joven
+    rp.persistir_corte(_bl_semana("2026-34"), "2026-34", True, base_dir=str(tmp_path))
+    rp.persistir_corte(_bl_semana("2026-35"), "2026-35", True, base_dir=str(tmp_path))
+    cortes = rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path))
+    cob.loc[cob.sku == 202, "pct_descuento"] = 0.6
+    f = rp.bloques_marca("M", cob, _trans_sint(), None, None, None, None, corte="36", semana_iso="2026-36", cortes_prev=cortes)["b2a"].set_index("sku")
+    assert f.loc[202, "racha_b2a"] == 3 and "Devolución" not in f.loc[202, "accion"] and "3 sem en sobrestock" in f.loc[202, "accion"]
+    # y con edad 20 (≥ 17) la regla vieja sigue intacta
+    assert bl_default_202_es_devolucion()
+
+
+def bl_default_202_es_devolucion():
+    f = rp.bloques_marca("M", _cob(), _trans_sint(), None, None, None, None, corte="x")["b2a"].set_index("sku")
+    return f.loc[202, "accion"].startswith("↩️ Devolución con recompra (ya al 60%")

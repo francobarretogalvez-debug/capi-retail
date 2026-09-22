@@ -159,12 +159,13 @@ COMO_PRIORIZAMOS = (
     "cadena entra a la lista de venta cero; uno que vende pero carga más de 26 semanas de stock, a sobrestock. El descuento "
     "que proponemos crece con la antigüedad del modelo. En los modelos jóvenes revisamos primero la exhibición en tienda y "
     "damos dos semanas para ver la venta; si no mejora, pasamos a descuento compartido. A partir de los 6 meses la alternativa "
-    "es liquidar o devolver, y a la tercera semana sin movimiento el pedido es devolución. El detalle de cada modelo, con su "
+    "es liquidar o devolver, y a la tercera semana sin movimiento el pedido es devolución. La devolución solo la pedimos para "
+    "modelos con al menos 4 meses en tienda; un ingreso reciente con cobertura alta se trabaja con exhibición y precio. El detalle de cada modelo, con su "
     "antigüedad y semanas en la lista, va en el Excel.")
 
 _CRITERIOS_B2 = ("Criterios: descuento compartido 50/50 según acuerdo vigente, sobre precio regular y según la antigüedad del modelo (pirámide: 20% a 80%); "
                  "transferencias desde 12 unidades por modelo y con demanda en la tienda destino (el traslado lo ejecuta y lo asume la marca, sin flete de Ripley); "
-                 "devolución para lo que no rota ni con precio.")
+                 "devolución para lo que no rota ni con precio, solo con 4 o más meses en tienda.")
 
 
 def ensamblar(h: dict, prosa: dict, tablas_texto: dict, tablas_html: dict, firma: str = "", evolucion_texto: str = "",
