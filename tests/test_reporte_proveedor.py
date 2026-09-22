@@ -242,7 +242,10 @@ def test_tablas_texto_cuadran(bl):
     assert "101" not in t["b1"].split("Qué pedimos:")[0].split("Por línea:")[1]        # la tabla por línea no lista SKUs
     pa = rp.resumen_por_accion(bl["b1"]); assert set(pa["accion"]) <= {"Liquidar al % de pirámide o devolución", "Revisar exhibición", "Devolución", "Exhibición + descuento compartido"}
     assert pa["accion"].iloc[-1] == "Revisar exhibición"                     # la exhibición va al final: es tarea nuestra (sin coletilla, Franco 21-sep)
-    pf = rp.resumen_por_accion(bl["b2a"]); assert "Frenar ingreso (a menos que se pueda demostrar que hay destallado)" in set(pf["accion"])
+    # 203 (edad 6, pirámide 0%) con 30% de dscto ya no pasa por exhibición → frenar ingreso, con la excepción explícita en el cuadro
+    cob = _cob(); cob.loc[cob.sku == 203, "pct_descuento"] = 0.30
+    pf = rp.resumen_por_accion(rp.bloques_marca("M", cob, _trans_sint(), None, None, None, None, corte="x")["b2a"])
+    assert "Frenar ingreso (a menos que se pueda demostrar que hay destallado)" in set(pf["accion"])
     assert pa["modelos"].sum() == 3 and pa["capital"].sum() == 3700
     pl = rp.resumen_por_linea(bl["b2a"]); assert pl["modelos"].sum() == 3 and set(pl["linea"]) == {"POLOS", "PANTALONES"}
     assert sum(v["capital"] for v in h["b2a"]["por_accion"].values()) == h["b2a"]["capital"]
