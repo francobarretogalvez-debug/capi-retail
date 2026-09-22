@@ -1317,7 +1317,7 @@ def comparar_marca(bloques: dict, cortes_prev: pd.DataFrame) -> dict:
 _KPI_LABELS = [("foto", "capital_total", "Capital total de la marca S/"), ("foto", "sell_through_pct", "Sell-through % (semanal)"),
                ("b1", "capital", "Venta cero — capital S/"), ("b1", "n_skus", "Venta cero — modelos"),
                ("b2a", "capital", "Sobrestock — capital S/"), ("b2a", "capital_pct", "Sobrestock — % del capital total"), ("b2a", "n_skus", "Sobrestock — modelos"),
-               ("b2b", "uds", "Transferencias — uds a mover"), ("b2b", "ganancia", "Transferencias — contribución esperada S/"),
+               ("b2b", "uds", "Transferencias — uds a mover"),      # la contribución esperada no va en el comparativo (Franco 21-sep)
                ("foto", "capital_obsoleto", "Pre-obsoleto + obsoleto — capital S/"),
                ("b3", "n_skus", "Ganadores cortos — modelos")]
 

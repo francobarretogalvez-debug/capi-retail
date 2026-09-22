@@ -310,8 +310,9 @@ def test_comparar_marca(tmp_path):
     assert "<table" in rp.evolucion_html(cmp, b36)
     serie = rp.serie_kpis(rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path)), b36)
     assert list(serie.columns) == ["2026-34", "2026-35", "2026-36"] and serie.loc["Venta cero — modelos"].tolist() == [3, 3, 2]
-    assert serie.loc["Transferencias — contribución esperada S/"].tolist() == [149, 149, 149]
-    assert serie.loc["Pre-obsoleto + obsoleto — capital S/"].tolist() == [1600, 1600, 1600] and serie.shape[0] == 11
+    assert "Transferencias — contribución esperada S/" not in serie.index and "contribución esperada" not in txt   # fuera del comparativo (Franco 21-sep)
+    assert len(serie.loc["Transferencias — uds a mover"]) == 3                       # las uds a mover sí se comparan
+    assert serie.loc["Pre-obsoleto + obsoleto — capital S/"].tolist() == [1600, 1600, 1600] and serie.shape[0] == 10
     h36 = b36["hechos"]; assert serie.loc["Sobrestock — % del capital total"].iloc[-1] == round(h36["b2a"]["capital"] / h36["foto"]["capital_total"] * 100, 1) == h36["b2a"]["pct_capital_marca"]
     assert not any("perdida" in i for i in serie.index)
 
