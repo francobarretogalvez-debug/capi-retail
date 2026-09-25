@@ -311,7 +311,11 @@ def test_comparar_marca(tmp_path):
     assert "33%" in txt and "que les reportamos la semana pasada" in txt      # el corte previo fue enviado
     assert "Capital total de la marca S/" in txt and "Sell-through % (semanal)" in txt and "Venta perdida" not in txt
     assert cmp["kpis"]["foto"]["capital_total"]["prev"] == b35["hechos"]["foto"]["capital_total"] if False else True
-    assert "<table" in rp.evolucion_html(cmp, b36)
+    eh = rp.evolucion_html(cmp, b36)
+    assert "<table" in eh and "Esta semana vs la anterior" in eh and "⚠️ 2 modelos llevan" in eh      # titular + persistentes resaltados
+    assert "#1e7b34" in eh or "#c00000" in eh                                                        # Δ con color (Franco 25-sep)
+    assert txt.startswith("Esta semana vs la anterior") and "venta cero" in txt.split("\n")[0]
+    assert rp._semaforo("b1", "capital", -100) == "bien" and rp._semaforo("b1", "capital", 100) == "mal" and rp._semaforo("b2b", "uds", 50) == ""
     serie = rp.serie_kpis(rp.cargar_cortes("M", hasta="2026-36", base_dir=str(tmp_path)), b36)
     assert list(serie.columns) == ["2026-34", "2026-35", "2026-36"] and serie.loc["Venta cero — modelos"].tolist() == [3, 3, 2]
     assert "Transferencias — contribución esperada S/" not in serie.index and "contribución esperada" not in txt   # fuera del comparativo (Franco 21-sep)

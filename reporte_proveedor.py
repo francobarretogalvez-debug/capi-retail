@@ -1323,6 +1323,40 @@ _KPI_LABELS = [("foto", "capital_total", "Capital total de la marca S/"), ("foto
                ("b3", "n_skus", "Ganadores cortos — modelos")]
 
 
+# Sentido de cada KPI del comparativo: -1 = bajar es bueno, +1 = subir es bueno, 0 = neutro (Franco 25-sep: la presión
+# la pone la evidencia, así que la evolución se destaca con color y un titular).
+_KPI_SENTIDO = {("foto", "capital_total"): 0, ("foto", "sell_through_pct"): 1, ("b1", "capital"): -1, ("b1", "n_skus"): -1,
+                ("b2a", "capital"): -1, ("b2a", "capital_pct"): -1, ("b2a", "n_skus"): -1, ("b2b", "uds"): 0,
+                ("foto", "capital_obsoleto"): -1, ("b3", "n_skus"): 0}
+
+
+def _semaforo(b: str, k: str, delta_abs) -> str:
+    """'bien' | 'mal' | '' según el sentido del KPI y el signo del delta."""
+    if delta_abs is None or delta_abs == 0 or not _KPI_SENTIDO.get((b, k)):
+        return ""
+    return "bien" if (delta_abs > 0) == (_KPI_SENTIDO[(b, k)] > 0) else "mal"
+
+
+def evolucion_titular(cmp: dict) -> str:
+    """Una línea que resume la semana: qué pasó con venta cero y sobrestock y cuántos modelos siguen sin venta."""
+    if not cmp.get("hay_prev"):
+        return ""
+    partes = []
+    for b, k, lab, nom in (("b1", "capital", "Venta cero — capital S/", "venta cero"), ("b2a", "capital", "Sobrestock — capital S/", "sobrestock")):
+        d = cmp["kpis"][b][k]
+        if d.get("delta_pct") is None or d.get("prev") is None:
+            continue
+        verbo = "bajó" if d["delta_abs"] < 0 else ("subió" if d["delta_abs"] > 0 else "se mantuvo")
+        partes.append(f"{nom} {verbo} {abs(d['delta_pct']):.0f}% (S/ {_s(d['prev'])} → S/ {_s(d['actual'])})" if verbo != "se mantuvo" else f"{nom} se mantuvo en S/ {_s(d['actual'])}")
+    pers = cmp.get("persistentes", {}).get("b1", [])
+    if pers:
+        partes.append(f"{len(pers)} modelos siguen sin venta por {PERSISTENCIA_ALERTA} semanas o más")
+    if not partes:
+        return ""
+    t = " · ".join(partes)
+    return f"Esta semana vs la anterior: {t[0].lower() + t[1:]}."
+
+
 def evolucion_texto(cmp: dict, bloques: dict) -> str:
     """Bloque 0 del correo (solo si hay corte previo REAL). Texto plano."""
     if not cmp.get("hay_prev"):
@@ -1336,7 +1370,8 @@ def evolucion_texto(cmp: dict, bloques: dict) -> str:
         fmt = (lambda v: "—" if v is None else f"{v:.1f}%") if es_pct else _s
         filas.append({"Indicador": lab, f"Sem {cmp['semana_prev']}": fmt(d["prev"]), f"Sem {cmp['semana']}": fmt(d["actual"]), "Δ": f"{flecha} {(lambda v: '—' if v is None else f'{v:+.1f}') (d['delta_abs']) if es_pct else _s(d['delta_abs'])}{dpct}".strip()})
     cols = list(filas[0].keys())
-    txt = _tabla_txt(filas, cols, {})
+    tit = evolucion_titular(cmp)
+    txt = (tit + "\n\n" if tit else "") + _tabla_txt(filas, cols, {})
     extra = []
     if cmp.get("resolucion_b1") is not None:
         quien = "que les reportamos la semana pasada" if cmp.get("prev_enviado") else "de la semana pasada"
@@ -1346,36 +1381,55 @@ def evolucion_texto(cmp: dict, bloques: dict) -> str:
         nombres = bloques["b1"].assign(_k=bloques["b1"]["sku"].map(sku_key)).set_index("_k")["nombre"].to_dict()
         rachas = cmp["semanas_en_bloque"]["b1"]
         top = ", ".join(f"{s} {nombres.get(s, '')} ({rachas[s]} sem)" for s in pers[:5])
-        extra.append(f"{len(pers)} modelos llevan {PERSISTENCIA_ALERTA} o más semanas seguidas sin venta: {top}{'…' if len(pers) > 5 else ''}.")
+        extra.append(f"⚠️ {len(pers)} modelos llevan {PERSISTENCIA_ALERTA} o más semanas seguidas sin venta: {top}{'…' if len(pers) > 5 else ''}.")
     if not cmp.get("consecutivas"):
         extra.append(f"(La comparación es contra la semana {cmp['semana_prev']}, la última reportada.)")
     return txt + ("\n" + "\n".join(extra) if extra else "")
 
 
 def evolucion_html(cmp: dict, bloques: dict) -> str:
+    """Bloque 0 en HTML: caja destacada con titular, tabla con Δ en color (verde = mejora, rojo = empeora) y
+    los modelos persistentes resaltados. Es la parte del correo que ejerce la presión (Franco 25-sep)."""
     if not cmp.get("hay_prev"):
         return ""
-    filas = []
+    F = "font-family:Calibri,Arial;"
+    th = "".join(f"<th style='{F}font-size:10.5pt;text-align:{'left' if i == 0 else 'right'};padding:5px 10px;border-bottom:2px solid #1f3864;background:#e8eef7'>{c}</th>"
+                 for i, c in enumerate(["Indicador", f"Sem {cmp['semana_prev']}", f"Sem {cmp['semana']}", "Δ vs semana anterior"]))
+    trs = []
     for b, k, lab in _KPI_LABELS:
         d = cmp["kpis"][b][k]
         flecha = "" if d["delta_abs"] is None else ("▲" if d["delta_abs"] > 0 else ("▼" if d["delta_abs"] < 0 else "="))
         es_pct = k.endswith("_pct")
         dpct = "" if d["delta_pct"] is None else (f" ({d['delta_pct']:+.1f} pp)" if es_pct else f" ({d['delta_pct']:+.0f}%)")
         fmt = (lambda v: "—" if v is None else f"{v:.1f}%") if es_pct else _s
-        filas.append({"Indicador": lab, f"Sem {cmp['semana_prev']}": fmt(d["prev"]), f"Sem {cmp['semana']}": fmt(d["actual"]), "Δ": f"{flecha} {(lambda v: '—' if v is None else f'{v:+.1f}') (d['delta_abs']) if es_pct else _s(d['delta_abs'])}{dpct}".strip()})
-    cols = list(filas[0].keys())
-    html = _tabla_html(filas, cols)
-    P = "<p style='font-family:Calibri,Arial;font-size:10.5pt;margin:4px 0'>"
+        dabs = ("—" if d["delta_abs"] is None else f"{d['delta_abs']:+.1f}") if es_pct else _s(d["delta_abs"])
+        sem = _semaforo(b, k, d["delta_abs"])
+        color = {"bien": "#1e7b34", "mal": "#c00000"}.get(sem, "#333")
+        peso = "font-weight:bold;" if sem else ""
+        td = lambda v, al="right", extra="": f"<td style='{F}font-size:10.5pt;text-align:{al};padding:4px 10px;border-bottom:1px solid #e3e3e3;{extra}'>{v}</td>"
+        trs.append("<tr>" + td(lab, "left") + td(fmt(d["prev"])) + td(fmt(d["actual"])) + td(f"{flecha} {dabs}{dpct}".strip(), extra=f"color:{color};{peso}") + "</tr>")
+    tabla = f"<table style='border-collapse:collapse;margin:6px 0 8px 0;background:#fff'><thead><tr>{th}</tr></thead><tbody>{''.join(trs)}</tbody></table>"
+    P = f"<p style='{F}font-size:11pt;margin:6px 0'>"
+    partes = []
+    tit = evolucion_titular(cmp)
+    if tit:
+        partes.append(f"<p style='{F}font-size:12pt;font-weight:bold;color:#1f3864;margin:0 0 6px 0'>{tit}</p>")
+    partes.append(tabla)
     if cmp.get("resolucion_b1") is not None:
         quien = "que les reportamos la semana pasada" if cmp.get("prev_enviado") else "de la semana pasada"
-        html += f"{P}De los modelos sin venta {quien}, el <b>{cmp['resolucion_b1']:.0f}%</b> ya volvió a vender o salió de la lista.</p>"
+        partes.append(f"{P}De los modelos sin venta {quien}, el <b style='font-size:12pt'>{cmp['resolucion_b1']:.0f}%</b> ya volvió a vender o salió de la lista.</p>")
     pers = cmp["persistentes"].get("b1", [])
     if pers:
         nombres = bloques["b1"].assign(_k=bloques["b1"]["sku"].map(sku_key)).set_index("_k")["nombre"].to_dict()
         rachas = cmp["semanas_en_bloque"]["b1"]
         top = ", ".join(f"{s} {nombres.get(s, '')} ({rachas[s]} sem)" for s in pers[:5])
-        html += f"{P}<b>{len(pers)} modelos llevan {PERSISTENCIA_ALERTA} o más semanas seguidas sin venta:</b> {top}{'…' if len(pers) > 5 else ''}</p>"
-    return html
+        partes.append(f"<p style='{F}font-size:11pt;margin:6px 0;padding:6px 10px;background:#fde9e7;border-left:4px solid #c00000'>"
+                      f"<b style='color:#c00000'>⚠️ {len(pers)} modelos llevan {PERSISTENCIA_ALERTA} o más semanas seguidas sin venta:</b> {top}{'…' if len(pers) > 5 else ''}</p>")
+    if not cmp.get("consecutivas"):
+        partes.append(f"<p style='{F}font-size:9.5pt;color:#666;margin:2px 0'>(La comparación es contra la semana {cmp['semana_prev']}, la última reportada.)</p>")
+    # caja: tabla de una celda con fondo (lo que mejor respeta Outlook)
+    return (f"<table style='border-collapse:collapse;width:100%;max-width:1100px;margin:4px 0 10px 0'><tr>"
+            f"<td style='background:#f4f7fb;border:1px solid #c9d6ea;border-left:5px solid #1f3864;padding:10px 14px'>{''.join(partes)}</td></tr></table>")
 
 
 def serie_kpis(cortes: pd.DataFrame, bloques: dict | None = None) -> pd.DataFrame:
