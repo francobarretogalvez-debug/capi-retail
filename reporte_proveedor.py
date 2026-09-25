@@ -352,11 +352,11 @@ def bloque_sobrestock(g: pd.DataFrame, excluir: set, df_trans: pd.DataFrame | No
             elif viejo and pd.notna(p):
                 acc = f"🏷️ Liquidar al {d:.0%} (→ S/ {p:,.2f}) o devolución"
             elif viejo:
-                acc = f"↩️ Devolución con recompra (ya al {act:.0%} y no rota)"
+                acc = f"↩️ Devolución con recompra (ya al {act:.0%}, sin mejora en rotación)"
             elif pd.notna(p):
                 acc = f"⬇️ Descuento compartido 50/50: {d:.0%} → S/ {p:,.2f}"
             else:
-                acc = "⏸️ Frenar ingreso / no reponer (dscto ya en pirámide)"
+                acc = "⏸️ Frenar ingreso / no reponer por ahora (dscto ya en pirámide)"
                 alts.append("devolución si no rota en 4 semanas")
             return pd.Series({"accion": acc + sufijo, "alternativas": " · ".join(alts)})
         b2 = pd.concat([b2, b2.apply(_acc, axis=1)], axis=1)
@@ -823,16 +823,16 @@ def resumen_por_accion(df: pd.DataFrame, top_n: int = 3) -> pd.DataFrame:
     out["_n"] = (out["accion"] == "Revisar exhibición").astype(int)
     out = out.sort_values(["_n", "capital"], ascending=[True, False]).drop(columns="_n")
     # Franco 21-sep: "frenar ingreso" lleva la excepción explícita (si la marca demuestra destallado, sí entra reposición)
-    out["accion"] = out["accion"].replace({"Frenar ingreso": "Frenar ingreso (a menos que se pueda demostrar que hay destallado)"})
+    out["accion"] = out["accion"].replace({"Frenar ingreso": "Pausar ingreso (salvo que se pueda demostrar que hay destallado)"})
     return out.reset_index(drop=True)
 
 
 def _seccion_resumen_txt(df: pd.DataFrame, nombre: str) -> str:
     pl = resumen_por_linea(df); pa = resumen_por_accion(df)
-    filas_l = [{"Línea": r.linea, "Modelos": r.modelos, "Stock uds": int(r.uds), "Capital S/": r.capital, "Pedido": r.pedido} for r in pl.itertuples()]
+    filas_l = [{"Línea": r.linea, "Modelos": r.modelos, "Stock uds": int(r.uds), "Capital S/": r.capital, "Propuesta": r.pedido} for r in pl.itertuples()]
     filas_a = [{"Acción pedida": r.accion, "Modelos": r.modelos, "Capital S/": r.capital, "Los 3 de mayor capital (resto en el Excel)": r.top} for r in pa.itertuples()]
-    return ("Por línea:\n" + _tabla_txt(filas_l, ["Línea", "Modelos", "Stock uds", "Capital S/", "Pedido"], _FMT_TXT)
-            + "\n\nQué pedimos:\n" + _tabla_txt(filas_a, ["Acción pedida", "Modelos", "Capital S/", "Los 3 de mayor capital (resto en el Excel)"], _FMT_TXT))
+    return ("Por línea:\n" + _tabla_txt(filas_l, ["Línea", "Modelos", "Stock uds", "Capital S/", "Propuesta"], _FMT_TXT)
+            + "\n\nQué proponemos:\n" + _tabla_txt(filas_a, ["Acción propuesta", "Modelos", "Capital S/", "Los 3 de mayor capital (resto en el Excel)"], _FMT_TXT))
 
 
 def tablas_texto(bloques: dict, tope_linea: int = TOP_CUERPO_LINEA, tope_plano: int = TOP_CUERPO_PLANO) -> dict:
@@ -897,10 +897,10 @@ def tablas_html(bloques: dict, tope_linea: int = TOP_CUERPO_LINEA, tope_plano: i
             hb = h["b1"]
             partes.append(f"{P}<b>■ Sin venta en las últimas 4 semanas:</b> {hb['n_4sem']} modelos · S/ {_s(hb['capital_4sem'])} &nbsp;&nbsp; <b>■ Vendían y no vendieron la última semana</b> (alerta temprana): {hb['n_paro']} modelos · S/ {_s(hb['capital_paro'])}</p>")
         pl = resumen_por_linea(df); pa = resumen_por_accion(df)
-        filas_l = [{"Línea": r.linea, "Modelos": r.modelos, "Stock uds": int(r.uds), "Capital S/": r.capital, "Pedido": r.pedido} for r in pl.itertuples()]
+        filas_l = [{"Línea": r.linea, "Modelos": r.modelos, "Stock uds": int(r.uds), "Capital S/": r.capital, "Propuesta": r.pedido} for r in pl.itertuples()]
         filas_a = [{"Acción pedida": r.accion, "Modelos": r.modelos, "Capital S/": r.capital, "Los 3 de mayor capital (resto en el Excel)": r.top} for r in pa.itertuples()]
-        partes.append(f"{P}<b>Por línea</b></p>" + _tabla_html(filas_l, ["Línea", "Modelos", "Stock uds", "Capital S/", "Pedido"]))
-        partes.append(f"{P}<b>Qué pedimos</b></p>" + _tabla_html(filas_a, ["Acción pedida", "Modelos", "Capital S/", "Los 3 de mayor capital (resto en el Excel)"]))
+        partes.append(f"{P}<b>Por línea</b></p>" + _tabla_html(filas_l, ["Línea", "Modelos", "Stock uds", "Capital S/", "Propuesta"]))
+        partes.append(f"{P}<b>Qué proponemos</b></p>" + _tabla_html(filas_a, ["Acción propuesta", "Modelos", "Capital S/", "Los 3 de mayor capital (resto en el Excel)"]))
         tot = h[key]
         partes.append(f"{P}<b>TOTAL {'VENTA CERO' if key == 'b1' else 'SOBRESTOCK'}:</b> {tot['n_skus']} modelos · {_s(tot['stock_uds'])} uds · S/ {_s(tot['capital'])} · detalle por modelo en la pestaña {'1' if key == 'b1' else '2a'} del Excel</p>")
         out[key] = "".join(partes)
@@ -942,16 +942,16 @@ def excel_proveedor(bloques: dict, cortes: pd.DataFrame | None = None, cmp: dict
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         foto = h["foto"]
         res = pd.DataFrame([
-            {"Bloque": f"1. Venta cero — {GRUPO_B1_4SEM.lower()}", "Modelos": h["b1"]["n_4sem"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_4sem"], "Qué pedimos": f"liquidar / devolución lo de más de 26 sem ({h['b1']['n_liquidar']} en todo el bloque) · exhibición y precio en el resto"},
-            {"Bloque": f"1. Venta cero — {GRUPO_B1_PARO.lower()} (alerta temprana)", "Modelos": h["b1"]["n_paro"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_paro"], "Qué pedimos": "revisar exhibición y precio esta semana; si repite, pasa al grupo anterior"},
-            {"Bloque": "2a. Sobrestock de cadena (venden, pero cargan de más)", "Modelos": h["b2a"]["n_skus"], "Stock (uds)": h["b2a"]["stock_uds"], "Capital S/ (costo)": h["b2a"]["capital"], "Qué pedimos": f"revisar exhibición (2 sem de plazo): {h['b2a'].get('n_exhib', 0)} · descuento compartido 50/50: {h['b2a']['n_markdown']} · liquidar o devolución: {int(b2a['accion'].str.startswith('🏷️').sum()) if not b2a.empty else 0} · devolución: {h['b2a']['n_canje']} · frenar ingreso: {h['b2a']['n_frenar']}"},
-            {"Bloque": "2b. Transferencias entre tiendas (las ejecuta la marca)", "Modelos": h["b2b"]["n_skus"], "Stock (uds)": h["b2b"]["uds"], "Capital S/ (costo)": None, "Qué pedimos": f"mover {h['b2b']['uds']:,} uds · contribución esperada S/ {h['b2b']['ganancia']:,} · detalle origen → destino en la pestaña 2b. Detalle"},
-            {"Bloque": "3. Ganadores que se quedan cortos", "Modelos": h["b3"]["n_skus"], "Stock (uds)": None, "Capital S/ (costo)": None, "Qué pedimos": f"{h['b3']['n_sin_cd']} sin stock en CD (reorden) · necesidad {h['b3']['necesidad_uds']:,} uds"},
+            {"Bloque": f"1. Venta cero — {GRUPO_B1_4SEM.lower()}", "Modelos": h["b1"]["n_4sem"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_4sem"], "Qué proponemos": f"liquidar / devolución lo de más de 26 sem ({h['b1']['n_liquidar']} en todo el bloque) · exhibición y precio en el resto"},
+            {"Bloque": f"1. Venta cero — {GRUPO_B1_PARO.lower()} (alerta temprana)", "Modelos": h["b1"]["n_paro"], "Stock (uds)": None, "Capital S/ (costo)": h["b1"]["capital_paro"], "Qué proponemos": "revisar exhibición y precio esta semana; si repite, pasa al grupo anterior"},
+            {"Bloque": "2a. Sobrestock de cadena (venden, pero con más stock del que rota)", "Modelos": h["b2a"]["n_skus"], "Stock (uds)": h["b2a"]["stock_uds"], "Capital S/ (costo)": h["b2a"]["capital"], "Qué proponemos": f"revisar exhibición (2 sem de plazo): {h['b2a'].get('n_exhib', 0)} · descuento compartido 50/50: {h['b2a']['n_markdown']} · liquidar o devolución: {int(b2a['accion'].str.startswith('🏷️').sum()) if not b2a.empty else 0} · devolución: {h['b2a']['n_canje']} · frenar ingreso: {h['b2a']['n_frenar']}"},
+            {"Bloque": "2b. Transferencias entre tiendas (las ejecuta la marca)", "Modelos": h["b2b"]["n_skus"], "Stock (uds)": h["b2b"]["uds"], "Capital S/ (costo)": None, "Qué proponemos": f"mover {h['b2b']['uds']:,} uds · contribución esperada S/ {h['b2b']['ganancia']:,} · detalle origen → destino en la pestaña 2b. Detalle"},
+            {"Bloque": "3. Ganadores que se quedan cortos", "Modelos": h["b3"]["n_skus"], "Stock (uds)": None, "Capital S/ (costo)": None, "Qué proponemos": f"{h['b3']['n_sin_cd']} sin stock en CD (reorden) · necesidad {h['b3']['necesidad_uds']:,} uds"},
             {"Bloque": "4. Pre-obsoleto y obsoleto (transversal: vendan o no)", "Modelos": h.get("obs", {}).get("n_skus", 0), "Stock (uds)": h.get("obs", {}).get("stock_uds", 0), "Capital S/ (costo)": h.get("obs", {}).get("capital", 0),
-             "Qué pedimos": f"{h.get('obs', {}).get('n_obsoleto', 0)} obsoletos (S/ {_s(h.get('obs', {}).get('capital_obsoleto'))}) + {h.get('obs', {}).get('n_preobsoleto', 0)} pre-obsoletos · rota bien {h.get('obs', {}).get('n_rota', 0)} · liquidar {h.get('obs', {}).get('n_liquidar', 0)} · recoger/devolución {h.get('obs', {}).get('n_recoger', 0)}"},
+             "Qué proponemos": f"{h.get('obs', {}).get('n_obsoleto', 0)} obsoletos (S/ {_s(h.get('obs', {}).get('capital_obsoleto'))}) + {h.get('obs', {}).get('n_preobsoleto', 0)} pre-obsoletos · rota bien {h.get('obs', {}).get('n_rota', 0)} · liquidar {h.get('obs', {}).get('n_liquidar', 0)} · recoger/devolución {h.get('obs', {}).get('n_recoger', 0)}"},
         ])
         ws = vistas_excel._tabla_con_titulo(w, "Resumen", f"{marca} — Reporte semanal Ripley · corte {corte}", res,
-                                            {"Stock (uds)": _F["S"], "Capital S/ (costo)": _F["S"]}, anchos={"Bloque": 58, "Qué pedimos": 70})
+                                            {"Stock (uds)": _F["S"], "Capital S/ (costo)": _F["S"]}, anchos={"Bloque": 58, "Qué proponemos": 70})
         fila = ws.max_row + 2
         ws.cell(row=fila, column=1, value=f"Foto de la marca en Ripley: S/ {foto['capital_total']:,} a costo · {foto['skus']} modelos · {foto['tiendas']} tiendas · "
                                           f"sell-through {foto['sell_through_pct']}% · margen efectivo {foto['margen_efectivo_pct'] if foto['margen_efectivo_pct'] is not None else '—'}%")

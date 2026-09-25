@@ -238,14 +238,14 @@ def test_tablas_texto_cuadran(bl):
     assert m and int(m[3].replace(",", "")) == h["b2a"]["capital"]
     assert "■ Sin venta en las últimas 4 semanas: 2 modelos · S/ 1,700" in t["b1"] and "alerta temprana): 1 modelos · S/ 2,000" in t["b1"]
     # mix B+C: por línea y por acción, sin filas por modelo
-    assert "Por línea:" in t["b1"] and "CAMISAS" in t["b1"] and "Qué pedimos:" in t["b1"]
-    assert "101" not in t["b1"].split("Qué pedimos:")[0].split("Por línea:")[1]        # la tabla por línea no lista SKUs
+    assert "Por línea:" in t["b1"] and "CAMISAS" in t["b1"] and "Qué proponemos:" in t["b1"]
+    assert "101" not in t["b1"].split("Qué proponemos:")[0].split("Por línea:")[1]        # la tabla por línea no lista SKUs
     pa = rp.resumen_por_accion(bl["b1"]); assert set(pa["accion"]) <= {"Liquidar al % de pirámide o devolución", "Revisar exhibición", "Devolución", "Exhibición + descuento compartido"}
     assert pa["accion"].iloc[-1] == "Revisar exhibición"                     # la exhibición va al final: es tarea nuestra (sin coletilla, Franco 21-sep)
     # 203 (edad 6, pirámide 0%) con 30% de dscto ya no pasa por exhibición → frenar ingreso, con la excepción explícita en el cuadro
     cob = _cob(); cob.loc[cob.sku == 203, "pct_descuento"] = 0.30
     pf = rp.resumen_por_accion(rp.bloques_marca("M", cob, _trans_sint(), None, None, None, None, corte="x")["b2a"])
-    assert "Frenar ingreso (a menos que se pueda demostrar que hay destallado)" in set(pf["accion"])
+    assert "Pausar ingreso (salvo que se pueda demostrar que hay destallado)" in set(pf["accion"])
     assert pa["modelos"].sum() == 3 and pa["capital"].sum() == 3700
     pl = rp.resumen_por_linea(bl["b2a"]); assert pl["modelos"].sum() == 3 and set(pl["linea"]) == {"POLOS", "PANTALONES"}
     assert sum(v["capital"] for v in h["b2a"]["por_accion"].values()) == h["b2a"]["capital"]
@@ -547,3 +547,12 @@ def test_devolucion_solo_con_4_meses_en_tienda(tmp_path):
 def bl_default_202_es_devolucion():
     f = rp.bloques_marca("M", _cob(), _trans_sint(), None, None, None, None, corte="x")["b2a"].set_index("sku")
     return f.loc[202, "accion"].startswith("↩️ Devolución con recompra (ya al 60%")
+
+
+def test_prosa_sin_tono_agresivo(bl):
+    """Franco 25-sep: el correo sonaba agresivo. Ni la prosa por reglas ni la sección fija llevan ultimátums."""
+    h = bl["hechos"]; import agente_proveedor as ap
+    txt = " ".join(ap.redactar_reglas(h).values()) + " " + ap.COMO_PRIORIZAMOS + " " + ap._CRITERIOS_B2 + " " + rp.tablas_texto(bl)["b1"]
+    for frase in ("cada semana que pasa", "antes del viernes", "ustedes eligen", "el pedido es devolución", "Qué pedimos", "Acción pedida", "cargan de más"):
+        assert frase not in txt, frase
+    assert "propuesta" in txt.lower() and "juntos" in txt
