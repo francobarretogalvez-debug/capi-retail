@@ -27,3 +27,7 @@ data2/bases antiguas/*.xlsx
 
 # Detalle de lotes del log de acciones (caché local; la fuente es Notion)
 acciones/lotes/
+
+# Módulo PV en Tránsito (2026-10-04): reportes de comex y persistencia local (la fuente es Notion)
+inputs/
+snapshots/pv_transito/

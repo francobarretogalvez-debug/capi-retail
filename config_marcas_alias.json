@@ -1,0 +1,37 @@
+{
+  "_nota": "Alias de marcas para unificar cómo escriben la marca los distintos reportes (Base Profundidad, DETALLE comex, hojas de Franco, transaccional). 'alias' mapea texto tal cual llega (en mayúsculas, sin espacios dobles) → clave canónica en MAYÚSCULAS, que es como Capi nombra las marcas internamente. 'display' mapea clave canónica → nombre bonito para exports y correos. Editable; agregar una línea por variante nueva.",
+  "_actualizado": "2026-10-04",
+  "alias": {
+    "US POLO": "US POLO",
+    "U.S. POLO": "US POLO",
+    "U.S. POLO ASSN": "US POLO",
+    "U.S. POLO ASSN.": "US POLO",
+    "US POLO ASSN": "US POLO",
+    "DOCKERS2": "DOCKERS",
+    "CALVIN KLEIN CONSIG1": "CALVIN KLEIN",
+    "OSCAR DE LA RENTA": "OSCAR DE LA RENTA",
+    "ODLR": "OSCAR DE LA RENTA",
+    "PSYCHO BUNNY": "PSYCHO BUNNY",
+    "PYSCHO BUNNY": "PSYCHO BUNNY",
+    "JACK & JONES": "JACK & JONES",
+    "JACK AND JONES": "JACK & JONES",
+    "JACK&JONES": "JACK & JONES",
+    "J&J": "JACK & JONES"
+  },
+  "display": {
+    "MARQUIS": "Marquis",
+    "NAVIGATA": "Navigata",
+    "CACHAREL": "Cacharel",
+    "SPAVALDI": "Spavaldi",
+    "JOHN HOLDEN": "John Holden",
+    "LACOSTE": "Lacoste",
+    "DOCKERS": "Dockers",
+    "PIERRE CARDIN": "Pierre Cardin",
+    "OSCAR DE LA RENTA": "Oscar de la Renta",
+    "US POLO": "U.S. Polo Assn.",
+    "SELECTED": "Selected",
+    "NAUTICA": "Nautica",
+    "PSYCHO BUNNY": "Psycho Bunny",
+    "JACK & JONES": "Jack & Jones"
+  }
+}

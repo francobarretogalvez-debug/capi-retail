@@ -1,0 +1,23 @@
+{
+  "_nota": "Módulo 🚢 PV en Tránsito (2026-10-04). Parámetros editables del motor pv_transito.py. Las claves con guion bajo son documentación; las demás las lee el código.",
+  "_actualizado": "2026-10-04",
+  "inputs_dir": "inputs",
+  "_inputs_dir": "Carpeta (relativa al repo o absoluta) donde se dejan los reportes de comex. Se puede sobreescribir con la variable de entorno CAPI_INPUTS_DIR. Está en .gitignore: data confidencial de Ripley.",
+  "marcas_foco": ["MARQUIS", "NAVIGATA", "CACHAREL", "SPAVALDI"],
+  "_marcas_foco": "Marcas propias importadas: las únicas que pasan por comex. Terceras (Lacoste, Dockers, John Holden…) son nacionales/consignación y no aparecen en el DETALLE. Nombres ya normalizados (ver config_marcas_alias.json).",
+  "division_filtro": "HOMBRE",
+  "_division_filtro": "Se conservan las filas cuya DIVISION contiene este texto. En el DETALLE, HOMBRE incluye los departamentos CAMISERIA, SASTRERIA y MARCAS CASUAL INTERNACIONAL HOMBRE (Spavaldi). Vacío = no filtrar.",
+  "estados_recibido": ["1.Almacenado", "2.En CD"],
+  "_estados_recibido": "Una fila cuenta como recibida si su ESTADO_EMBARQUE_FINAL está aquí O si trae fecha en INGRESOCD. Medido 2026-10-04 sobre el DETALLE del 24-sep: 1.583/1.583 Almacenado y 22/22 En CD tienen INGRESOCD; los demás estados 0/3.312.",
+  "factor_fob_a_costo": 4.04,
+  "_factor_fob_a_costo": "Costo S/. de la Base Profundidad ÷ (MONTO_FOB ÷ UND). Medido 2026-10-04 sobre 165 modelos hombre con costo > 0: mediana 4,04 · p10 3,91 · p90 4,39 · por marca 4,03–4,07. Es tipo de cambio × internación. Solo se usa cuando el modelo no tiene Costo S/. en la Base (modelos nuevos sin stock).",
+  "banda_costo_pct": 0.06,
+  "_banda_costo_pct": "Semiancho de la banda que se declara al pie cuando el costo sale de FOB × factor (p10–p90 ≈ ±6 %).",
+  "umbral_atraso_ambar": 0.10,
+  "_umbral_atraso_ambar": "Semáforo por marca: verde = 0 u atrasadas; ámbar = atrasadas < 10 % del pendiente; rojo = ≥ 10 %. ELEGIDO 2026-10-04 (no medido); recalibrar con 4 cortes reales.",
+  "temporada_default": "PV",
+  "ventana_temporada": {"E": "PV", "F": "PV", "A": "OI"},
+  "_ventana_temporada": "Solo para el fallback de las 4 hojas de Franco, que no traen TEMP: la hoja 'VENTANA E/F' es PV 26/27 y 'VENTANA OI27 A' es OI 27 (hojas del 24-sep-2026). B, C y D aparecen en ambas temporadas en el DETALLE, por eso no se mapean.",
+  "max_items_detalle_llegadas": 6,
+  "_max_items_detalle_llegadas": "Máximo de pares 'Línea N u dd/mm' en la columna detalle_llegadas del export."
+}

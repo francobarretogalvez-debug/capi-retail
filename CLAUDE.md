@@ -71,8 +71,16 @@ Por eso el **log de acciones** y los **cortes semanales** salen a Notion (`notio
   y `agente_proveedor.py` (prosa acotada). El lote `prov-<marca>-<semana>` (venta cero enviada al
   proveedor) cuenta para K1 igual que el de tiendas. Checksum antes de entregar:
   `python medicion/checksum_reporte_proveedor.py --base <Base> --marca ALL`.
+- 🚢 **ETA Capi** (DB nueva, id vía `NOTION_DB_ETA`; módulo **PV en Tránsito**, 2026-10-04): una página por
+  **cambio de ETA de una OC** (historial append-only: nunca se actualiza una página; la vigente se calcula).
+  Fuente: el **DETALLE de comex** (Luis Huerta, OC × SKU con `MONTO_FOB`, `TEMP`, `VENTANA`, `COD PADRE`,
+  `INGRESOCD`); fallback las hojas `LLEGADAS RETRASOS COMEX` (solo pendientes, sin costo). Módulos
+  `pv_transito.py` (motor: recibida = Almacenado/En CD ∨ INGRESOCD; costo = `Costo S/.` de la Base por
+  `COD PADRE` o FOB × 4,04 medido; export fijo de 13 columnas `pv_transito_AAAA-MM-DD.xlsx`), `eta_store.py`
+  (parquet `snapshots/pv_transito/` + Notion) y `vista_pv_transito.py`. Alcance v1: 4 propias importadas.
+  Guía: `docs/Guia-PV-Transito.md`. Decisión: Decision Journal `2026-10-04-PV-Transito-Fuente-Comex.md`.
 - Credencial: `NOTION_TOKEN` (local `.env`; nube `st.secrets`). La integración debe estar
-  **conectada a las tres bases**. Sin token todo sigue con CSV/parquet local y el sidebar lo avisa.
+  **conectada a las cuatro bases** (ETA vía `NOTION_DB_ETA`). Sin token todo sigue con CSV/parquet local y el sidebar lo avisa.
 - Regla: el "pedido" que se mide (S6 cumplimiento, K1 activación) es el LOTE registrado el día
   que se manda el Excel. Sin lote registrado, no hay KPI esa semana.
 
@@ -107,7 +115,7 @@ Los colores y orden están centralizados en `config.py` → `COLOR_MAP` y `ESTAD
 ## Navegación (17 vistas en 4 categorías)
 
 **VISIÓN GENERAL:** Dashboard, Salud del Stock, Briefing Semanal, Diario de Gestión
-**GESTIÓN DE STOCK:** Reposición, Cobertura, Transferencias, Predistribución, Sobrestock, Acciones de Stock
+**GESTIÓN DE STOCK:** Reposición, Cobertura, Transferencias, Predistribución, Sobrestock, Acciones de Stock, 🚢 PV en Tránsito (vista aislada `vista_pv_transito.py`, 2026-10-04)
 **GESTIÓN COMERCIAL:** Gestión por Antigüedad, Acciones Precio, Marcas Terceras
 **ANÁLISIS PREDICTIVO:** Ventana de Compra, Evolución Semanal, Fenómeno del Niño, Afinidad Producto×Plaza, Alertas IA, Simulador Predictivo
 

@@ -32,6 +32,7 @@ MODULOS_MOTOR = {
     "cobertura", "otb_engine", "curva_estacional", "alertas_plan",
     "noos_engine", "variance_bridge", "rendimiento_tienda",
     "analisis_estados", "calendario_ripley", "snapshots_engine",
+    "pv_transito", "eta_store",
 }
 
 # Funciones que miden una diferencia esperada o son utilitarias, no cuadres.
