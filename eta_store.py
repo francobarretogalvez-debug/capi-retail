@@ -122,11 +122,17 @@ def registrar(oc: str, eta, fuente: str, comentario: str = "", usuario: str = ""
 def registrar_lote(cambios: pd.DataFrame, fuente: str, usuario: str = "", registrado_en=None,
                    base_dir: str | None = None, notion: bool = True, solo_si_cambia: bool = True) -> int:
     """Varias filas de una vez: `cambios` con columnas oc · eta (· comentario · marca · modelo).
-    Con solo_si_cambia, una OC cuya ETA es igual a la vigente no genera fila. Devuelve n registradas."""
+    Con solo_si_cambia, una OC cuya ETA es igual a la vigente no genera fila. El parquet se lee y
+    escribe UNA vez (no por fila); Notion recibe una página por fila. Devuelve n registradas."""
     if cambios is None or cambios.empty:
         return 0
-    vig = vigente(cargar_historial(base_dir)).set_index("oc")["eta"] if solo_si_cambia else pd.Series(dtype="datetime64[ns]")
-    n = 0
+    if fuente not in FUENTES:
+        raise ValueError(f"fuente debe ser una de {FUENTES}")
+    hist = cargar_historial(base_dir)
+    vig = vigente(hist).set_index("oc")["eta"] if solo_si_cambia and not hist.empty else pd.Series(dtype="datetime64[ns]")
+    reg = pd.Timestamp(registrado_en or datetime.now())
+    sem = _semana(reg)
+    filas = []
     for _, r in cambios.iterrows():
         oc = str(r["oc"]).strip()
         eta = pd.Timestamp(r["eta"]).normalize() if pd.notna(r.get("eta")) else pd.NaT
@@ -134,10 +140,24 @@ def registrar_lote(cambios: pd.DataFrame, fuente: str, usuario: str = "", regist
             prev = vig[oc]
             if (pd.isna(prev) and pd.isna(eta)) or (pd.notna(prev) and pd.notna(eta) and prev == eta):
                 continue
-        registrar(oc, None if pd.isna(eta) else eta, fuente, str(r.get("comentario", "") or ""), usuario,
-                  str(r.get("marca", "") or ""), str(r.get("modelo", "") or ""), registrado_en, base_dir, notion)
-        n += 1
-    return n
+        fila = {"oc": oc, "eta": eta, "fuente": fuente, "comentario": str(r.get("comentario", "") or ""),
+                "registrado_en": reg, "semana_ripley": sem, "usuario": str(usuario or ""),
+                "marca": str(r.get("marca", "") or ""), "modelo": str(r.get("modelo", "") or ""), "notion_url": ""}
+        if notion:
+            try:
+                import notion_store
+                rn = notion_store.registrar_eta(oc, None if pd.isna(eta) else eta.date().isoformat(), fuente, fila["comentario"],
+                                                sem, fila["marca"], fila["modelo"], reg.date().isoformat(), fila["usuario"])
+                if rn.get("ok"):
+                    fila["notion_url"] = rn.get("url") or ""
+            except Exception:  # pragma: no cover
+                pass
+        filas.append(fila)
+    if not filas:
+        return 0
+    hist = pd.concat([hist, pd.DataFrame(filas)], ignore_index=True)
+    guardar_historial(hist, base_dir)
+    return len(filas)
 
 
 def vigente(hist: pd.DataFrame) -> pd.DataFrame:

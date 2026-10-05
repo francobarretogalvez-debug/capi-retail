@@ -55,6 +55,22 @@ def _fmt_sol(v) -> str:
     return "—" if v is None or (isinstance(v, float) and np.isnan(v)) else f"S/ {v/1e6:,.2f} M" if abs(v) >= 1e6 else f"S/ {v:,.0f}"
 
 
+def cambios_editor(original: pd.DataFrame, editado: pd.DataFrame) -> list[dict]:
+    """Compara la tabla por OC que se mostró con la que devolvió st.data_editor y devuelve solo las
+    OC cuya ETA cambió (incluye borrar la fecha → NaT). Puro: así se prueba sin Streamlit."""
+    base_eta = original.set_index("oc")["eta"]
+    cambios = []
+    for _, r in editado.iterrows():
+        nueva, prev = r.get("eta"), base_eta.get(r["oc"])
+        nueva_ts = pd.Timestamp(nueva) if nueva is not None and not pd.isna(nueva) else pd.NaT
+        prev_ts = pd.Timestamp(prev) if prev is not None and not pd.isna(prev) else pd.NaT
+        if (pd.isna(nueva_ts) and pd.isna(prev_ts)) or (pd.notna(nueva_ts) and pd.notna(prev_ts) and nueva_ts == prev_ts):
+            continue
+        cambios.append({"oc": r["oc"], "eta": nueva_ts, "comentario": str(r.get("comentario", "") or ""),
+                        "marca": r.get("marca", ""), "modelo": r.get("modelo", "")})
+    return cambios
+
+
 # ── Fuente ───────────────────────────────────────────────────────────────────
 def _elegir_archivo(st, cfg) -> tuple[str | None, str | None]:
     """Devuelve (ruta, nombre). Uploader manda; si no, un archivo de la carpeta de inputs."""
@@ -142,9 +158,12 @@ def render(st, df_cob: pd.DataFrame | None = None, hoy: date | None = None):
     # Sincronizar el historial con este corte (una vez por archivo): las ETA que cambiaron quedan registradas
     fp_sync = f"_pvt_sync::{ruta}|{os.path.getmtime(ruta)}"
     if not st.session_state.get(fp_sync):
-        n_nuevas = es.sincronizar_desde_reporte(res["oc_todo"], fecha_reporte=fecha_reporte, usuario="comex")
+        # Solo el universo del módulo (marcas foco + división), todas las temporadas: así OI también
+        # queda con historial sin arrastrar las OC de otras divisiones del DETALLE (MUJER, CALZADO…)
+        universo = pt.filtrar(res["oc_todo"], cfg["marcas_foco"], cfg.get("division_filtro") or None, None)
+        n_nuevas = es.sincronizar_desde_reporte(universo, fecha_reporte=fecha_reporte, usuario="comex")
         if res["formato"] == "llegadas":
-            es.actualizar_maestro(res["oc_todo"], fecha_reporte, "llegadas")
+            es.actualizar_maestro(universo, fecha_reporte, "llegadas")
         st.session_state[fp_sync] = True
         if n_nuevas:
             st.session_state.pop("pvt_fp", None)        # fuerza recalcular con la ETA vigente nueva
@@ -204,12 +223,12 @@ def render(st, df_cob: pd.DataFrame | None = None, hoy: date | None = None):
                      "marca": "Marca", "n_oc": st.column_config.NumberColumn("OC", format="%d"),
                      "und_compra_pv": st.column_config.NumberColumn("Compra u", format="%,d"),
                      "und_recibida_cd": st.column_config.NumberColumn("Recibido u", format="%,d"),
-                     "pct_recibido_und": st.column_config.ProgressColumn("% recibido u", format="%.0f%%", min_value=0, max_value=1),
-                     "pct_recibido_costo": st.column_config.NumberColumn("% a costo", format="%.0f%%"),
+                     "pct_recibido_und": st.column_config.ProgressColumn("% recibido u", format="percent", min_value=0, max_value=1),
+                     "pct_recibido_costo": st.column_config.NumberColumn("% a costo", format="percent"),
                      "und_pendiente": st.column_config.NumberColumn("Pendiente u", format="%,d"),
                      "und_atrasadas": st.column_config.NumberColumn("Atrasadas u", format="%,d"),
                      "proxima_eta": st.column_config.DateColumn("Próxima ETA", format="DD/MM"),
-                     "pct_en_tienda": st.column_config.NumberColumn("% compra en tienda", format="%.0f%%",
+                     "pct_en_tienda": st.column_config.NumberColumn("% compra en tienda", format="percent",
                                                                     help="Stock hoy en tiendas de los modelos de esta compra ÷ unidades compradas. Incluye lo ya vendido como 'no en tienda'."),
                      "detalle_llegadas": st.column_config.TextColumn("Qué llega cuándo", width="large"),
                  })
@@ -220,7 +239,7 @@ def render(st, df_cob: pd.DataFrame | None = None, hoy: date | None = None):
         rl = res["resumen_linea"]
         st.dataframe(rl[["marca", "linea", "n_oc", "und_compra_pv", "und_recibida_cd", "pct_recibido_und", "und_pendiente", "und_atrasadas", "proxima_eta", "detalle_llegadas"]],
                      hide_index=True, use_container_width=True,
-                     column_config={"pct_recibido_und": st.column_config.NumberColumn("% recibido u", format="%.0f%%"),
+                     column_config={"pct_recibido_und": st.column_config.NumberColumn("% recibido u", format="percent"),
                                     "proxima_eta": st.column_config.DateColumn("Próxima ETA", format="DD/MM")})
 
     # ── 3. Por semana ──
@@ -270,16 +289,7 @@ def render(st, df_cob: pd.DataFrame | None = None, hoy: date | None = None):
             "motivo": "Motivo (comex)", "comentario": st.column_config.TextColumn("Comentario ✏️"),
         })
     if st.button("💾 Guardar ETA corregidas", key="pvt_guardar"):
-        base_eta = vista_oc.set_index("oc")["eta"]
-        cambios = []
-        for _, r in editado.iterrows():
-            nueva = r["eta"]
-            prev = base_eta.get(r["oc"])
-            nueva_ts = pd.Timestamp(nueva) if nueva is not None and not pd.isna(nueva) else pd.NaT
-            prev_ts = pd.Timestamp(prev) if prev is not None and not pd.isna(prev) else pd.NaT
-            if (pd.isna(nueva_ts) and pd.isna(prev_ts)) or (pd.notna(nueva_ts) and pd.notna(prev_ts) and nueva_ts == prev_ts):
-                continue
-            cambios.append({"oc": r["oc"], "eta": nueva_ts, "comentario": r.get("comentario", ""), "marca": r["marca"], "modelo": r["modelo"]})
+        cambios = cambios_editor(vista_oc, editado)
         if not cambios:
             st.info("No hay ETA distintas a la vigente.")
         else:

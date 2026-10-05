@@ -60,9 +60,9 @@ def test_vista_con_detalle_mini(res, aislado):
     at.run()
     errores = [str(e.value)[:300] for e in at.exception]
     assert not errores, errores
-    # el corte sincronizó el historial solo: 10 OC distintas con su ETA de comex
+    # el corte sincronizó el historial solo: las OC del universo del módulo con su ETA de comex
     h = es.cargar_historial()
-    assert h["oc"].nunique() == 10 and (h["fuente"] == "comex").all()
+    assert h["oc"].nunique() == 7 and (h["fuente"] == "comex").all()        # marcas foco reales (MARQUIS, NAVIGATA) × HOMBRE, PV y OI
     # hay botón de descarga del export con el nombre contractual y el editor de OC
     assert any(d.label.endswith(".xlsx") and "pv_transito_" in d.label for d in at.get("download_button"))
     assert at.session_state["pvt_res"]["formato"] == "detalle"
@@ -71,7 +71,7 @@ def test_vista_con_detalle_mini(res, aislado):
     # guardar sin cambios no registra nada
     at.button(key="pvt_guardar").click().run()
     assert not [str(e.value)[:300] for e in at.exception]
-    assert es.cargar_historial()["oc"].nunique() == 10
+    assert es.cargar_historial()["oc"].nunique() == 7
 
 
 def test_vista_con_llegadas_franco(res, aislado):
@@ -82,3 +82,35 @@ def test_vista_con_llegadas_franco(res, aislado):
     assert at.session_state["pvt_res"]["formato"] == "llegadas"
     assert any("solo trae lo **pendiente**" in str(w.value) for w in at.warning)
     assert not es.cargar_maestro().empty                                # el fallback alimenta el maestro de OC
+
+
+def test_cambios_editor_detecta_solo_lo_editado():
+    from datetime import date as _d
+    import vista_pv_transito as v
+    orig = pd.DataFrame({"oc": ["1", "2", "3", "4"], "eta": [_d(2026, 10, 15), None, _d(2026, 10, 20), _d(2026, 11, 1)],
+                         "marca": ["Marquis"] * 4, "modelo": ["m"] * 4})
+    edit = orig.copy()
+    edit["comentario"] = ["", "", "proveedor confirma", ""]
+    edit.loc[edit["oc"] == "1", "eta"] = _d(2026, 10, 15)          # igual → no cuenta
+    edit.loc[edit["oc"] == "2", "eta"] = _d(2026, 10, 30)          # sin ETA → con ETA
+    edit.loc[edit["oc"] == "3", "eta"] = _d(2026, 10, 27)          # corrida
+    edit.loc[edit["oc"] == "4", "eta"] = None                      # borrada
+    c = v.cambios_editor(orig, edit)
+    assert [x["oc"] for x in c] == ["2", "3", "4"]
+    assert c[1]["eta"] == pd.Timestamp("2026-10-27") and c[1]["comentario"] == "proveedor confirma"
+    assert pd.isna(c[2]["eta"])
+    assert v.cambios_editor(orig, orig.assign(comentario="")) == []
+
+
+def test_registrar_corte_escribe_parquets(res, aislado):
+    import eta_store as es
+    at = _app(res, os.path.join(FIX, "detalle_comex_mini.xlsx"))
+    at.run()
+    at.button(key="pvt_corte").click().run()
+    assert not [str(e.value)[:300] for e in at.exception]
+    import glob
+    d = es._dir()                                                       # la fecha sale del mtime del fixture (sin fecha en el nombre)
+    res_p, oc_p = glob.glob(os.path.join(d, "corte_*_resumen.parquet")), glob.glob(os.path.join(d, "corte_*_oc.parquet"))
+    assert len(res_p) == 1 and len(oc_p) == 1
+    r = pd.read_parquet(res_p[0])
+    assert set(r["marca"]) == {"Marquis", "Navigata"} and (r["temporada"] == "PV").all()
