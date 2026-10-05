@@ -234,3 +234,45 @@ def upsert_proveedor(marca: str, semana_iso: str, props: dict, archivos: list | 
     except Exception as e:  # NotionError, requests
         return {"ok": False, "error": str(e)[:300], "page_id": None, "url": None, "creada": False}
 
+
+# ── 🚢 ETA Capi (historial de fechas de llegada por OC; módulo PV en Tránsito, 2026-10-04) ─
+# Una página por CAMBIO de ETA (nunca se actualiza una página: es historial). La fila vigente
+# de cada OC se calcula en eta_store.vigente(). Franco crea la base bajo FRANCO OS y pasa el id.
+DB_ETA = os.getenv("NOTION_DB_ETA", "")
+
+PROPS_ETA = ("OC", "ETA", "Fuente", "Comentario", "Semana Ripley", "Marca", "Modelo", "Registrado", "Usuario")
+
+
+def registrar_eta(oc: str, eta_iso: str | None, fuente: str, comentario: str = "", semana_ripley: str = "",
+                  marca: str = "", modelo: str = "", registrado_iso: str | None = None, usuario: str = "") -> dict:
+    """Crea una página en 🚢 ETA Capi. Devuelve {ok, page_id, url, error}. Sin token o sin id → {ok: False}."""
+    if not disponible():
+        return {"ok": False, "error": "sin NOTION_TOKEN", "page_id": None, "url": None}
+    if not DB_ETA:
+        return {"ok": False, "error": "sin NOTION_DB_ETA", "page_id": None, "url": None}
+    props = {
+        "OC": p_title(oc), "ETA": p_date(eta_iso), "Fuente": p_select(fuente), "Comentario": p_text(comentario),
+        "Semana Ripley": p_text(semana_ripley), "Marca": p_select(marca or None), "Modelo": p_text(modelo),
+        "Registrado": p_date(registrado_iso), "Usuario": p_text(usuario),
+    }
+    try:
+        r = crear_pagina(DB_ETA, props)
+        return {"ok": True, "page_id": r.get("id"), "url": r.get("url"), "error": None}
+    except Exception as e:  # NotionError, requests
+        return {"ok": False, "error": str(e)[:300], "page_id": None, "url": None}
+
+
+def listar_eta() -> list[dict]:
+    """Todas las filas de 🚢 ETA Capi como dicts planos (claves = PROPS_ETA en minúscula con _).
+    Sin token o sin id → []. Sirve para reconstruir el historial local tras un reboot de la nube."""
+    if not disponible() or not DB_ETA:
+        return []
+    out = []
+    for pag in consultar(DB_ETA, sorts=[{"property": "Registrado", "direction": "ascending"}]):
+        out.append({"oc": valor(pag, "OC"), "eta": valor(pag, "ETA"), "fuente": valor(pag, "Fuente"),
+                    "comentario": valor(pag, "Comentario"), "semana_ripley": valor(pag, "Semana Ripley"),
+                    "marca": valor(pag, "Marca"), "modelo": valor(pag, "Modelo"),
+                    "registrado_en": valor(pag, "Registrado") or valor(pag, "created_time"),
+                    "usuario": valor(pag, "Usuario"), "notion_url": pag.get("url")})
+    return out
+

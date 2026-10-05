@@ -180,11 +180,16 @@ def _leer_hojas(archivo, nombre: str | None = None) -> dict[str, pd.DataFrame]:
     return {sh: xl.parse(sh, header=None) for sh in xl.sheet_names}
 
 
+def _alias_oc() -> set:
+    return {_norm_txt(a) for a in COLUMN_MAP["oc"]}
+
+
 def _fila_encabezado(raw: pd.DataFrame, max_filas: int = 30) -> int | None:
-    """Primera fila (de las primeras 30) que contiene una celda 'OC'. None si no hay."""
+    """Primera fila (de las primeras 30) con una celda que sea un alias de OC ('OC', 'N° OC'…). None si no hay."""
+    alias = _alias_oc()
     for i in range(min(max_filas, len(raw))):
         vals = {_norm_txt(v) for v in raw.iloc[i].tolist()}
-        if "OC" in vals:
+        if vals & alias:
             return i
     return None
 
@@ -199,8 +204,11 @@ def _tabla_desde_raw(raw: pd.DataFrame) -> pd.DataFrame | None:
     df.columns = [_norm_txt(c) for c in raw.iloc[h].tolist()]
     df = df.loc[:, [c for c in df.columns if c and c != "NAN"]]
     df = df.loc[:, ~pd.Index(df.columns).duplicated()]
-    if "OC" not in df.columns:
+    col_oc = next((c for c in df.columns if c in _alias_oc()), None)
+    if col_oc is None:
         return None
+    if col_oc != "OC":
+        df = df.rename(columns={col_oc: "OC"})          # la columna de OC siempre se llama OC de aquí en adelante
     oc = df["OC"].map(_oc_str)
     df = df[oc.ne("")].copy()
     df["OC"] = oc[oc.ne("")]
