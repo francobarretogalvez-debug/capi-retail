@@ -36,6 +36,7 @@ importlib.reload(etl_profundidad)
 import vista_planificacion as vista_plan
 import vista_talla_color
 import vista_auditoria_predist
+import vista_pv_transito
 import outlets
 importlib.reload(vista_plan)
 
@@ -757,6 +758,7 @@ with st.sidebar:
                 ("💰", "Gestión de Precios"),
                 ("🚚", "Predistribución"),
                 ("🤝", "Agente Terceras"),
+                ("🚢", "PV en Tránsito"),
             ]
             for _icon, _label in _NAV_MARCAS:
                 _full = f"{_icon} {_label}"
@@ -4971,6 +4973,11 @@ elif nav_page == "📊 Planificación":
     # Toda la vista vive en vista_planificacion.py (módulo aislado): este
     # bloque solo delega. Ver la nota de scoping en el encabezado del módulo.
     vista_plan.render(st)
+
+elif nav_page == "🚢 PV en Tránsito":
+    # Vista aislada (2026-10-04): compra PV comprada vs recibida en CD, ETA con historial y
+    # atrasos, desde el DETALLE de comex. df_cob da costo S/ y stock en tienda por modelo.
+    vista_pv_transito.render(st, df_cob)
 
 elif nav_page == "📐 Rendimiento de Marca":
     # El nav dice Spavaldi porque es el caso de uso vivo, pero el módulo es
