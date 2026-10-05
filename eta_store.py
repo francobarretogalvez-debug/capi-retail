@@ -19,7 +19,7 @@ se llama restaurar_desde_notion() si el parquet local está vacío.
 from __future__ import annotations
 
 import os
-from datetime import date, datetime
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
